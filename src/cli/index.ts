@@ -6,6 +6,7 @@ import { registerAgentCommand } from './commands/agent.js';
 import { registerSkillCommand } from './commands/skill.js';
 import { registerWorkCommand } from './commands/work.js';
 import { registerDoctorCommand } from './commands/doctor.js';
+import { registerUiCommand } from './commands/ui.js';
 
 /**
  * Create and configure the Clade CLI program.
@@ -27,6 +28,7 @@ export function createCli(): Command {
   registerSkillCommand(program);
   registerWorkCommand(program);
   registerDoctorCommand(program);
+  registerUiCommand(program);
 
   // Default action: show help
   program.action(() => {
