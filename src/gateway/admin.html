@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TeamAgents Admin</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  darkMode: 'class',
+  theme: { extend: { colors: {
+    surface: { DEFAULT: '#0f1117', 100: '#161b22', 200: '#1c2128', 300: '#282e36' },
+    border: { DEFAULT: '#30363d' },
+    accent: { DEFAULT: '#58a6ff' },
+  }}}
+}
+</script>
+<style>
+body { background: #0f1117; color: #e6edf3; font-family: system-ui, -apple-system, sans-serif; margin: 0; }
+.toggle { position: relative; width: 44px; height: 24px; appearance: none; background: #30363d; border-radius: 12px; cursor: pointer; transition: background 0.2s; }
+.toggle:checked { background: #58a6ff; }
+.toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; background: #e6edf3; border-radius: 50%; transition: transform 0.2s; }
+.toggle:checked::after { transform: translateX(20px); }
+.card { background: #1c2128; border: 1px solid #30363d; border-radius: 8px; padding: 16px; }
+.btn { padding: 6px 14px; border-radius: 6px; font-size: 14px; cursor: pointer; border: 1px solid #30363d; background: #282e36; color: #e6edf3; transition: all 0.15s; }
+.btn:hover { background: #30363d; }
+.btn-primary { background: #1f6feb; border-color: #1f6feb; }
+.btn-primary:hover { background: #388bfd; }
+.btn-success { background: #238636; border-color: #238636; }
+.btn-success:hover { background: #2ea043; }
+.btn-danger { background: #da3633; border-color: #da3633; }
+.btn-danger:hover { background: #f85149; }
+.btn-warning { background: #9e6a03; border-color: #9e6a03; }
+.btn-warning:hover { background: #d29922; }
+.preset-btn { padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: 2px solid transparent; transition: all 0.15s; }
+.tab { padding: 8px 16px; cursor: pointer; border-bottom: 2px solid transparent; color: #8b949e; transition: all 0.15s; }
+.tab:hover { color: #e6edf3; }
+.tab.active { color: #58a6ff; border-color: #58a6ff; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 500; }
+.badge-green { background: rgba(63,185,80,0.15); color: #3fb950; }
+.badge-yellow { background: rgba(210,153,34,0.15); color: #d29922; }
+.badge-red { background: rgba(248,81,73,0.15); color: #f85149; }
+.badge-blue { background: rgba(88,166,255,0.15); color: #58a6ff; }
+textarea, input, select { background: #0f1117; border: 1px solid #30363d; border-radius: 6px; padding: 8px 12px; color: #e6edf3; font-size: 14px; width: 100%; box-sizing: border-box; }
+textarea:focus, input:focus, select:focus { outline: none; border-color: #58a6ff; }
+textarea { font-family: ui-monospace, 'SF Mono', monospace; resize: vertical; }
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: #0f1117; }
+::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script type="module">
+import { h, render } from 'https://esm.sh/preact@10.19.3';
+import { useState, useEffect, useCallback, useRef } from 'https://esm.sh/preact@10.19.3/hooks';
+import htm from 'https://esm.sh/htm@3.1.1';
+const html = htm.bind(h);
+
+const api = async (path, opts = {}) => {
+  try {
+    const res = await fetch('/api' + path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  } catch (e) { console.error('API error:', e); return null; }
+};
+
+// ── Tool definitions ────────────────────────────────────────
+const TOOL_CATEGORIES = {
+  'Fs': [
+    { id: 'Read', desc: 'Read file contents' },
+    { id: 'Edit', desc: 'Make precise edits to files' },
+    { id: 'Write', desc: 'Create or overwrite files' },
+    { id: 'Glob', desc: 'Search files by pattern' },
+  ],
+  'Runtime': [
+    { id: 'Bash', desc: 'Run shell commands' },
+    { id: 'Task', desc: 'Spawn sub-agents' },
+  ],
+  'Web': [
+    { id: 'WebSearch', desc: 'Search the web' },
+    { id: 'WebFetch', desc: 'Fetch and extract web content' },
+  ],
+  'Memory': [
+    { id: 'mcp__memory__store', desc: 'Store memory entries' },
+    { id: 'mcp__memory__search', desc: 'Search memory' },
+    { id: 'mcp__memory__get', desc: 'Read memory files' },
+    { id: 'mcp__memory__list', desc: 'List memory files' },
+  ],
+  'Sessions': [
+    { id: 'mcp__sessions__list', desc: 'List sessions' },
+    { id: 'mcp__sessions__spawn', desc: 'Spawn sub-agent' },
+    { id: 'mcp__sessions__send', desc: 'Send to session' },
+    { id: 'mcp__sessions__status', desc: 'Session status' },
+    { id: 'mcp__sessions__agents_list', desc: 'List agents' },
+  ],
+  'Messaging': [
+    { id: 'mcp__messaging__send_message', desc: 'Send channel message' },
+    { id: 'mcp__messaging__send_typing', desc: 'Show typing indicator' },
+  ],
+  'Skills': [
+    { id: 'mcp__skills__search', desc: 'Search skill registry' },
+    { id: 'mcp__skills__install', desc: 'Install a skill' },
+    { id: 'mcp__skills__list', desc: 'List skills' },
+    { id: 'mcp__skills__create', desc: 'Create custom skill' },
+  ],
+};
+
+const PRESETS = {
+  potato: { label: 'Potato', color: '#d29922', tools: [] },
+  coding: { label: 'Coding', color: '#58a6ff', tools: ['Read','Edit','Write','Glob','Bash','Grep','mcp__memory__store','mcp__memory__search','mcp__memory__get','mcp__memory__list','mcp__sessions__list','mcp__sessions__status'] },
+  messaging: { label: 'Messaging', color: '#3fb950', tools: ['mcp__memory__store','mcp__memory__search','mcp__sessions__list','mcp__sessions__status','mcp__messaging__send_message','mcp__messaging__send_typing'] },
+  full: { label: 'Full', color: '#bc8cff', tools: Object.values(TOOL_CATEGORIES).flat().map(t => t.id) },
+};
+
+// ── Components ──────────────────────────────────────────────
+
+function App() {
+  const [page, setPage] = useState('dashboard');
+  const [agents, setAgents] = useState({});
+  const [health, setHealth] = useState(null);
+  const [sessions, setSessions] = useState([]);
+  const [skills, setSkills] = useState([]);
+  const [cronJobs, setCronJobs] = useState([]);
+
+  const refresh = useCallback(async () => {
+    const [h, a, sess, sk, cj] = await Promise.all([
+      fetch('/health').then(r => r.json()).catch(() => null),
+      api('/agents'),
+      api('/sessions'),
+      api('/skills'),
+      api('/cron'),
+    ]);
+    if (h) setHealth(h);
+    if (a?.agents) setAgents(a.agents);
+    if (sess?.sessions) setSessions(sess.sessions);
+    if (sk?.skills) setSkills(sk.skills);
+    if (cj?.jobs) setCronJobs(cj.jobs);
+  }, []);
+
+  useEffect(() => { refresh(); const t = setInterval(refresh, 10000); return () => clearInterval(t); }, []);
+
+  const navItems = [
+    { id: 'dashboard', icon: '◉', label: 'Dashboard' },
+    { id: 'agents', icon: '⚙', label: 'Agents' },
+    { id: 'sessions', icon: '◎', label: 'Sessions' },
+    { id: 'skills', icon: '✦', label: 'Skills' },
+    { id: 'channels', icon: '◻', label: 'Channels' },
+    { id: 'cron', icon: '⏱', label: 'Cron' },
+    { id: 'config', icon: '⚡', label: 'Config' },
+  ];
+
+  const agentCount = Object.keys(agents).length;
+
+  return html`
+    <div style="display:flex; min-height:100vh">
+      <!-- Sidebar -->
+      <div style="width:240px; background:#161b22; border-right:1px solid #30363d; display:flex; flex-direction:column; flex-shrink:0">
+        <div style="padding:16px; border-bottom:1px solid #30363d">
+          <div style="font-weight:700; font-size:16px; display:flex; align-items:center; gap:8px">
+            <span style="color:#58a6ff">⬡</span> TeamAgents Admin
+          </div>
+          <div style="font-size:12px; color:#8b949e; margin-top:6px; display:flex; align-items:center; gap:6px">
+            <span style="width:8px;height:8px;border-radius:50%;background:${health ? '#3fb950' : '#f85149'};display:inline-block"></span>
+            ${health ? 'Connected' : 'Disconnected'}
+            <span style="margin-left:4px">:7890</span>
+            <span style="margin-left:auto">${agentCount} agents</span>
+          </div>
+        </div>
+        <nav style="padding:8px">
+          ${navItems.map(item => html`
+            <div onClick=${() => setPage(item.id)}
+              style="padding:8px 12px; border-radius:6px; cursor:pointer; margin-bottom:2px; display:flex; align-items:center; gap:10px; font-size:14px;
+                background:${page === item.id ? '#282e36' : 'transparent'}; color:${page === item.id ? '#e6edf3' : '#8b949e'};"
+              onMouseEnter=${(e) => { if(page !== item.id) e.target.style.background='#1c2128'; }}
+              onMouseLeave=${(e) => { if(page !== item.id) e.target.style.background='transparent'; }}>
+              <span style="width:20px; text-align:center">${item.icon}</span> ${item.label}
+            </div>
+          `)}
+        </nav>
+      </div>
+
+      <!-- Main -->
+      <div style="flex:1; overflow-y:auto; padding:24px; max-width:1200px">
+        ${page === 'dashboard' && html`<${Dashboard} health=${health} agents=${agents} sessions=${sessions} cronJobs=${cronJobs} />`}
+        ${page === 'agents' && html`<${AgentsPage} agents=${agents} refresh=${refresh} />`}
+        ${page === 'sessions' && html`<${SessionsPage} sessions=${sessions} />`}
+        ${page === 'skills' && html`<${SkillsPage} skills=${skills} refresh=${refresh} />`}
+        ${page === 'channels' && html`<${ChannelsPage} health=${health} />`}
+        ${page === 'cron' && html`<${CronPage} cronJobs=${cronJobs} agents=${agents} refresh=${refresh} />`}
+        ${page === 'config' && html`<${ConfigPage} />`}
+      </div>
+    </div>
+  `;
+}
+
+function Dashboard({ health, agents, sessions, cronJobs }) {
+  const stats = [
+    { label: 'Uptime', value: health ? Math.floor(health.uptime / 60) + 'm' : '--', color: '#58a6ff' },
+    { label: 'Agents', value: Object.keys(agents).length, color: '#bc8cff' },
+    { label: 'Sessions', value: sessions.length, color: '#3fb950' },
+    { label: 'Cron Jobs', value: cronJobs.length, color: '#d29922' },
+  ];
+  return html`
+    <h1 style="font-size:24px; font-weight:700; margin-bottom:24px">Dashboard</h1>
+    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:16px; margin-bottom:32px">
+      ${stats.map(s => html`
+        <div class="card" style="border-left:3px solid ${s.color}">
+          <div style="color:#8b949e; font-size:13px; margin-bottom:8px">${s.label}</div>
+          <div style="font-size:28px; font-weight:700">${s.value}</div>
+        </div>
+      `)}
+    </div>
+    <h2 style="font-size:18px; font-weight:600; margin-bottom:12px">Agents</h2>
+    <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:12px">
+      ${Object.entries(agents).map(([id, a]) => html`
+        <div class="card" style="display:flex; align-items:center; gap:12px">
+          <div style="width:40px;height:40px;border-radius:50%;background:#282e36;display:flex;align-items:center;justify-content:center;font-size:20px">⬡</div>
+          <div>
+            <div style="font-weight:600">${a.name || id}</div>
+            <div style="font-size:12px; color:#8b949e">${a.toolPreset} · ${a.model}</div>
+          </div>
+        </div>
+      `)}
+    </div>
+  `;
+}
+
+function AgentsPage({ agents, refresh }) {
+  const ids = Object.keys(agents);
+  const [selected, setSelected] = useState(ids[0] || '');
+  const [tab, setTab] = useState('soul');
+  const [soul, setSoul] = useState('');
+  const [tools, setTools] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const agent = agents[selected];
+
+  useEffect(() => { if (ids.length && !ids.includes(selected)) setSelected(ids[0]); }, [agents]);
+  useEffect(() => {
+    if (!selected) return;
+    api('/agents/' + selected + '/soul').then(d => { if (d?.content) setSoul(d.content); });
+    const preset = agents[selected]?.toolPreset || 'full';
+    setTools(PRESETS[preset]?.tools || PRESETS.full.tools);
+  }, [selected]);
+
+  const saveSoul = async () => {
+    setSaving(true);
+    await api('/agents/' + selected + '/soul', { method: 'PUT', body: JSON.stringify({ content: soul }) });
+    setSaving(false);
+  };
+  const applyPreset = (key) => setTools([...(PRESETS[key]?.tools || [])]);
+  const toggleTool = (id) => setTools(t => t.includes(id) ? t.filter(x => x !== id) : [...t, id]);
+
+  const tabs = ['Soul', 'Tools', 'Memory', 'Heartbeat'];
+
+  return html`
+    <div style="display:flex; gap:20px">
+      <!-- Agent list -->
+      <div style="width:180px; flex-shrink:0">
+        <h2 style="font-size:14px; color:#8b949e; text-transform:uppercase; letter-spacing:1px; margin-bottom:12px">Agents</h2>
+        ${ids.map(id => html`
+          <div onClick=${() => setSelected(id)}
+            style="padding:10px 12px; border-radius:6px; cursor:pointer; margin-bottom:4px;
+              background:${selected === id ? '#282e36' : 'transparent'}; border:${selected === id ? '1px solid #30363d' : '1px solid transparent'}">
+            <div style="font-weight:${selected === id ? '600' : '400'}">${agents[id]?.name || id}</div>
+            <div style="font-size:11px; color:#8b949e">${agents[id]?.skills?.length || 0} skills</div>
+          </div>
+        `)}
+      </div>
+
+      <!-- Editor -->
+      <div style="flex:1">
+        ${agent && html`
+          <div style="margin-bottom:16px">
+            <h1 style="font-size:20px; font-weight:700">${agent.name || selected}</h1>
+            <p style="color:#8b949e; font-size:13px">${agent.description || 'No description'}</p>
+          </div>
+          <div style="display:flex; gap:0; border-bottom:1px solid #30363d; margin-bottom:20px">
+            ${tabs.map(t => html`
+              <div class="tab ${tab === t.toLowerCase() ? 'active' : ''}" onClick=${() => setTab(t.toLowerCase())}>${t}</div>
+            `)}
+          </div>
+
+          ${tab === 'soul' && html`
+            <textarea rows="20" value=${soul} onInput=${(e) => setSoul(e.target.value)}
+              style="font-size:13px; line-height:1.6; margin-bottom:12px" />
+            <button class="btn btn-primary" onClick=${saveSoul} disabled=${saving}>
+              ${saving ? 'Saving...' : 'Save'}
+            </button>
+          `}
+
+          ${tab === 'tools' && html`
+            <div style="margin-bottom:16px">
+              <div style="font-size:13px; color:#8b949e; margin-bottom:8px">
+                Tool Access · ${tools.length}/${Object.values(TOOL_CATEGORIES).flat().length} tools enabled
+              </div>
+              <div style="display:flex; gap:8px; margin-bottom:20px">
+                ${Object.entries(PRESETS).map(([key, p]) => html`
+                  <button class="preset-btn" onClick=${() => applyPreset(key)}
+                    style="background:${p.color}22; color:${p.color}; border-color:${p.color}44">
+                    ${p.label}
+                  </button>
+                `)}
+              </div>
+            </div>
+            ${Object.entries(TOOL_CATEGORIES).map(([cat, catTools]) => html`
+              <div style="margin-bottom:20px">
+                <div style="font-size:13px; font-weight:600; color:#8b949e; margin-bottom:8px">
+                  ${cat} · ${catTools.filter(t => tools.includes(t.id)).length}/${catTools.length}
+                </div>
+                <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:8px">
+                  ${catTools.map(t => html`
+                    <div class="card" style="padding:10px 12px; display:flex; align-items:center; justify-content:space-between; gap:8px">
+                      <div>
+                        <div style="font-size:13px; font-weight:500">${t.id.replace('mcp__','').replace('__','.')}</div>
+                        <div style="font-size:11px; color:#8b949e">${t.desc}</div>
+                      </div>
+                      <input type="checkbox" class="toggle" checked=${tools.includes(t.id)} onChange=${() => toggleTool(t.id)} />
+                    </div>
+                  `)}
+                </div>
+              </div>
+            `)}
+          `}
+
+          ${tab === 'memory' && html`<${MemoryTab} agentId=${selected} />`}
+
+          ${tab === 'heartbeat' && html`
+            <div class="card" style="margin-bottom:16px">
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px">
+                <div>
+                  <label style="font-size:13px; color:#8b949e; display:block; margin-bottom:4px">Interval</label>
+                  <select value=${agent.heartbeat?.interval || '30m'}>
+                    <option value="15m">Every 15 minutes</option>
+                    <option value="30m">Every 30 minutes</option>
+                    <option value="1h">Every hour</option>
+                    <option value="4h">Every 4 hours</option>
+                    <option value="daily">Daily</option>
+                  </select>
+                </div>
+                <div>
+                  <label style="font-size:13px; color:#8b949e; display:block; margin-bottom:4px">Enabled</label>
+                  <input type="checkbox" class="toggle" checked=${agent.heartbeat?.enabled || false} />
+                </div>
+              </div>
+            </div>
+            <label style="font-size:13px; color:#8b949e; display:block; margin-bottom:4px">HEARTBEAT.md</label>
+            <textarea rows="12" placeholder="# Heartbeat Checklist..." style="font-size:13px" />
+          `}
+        `}
+      </div>
+    </div>
+  `;
+}
+
+function MemoryTab({ agentId }) {
+  const [files, setFiles] = useState([]);
+  const [content, setContent] = useState('');
+  const [selectedFile, setSelectedFile] = useState('');
+  const [query, setQuery] = useState('');
+
+  useEffect(() => {
+    api('/agents/' + agentId + '/memory').then(d => { if (d?.files) setFiles(d.files); });
+  }, [agentId]);
+
+  const viewFile = async (f) => {
+    setSelectedFile(f);
+    const d = await api('/agents/' + agentId + '/memory/' + encodeURIComponent(f));
+    if (d?.content) setContent(d.content);
+  };
+
+  const search = async () => {
+    if (!query) return;
+    const d = await api('/agents/' + agentId + '/memory/search', { method: 'POST', body: JSON.stringify({ query }) });
+    if (d?.results) setContent(d.results.map(r => `--- ${r.file_path}:${r.chunk_start} ---\n${r.chunk_text}`).join('\n\n'));
+  };
+
+  return html`
+    <div style="display:flex; gap:8px; margin-bottom:16px">
+      <input placeholder="Search memory..." value=${query} onInput=${(e) => setQuery(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && search()} style="flex:1" />
+      <button class="btn btn-primary" onClick=${search}>Search</button>
+    </div>
+    <div style="display:flex; gap:16px">
+      <div style="width:200px; flex-shrink:0">
+        ${files.map(f => html`
+          <div onClick=${() => viewFile(typeof f === 'string' ? f : f.name)} style="padding:6px 8px; cursor:pointer; border-radius:4px; font-size:13px; font-family:monospace;
+            background:${selectedFile === (typeof f === 'string' ? f : f.name) ? '#282e36' : 'transparent'}; color:#8b949e">
+            ${typeof f === 'string' ? f : f.name}
+          </div>
+        `)}
+      </div>
+      <pre style="flex:1; background:#0f1117; border:1px solid #30363d; border-radius:6px; padding:12px; font-size:13px; overflow:auto; white-space:pre-wrap; max-height:400px; margin:0">${content || 'Select a file to view'}</pre>
+    </div>
+  `;
+}
+
+function SessionsPage({ sessions }) {
+  return html`
+    <h1 style="font-size:24px; font-weight:700; margin-bottom:20px">Sessions</h1>
+    <div class="card" style="overflow-x:auto">
+      <table style="width:100%; border-collapse:collapse; font-size:14px">
+        <thead>
+          <tr style="border-bottom:1px solid #30363d">
+            <th style="text-align:left; padding:10px; color:#8b949e; font-weight:500">Session ID</th>
+            <th style="text-align:left; padding:10px; color:#8b949e; font-weight:500">Agent</th>
+            <th style="text-align:left; padding:10px; color:#8b949e; font-weight:500">Channel</th>
+            <th style="text-align:left; padding:10px; color:#8b949e; font-weight:500">Status</th>
+            <th style="text-align:left; padding:10px; color:#8b949e; font-weight:500">Last Active</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${sessions.length === 0 && html`<tr><td colspan="5" style="padding:20px; text-align:center; color:#8b949e">No active sessions</td></tr>`}
+          ${sessions.map(s => html`
+            <tr style="border-bottom:1px solid #30363d22">
+              <td style="padding:10px; font-family:monospace; font-size:12px">${(s.id || '').slice(0, 12)}...</td>
+              <td style="padding:10px">${s.agent_id}</td>
+              <td style="padding:10px">${s.channel || 'cli'}</td>
+              <td style="padding:10px"><span class="badge badge-${s.status === 'active' ? 'green' : 'yellow'}">${s.status}</span></td>
+              <td style="padding:10px; color:#8b949e; font-size:13px">${s.last_active_at || '--'}</td>
+            </tr>
+          `)}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function SkillsPage({ skills, refresh }) {
+  const active = skills.filter(s => s.status === 'active');
+  const pending = skills.filter(s => s.status === 'pending');
+  const [pkg, setPkg] = useState('');
+
+  const approve = async (name) => { await api('/skills/' + name + '/approve', { method: 'POST' }); refresh(); };
+  const reject = async (name) => { await api('/skills/' + name + '/reject', { method: 'POST' }); refresh(); };
+  const install = async () => { if (!pkg) return; await api('/skills', { method: 'POST', body: JSON.stringify({ package: pkg }) }); setPkg(''); refresh(); };
+
+  return html`
+    <h1 style="font-size:24px; font-weight:700; margin-bottom:20px">Skills</h1>
+    ${pending.length > 0 && html`
+      <h2 style="font-size:16px; font-weight:600; margin-bottom:12px; color:#d29922">Pending Approval</h2>
+      <div style="margin-bottom:24px">
+        ${pending.map(s => html`
+          <div class="card" style="border-color:#9e6a03; margin-bottom:8px; display:flex; align-items:center; justify-content:space-between">
+            <div>
+              <span style="font-weight:600">${s.name}</span>
+              <span style="color:#8b949e; font-size:13px; margin-left:8px">${s.package || ''}</span>
+            </div>
+            <div style="display:flex; gap:8px">
+              <button class="btn btn-success" onClick=${() => approve(s.name)}>Approve</button>
+              <button class="btn btn-danger" onClick=${() => reject(s.name)}>Reject</button>
+            </div>
+          </div>
+        `)}
+      </div>
+    `}
+    <h2 style="font-size:16px; font-weight:600; margin-bottom:12px">Active Skills</h2>
+    ${active.length === 0 && html`<p style="color:#8b949e">No active skills</p>`}
+    ${active.map(s => html`
+      <div class="card" style="margin-bottom:8px; display:flex; align-items:center; justify-content:space-between">
+        <div>
+          <span style="font-weight:600">${s.name}</span>
+          <span class="badge badge-green" style="margin-left:8px">active</span>
+        </div>
+        <span style="color:#8b949e; font-size:13px">${s.package || 'custom'}</span>
+      </div>
+    `)}
+    <div class="card" style="margin-top:24px">
+      <h3 style="font-size:14px; font-weight:600; margin-bottom:12px">Install Skill</h3>
+      <div style="display:flex; gap:8px">
+        <input placeholder="npm package name or URL" value=${pkg} onInput=${(e) => setPkg(e.target.value)} style="flex:1" />
+        <button class="btn btn-primary" onClick=${install}>Install</button>
+      </div>
+    </div>
+  `;
+}
+
+function ChannelsPage({ health }) {
+  const channels = [
+    { id: 'telegram', name: 'Telegram', icon: '✈' },
+    { id: 'slack', name: 'Slack', icon: '#' },
+    { id: 'discord', name: 'Discord', icon: '⬡' },
+    { id: 'webchat', name: 'WebChat', icon: '◯' },
+  ];
+  return html`
+    <h1 style="font-size:24px; font-weight:700; margin-bottom:20px">Channels</h1>
+    <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:16px">
+      ${channels.map(ch => {
+        const connected = health?.channels?.[ch.id] || false;
+        return html`
+          <div class="card">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px">
+              <span style="font-size:24px">${ch.icon}</span>
+              <span style="font-weight:600; font-size:16px">${ch.name}</span>
+              <span style="margin-left:auto; width:10px; height:10px; border-radius:50%; background:${connected ? '#3fb950' : '#f85149'}"></span>
+            </div>
+            <div style="font-size:13px; color:#8b949e; margin-bottom:8px">
+              Status: <span style="color:${connected ? '#3fb950' : '#f85149'}">${connected ? 'Connected' : 'Disconnected'}</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px">
+              <span style="font-size:13px; color:#8b949e">Enabled</span>
+              <input type="checkbox" class="toggle" checked=${connected} />
+            </div>
+          </div>
+        `;
+      })}
+    </div>
+  `;
+}
+
+function CronPage({ cronJobs, agents, refresh }) {
+  const [name, setName] = useState('');
+  const [schedule, setSchedule] = useState('');
+  const [agentId, setAgentId] = useState('');
+  const [prompt, setPrompt] = useState('');
+
+  const addJob = async () => {
+    if (!name || !schedule || !agentId || !prompt) return;
+    await api('/cron', { method: 'POST', body: JSON.stringify({ name, schedule, agentId, prompt }) });
+    setName(''); setSchedule(''); setPrompt('');
+    refresh();
+  };
+
+  return html`
+    <h1 style="font-size:24px; font-weight:700; margin-bottom:20px">Cron Jobs</h1>
+    <div class="card" style="overflow-x:auto; margin-bottom:24px">
+      <table style="width:100%; border-collapse:collapse; font-size:14px">
+        <thead>
+          <tr style="border-bottom:1px solid #30363d">
+            <th style="text-align:left; padding:10px; color:#8b949e; font-weight:500">Name</th>
+            <th style="text-align:left; padding:10px; color:#8b949e; font-weight:500">Schedule</th>
+            <th style="text-align:left; padding:10px; color:#8b949e; font-weight:500">Agent</th>
+            <th style="text-align:left; padding:10px; color:#8b949e; font-weight:500">Enabled</th>
+            <th style="text-align:left; padding:10px; color:#8b949e; font-weight:500">Last Run</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${cronJobs.length === 0 && html`<tr><td colspan="5" style="padding:20px; text-align:center; color:#8b949e">No cron jobs</td></tr>`}
+          ${cronJobs.map(j => html`
+            <tr style="border-bottom:1px solid #30363d22">
+              <td style="padding:10px; font-weight:500">${j.name}</td>
+              <td style="padding:10px; font-family:monospace; font-size:12px">${j.schedule}</td>
+              <td style="padding:10px">${j.agentId}</td>
+              <td style="padding:10px"><span class="badge badge-${j.enabled ? 'green' : 'yellow'}">${j.enabled ? 'on' : 'off'}</span></td>
+              <td style="padding:10px; color:#8b949e; font-size:13px">${j.lastRunAt || 'never'}</td>
+            </tr>
+          `)}
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h3 style="font-size:14px; font-weight:600; margin-bottom:12px">Add Cron Job</h3>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px">
+        <div><label style="font-size:13px; color:#8b949e; display:block; margin-bottom:4px">Name</label><input value=${name} onInput=${(e) => setName(e.target.value)} placeholder="daily-check" /></div>
+        <div><label style="font-size:13px; color:#8b949e; display:block; margin-bottom:4px">Schedule</label><input value=${schedule} onInput=${(e) => setSchedule(e.target.value)} placeholder="0 9 * * *" /></div>
+        <div>
+          <label style="font-size:13px; color:#8b949e; display:block; margin-bottom:4px">Agent</label>
+          <select value=${agentId} onChange=${(e) => setAgentId(e.target.value)}>
+            <option value="">Select agent...</option>
+            ${Object.keys(agents).map(id => html`<option value=${id}>${id}</option>`)}
+          </select>
+        </div>
+      </div>
+      <div style="margin-bottom:12px"><label style="font-size:13px; color:#8b949e; display:block; margin-bottom:4px">Prompt</label><textarea rows="3" value=${prompt} onInput=${(e) => setPrompt(e.target.value)} placeholder="Check for pending tasks..." /></div>
+      <button class="btn btn-primary" onClick=${addJob}>Add Job</button>
+    </div>
+  `;
+}
+
+function ConfigPage() {
+  const [config, setConfig] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => { api('/config').then(d => { if (d) setConfig(JSON.stringify(d, null, 2)); }); }, []);
+
+  const save = async () => {
+    setSaving(true); setMsg('');
+    try {
+      const parsed = JSON.parse(config);
+      await api('/config', { method: 'PUT', body: JSON.stringify(parsed) });
+      setMsg('Saved');
+    } catch (e) { setMsg('Error: ' + e.message); }
+    setSaving(false);
+  };
+
+  return html`
+    <h1 style="font-size:24px; font-weight:700; margin-bottom:20px">Configuration</h1>
+    <div class="card">
+      <textarea rows="25" value=${config} onInput=${(e) => setConfig(e.target.value)} style="font-size:13px; line-height:1.5" />
+      <div style="display:flex; align-items:center; gap:12px; margin-top:12px">
+        <button class="btn btn-primary" onClick=${save} disabled=${saving}>${saving ? 'Saving...' : 'Save Config'}</button>
+        ${msg && html`<span style="font-size:13px; color:${msg.startsWith('Error') ? '#f85149' : '#3fb950'}">${msg}</span>`}
+      </div>
+    </div>
+  `;
+}
+
+// ── Mount ───────────────────────────────────────────────────
+render(html`<${App} />`, document.getElementById('app'));
+</script>
+</body>
+</html>

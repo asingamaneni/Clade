@@ -1,0 +1,37 @@
+import { Command } from 'commander';
+import { registerSetupCommand } from './commands/setup.js';
+import { registerStartCommand } from './commands/start.js';
+import { registerAskCommand } from './commands/ask.js';
+import { registerAgentCommand } from './commands/agent.js';
+import { registerSkillCommand } from './commands/skill.js';
+import { registerWorkCommand } from './commands/work.js';
+import { registerDoctorCommand } from './commands/doctor.js';
+
+/**
+ * Create and configure the TeamAgents CLI program.
+ */
+export function createCli(): Command {
+  const program = new Command();
+
+  program
+    .name('teamagents')
+    .description(
+      'Multi-agent orchestration platform built on the Claude CLI',
+    )
+    .version('0.1.0');
+
+  registerSetupCommand(program);
+  registerStartCommand(program);
+  registerAskCommand(program);
+  registerAgentCommand(program);
+  registerSkillCommand(program);
+  registerWorkCommand(program);
+  registerDoctorCommand(program);
+
+  // Default action: show help
+  program.action(() => {
+    program.help();
+  });
+
+  return program;
+}
