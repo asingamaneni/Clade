@@ -1,9 +1,12 @@
 import { defineConfig } from 'vitepress';
 
+// DOCS_BASE env var overrides the base path (e.g. /Clade/ for GitHub Pages)
+const base = (process.env['DOCS_BASE'] as `/${string}/` | undefined) ?? '/';
+
 export default defineConfig({
   title: 'Clade',
   description: 'Your personal team of AI agents, powered by Claude Code',
-  base: '/',
+  base,
 
   head: [
     ['meta', { name: 'theme-color', content: '#7c3aed' }],
