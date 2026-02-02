@@ -194,7 +194,7 @@
     // ═══════════════════════════════════════════════════════════════════
     // Imports
     // ═══════════════════════════════════════════════════════════════════
-    import { h, render } from 'https://esm.sh/preact@10.19.3';
+    import { h, Fragment, render } from 'https://esm.sh/preact@10.19.3';
     import { useState, useEffect, useRef, useCallback, useMemo } from 'https://esm.sh/preact@10.19.3/hooks';
     import htm from 'https://esm.sh/htm@3.1.1';
     const html = htm.bind(h);
@@ -204,10 +204,12 @@
     // ═══════════════════════════════════════════════════════════════════
 
     const api = async (path, opts = {}) => {
+      const hasBody = opts.body != null;
+      const headers = hasBody ? { 'Content-Type': 'application/json' } : {};
       const res = await fetch('/api' + path, {
-        headers: { 'Content-Type': 'application/json' },
         ...opts,
-        body: opts.body ? JSON.stringify(opts.body) : undefined,
+        headers: { ...headers, ...(opts.headers || {}) },
+        body: hasBody ? JSON.stringify(opts.body) : undefined,
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
@@ -405,7 +407,7 @@
       { id: 'config',    label: 'Config',     icon: '\u{2699}\u{FE0F}' },
     ];
 
-    function Sidebar({ page, setPage, agents }) {
+    function Sidebar({ page, setPage, agents, onNavigateToAgent }) {
       return html`
         <aside class="flex flex-col h-full" style="width:240px;min-width:240px;background:#161b22;border-right:1px solid #30363d">
           <!-- Logo -->
@@ -435,9 +437,9 @@
                   key=${a.id}
                   class="nav-item"
                   style="font-size:13px"
-                  onClick=${() => setPage('agents')}
+                  onClick=${() => onNavigateToAgent ? onNavigateToAgent(a.id) : setPage('agents')}
                 >
-                  <span class="text-sm" style="width:20px;text-align:center">\u{1F916}</span>
+                  <span class="text-sm" style="width:20px;text-align:center">${a.emoji || '\u{1F916}'}</span>
                   <span class="truncate flex-1">${a.name || a.id}</span>
                   ${a.skills && a.skills.length > 0 && html`
                     <span class="text-xs px-1.5 rounded" style="background:#282e36;color:#8b949e">${a.skills.length}</span>
@@ -501,6 +503,7 @@
       research: { icon: '\u{1F50D}', color: '#bc8cff', border: 'rgba(188,140,255,0.4)', bg: 'rgba(188,140,255,0.06)' },
       ops:      { icon: '\u{1F4E1}', color: '#3fb950', border: 'rgba(63,185,80,0.4)',   bg: 'rgba(63,185,80,0.06)' },
       pm:       { icon: '\u{1F4CB}', color: '#d29922', border: 'rgba(210,153,34,0.4)',  bg: 'rgba(210,153,34,0.06)' },
+      custom:   { icon: '\u{2728}',  color: '#e6edf3', border: 'rgba(139,148,158,0.4)', bg: 'rgba(139,148,158,0.04)' },
     };
 
     // ═══════════════════════════════════════════════════════════════════
@@ -510,6 +513,7 @@
     function WelcomePage({ onCreated }) {
       const [templates, setTemplates] = useState([]);
       const [selected, setSelected] = useState(null);
+      const [customMode, setCustomMode] = useState(false);
       const [loading, setLoading] = useState(true);
 
       useEffect(() => {
@@ -527,6 +531,10 @@
           .finally(() => setLoading(false));
       }, []);
 
+      if (customMode) {
+        return html`<${CustomAgentWizard} onCancel=${() => setCustomMode(false)} onCreated=${onCreated} />`;
+      }
+
       if (selected) {
         return html`<${CreateAgentForm} template=${selected} onCancel=${() => setSelected(null)} onCreated=${onCreated} />`;
       }
@@ -541,7 +549,7 @@
               Your personal team of AI agents, powered by Claude Code.
             </p>
             <p class="text-sm mb-8" style="color:#484f58;max-width:480px;margin:0 auto">
-              Create your first agent to get started. Pick a template — you can customize everything later.
+              Create your first agent to get started. Pick a template, or build one from scratch.
             </p>
 
             <!-- Template cards -->
@@ -581,6 +589,27 @@
                 </div>
               `
             }
+
+            <!-- Custom agent card -->
+            <div class="mt-4">
+              <button
+                class="w-full p-5 rounded-xl text-left transition-all"
+                style="background:rgba(139,148,158,0.04);border:2px dashed rgba(139,148,158,0.3);cursor:pointer;outline:none"
+                onMouseEnter=${e => { e.currentTarget.style.borderColor = 'rgba(230,237,243,0.5)'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
+                onMouseLeave=${e => { e.currentTarget.style.borderColor = 'rgba(139,148,158,0.3)'; e.currentTarget.style.transform = 'none'; }}
+                onClick=${() => setCustomMode(true)}
+              >
+                <div class="flex items-center gap-3">
+                  <div class="flex items-center justify-center rounded-xl" style="width:44px;height:44px;background:rgba(139,148,158,0.06);border:1px dashed rgba(139,148,158,0.3);font-size:22px">
+                    \u{2728}
+                  </div>
+                  <div>
+                    <div class="text-sm font-bold" style="color:#e6edf3">Custom Agent</div>
+                    <div class="text-xs" style="color:#8b949e">Build from scratch — define your own personality, tools, and schedule</div>
+                  </div>
+                </div>
+              </button>
+            </div>
 
             <!-- CLI hint -->
             <div class="mt-8 p-4 rounded-lg text-sm" style="background:#161b22;border:1px solid #30363d;color:#8b949e">
@@ -726,10 +755,393 @@
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    //  ONBOARDING: Custom Agent Wizard (multi-step)
+    // ═══════════════════════════════════════════════════════════════════
+
+    const DEFAULT_CUSTOM_SOUL = `# SOUL.md — {AGENT_NAME}
+
+_Describe who this agent is and how it approaches work._
+
+## Core Principles
+
+**Principle 1.** What matters most to this agent? What does it always prioritize?
+
+**Principle 2.** How does it handle uncertainty or ambiguity?
+
+**Principle 3.** What is its relationship with the human it works for?
+
+## How You Work
+
+- Describe the agent's working style
+- What does it do on heartbeat?
+- How does it communicate results?
+
+## Growth
+
+This agent evolves over time. What does it get better at?
+`;
+
+    const DEFAULT_CUSTOM_HEARTBEAT = `# Heartbeat Checklist
+
+- [ ] Check for pending tasks or requests
+- [ ] Review recent activity for anomalies
+- [ ] Any scheduled items overdue?
+
+If nothing needs attention, respond with: HEARTBEAT_OK
+`;
+
+    const TOOL_PRESET_INFO = {
+      potato:    { label: 'None',      desc: 'Pure chat — no file or system access' },
+      coding:    { label: 'Coding',    desc: 'Read, Edit, Write, Bash, Glob, Grep + memory' },
+      messaging: { label: 'Messaging', desc: 'Memory, sessions, and messaging only' },
+      full:      { label: 'Full',      desc: 'All Claude Code tools + all MCP servers' },
+    };
+
+    function CustomAgentWizard({ onCancel, onCreated }) {
+      const [step, setStep] = useState(1);
+      const [creating, setCreating] = useState(false);
+      const [error, setError] = useState(null);
+      const inputRef = useRef(null);
+
+      // Step 1: Identity
+      const [name, setName] = useState('');
+      const [displayName, setDisplayName] = useState('');
+      const [description, setDescription] = useState('');
+
+      // Step 2: Personality & Tools
+      const [toolPreset, setToolPreset] = useState('full');
+      const [model, setModel] = useState('sonnet');
+      const [soulContent, setSoulContent] = useState('');
+
+      // Step 3: Heartbeat
+      const [heartbeatEnabled, setHeartbeatEnabled] = useState(true);
+      const [heartbeatInterval, setHeartbeatInterval] = useState('30m');
+      const [heartbeatContent, setHeartbeatContent] = useState(DEFAULT_CUSTOM_HEARTBEAT);
+
+      const nameSlug = name.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+
+      useEffect(() => { inputRef.current && inputRef.current.focus(); }, [step]);
+
+      // Initialize SOUL.md with agent name when moving to step 2
+      const goToStep = (s) => {
+        if (s === 2 && !soulContent) {
+          setSoulContent(DEFAULT_CUSTOM_SOUL.replace('{AGENT_NAME}', displayName || nameSlug || 'My Agent'));
+        }
+        setStep(s);
+      };
+
+      const create = async () => {
+        if (!nameSlug) { setError('Name is required'); return; }
+        setCreating(true);
+        setError(null);
+        try {
+          await api('/agents', {
+            method: 'POST',
+            body: {
+              name: nameSlug,
+              template: 'custom',
+              description: displayName || nameSlug,
+              agentDescription: description,
+              model,
+              toolPreset,
+              soulContent: soulContent || undefined,
+              heartbeatContent: heartbeatContent || undefined,
+              heartbeatEnabled,
+              heartbeatInterval,
+            },
+          });
+          showToast('Agent "' + nameSlug + '" created!', 'success');
+          onCreated && onCreated();
+        } catch (e) {
+          setError(e.message);
+          showToast('Failed: ' + e.message, 'error');
+        }
+        setCreating(false);
+      };
+
+      const stepIndicator = html`
+        <div class="flex items-center justify-center gap-2 mb-8">
+          ${[1,2,3].map(s => html`
+            <${Fragment} key=${s}>
+              <button
+                class="flex items-center justify-center rounded-full text-xs font-bold transition-all"
+                style="width:32px;height:32px;background:${step >= s ? 'rgba(88,166,255,0.15)' : '#161b22'};color:${step >= s ? '#58a6ff' : '#484f58'};border:1px solid ${step >= s ? 'rgba(88,166,255,0.4)' : '#30363d'};cursor:${step > s ? 'pointer' : 'default'}"
+                onClick=${() => step > s && goToStep(s)}
+              >${s}</button>
+              ${s < 3 ? html`<div style="width:40px;height:1px;background:${step > s ? 'rgba(88,166,255,0.4)' : '#30363d'}"></div>` : null}
+            <//>
+          `)}
+        </div>
+      `;
+
+      return html`
+        <div class="page-enter flex flex-col items-center justify-center" style="min-height:calc(100vh - 48px);padding:2rem">
+          <div style="max-width:520px;width:100%">
+            <!-- Back link -->
+            <button
+              class="flex items-center gap-1.5 mb-6 text-sm"
+              style="color:#8b949e;background:none;border:none;cursor:pointer;padding:0"
+              onClick=${step === 1 ? onCancel : () => goToStep(step - 1)}
+            >
+              \u{2190} ${step === 1 ? 'Back to templates' : 'Back'}
+            </button>
+
+            <!-- Header -->
+            <div class="flex items-center gap-3 mb-2">
+              <div class="flex items-center justify-center rounded-xl" style="width:48px;height:48px;background:rgba(139,148,158,0.06);border:1px dashed rgba(139,148,158,0.3);font-size:24px">
+                \u{2728}
+              </div>
+              <div>
+                <div class="text-lg font-bold" style="color:#e6edf3">Custom Agent</div>
+                <div class="text-sm" style="color:#8b949e">
+                  ${step === 1 ? 'Identity' : step === 2 ? 'Personality & Tools' : 'Schedule & Review'}
+                </div>
+              </div>
+            </div>
+
+            ${stepIndicator}
+
+            <!-- ── Step 1: Identity ── -->
+            ${step === 1 && html`
+              <div class="space-y-5">
+                <div>
+                  <label class="block text-xs font-semibold mb-2 uppercase tracking-wider" style="color:#8b949e">Agent ID</label>
+                  <input
+                    ref=${inputRef}
+                    type="text"
+                    value=${name}
+                    onInput=${e => { setName(e.target.value); setError(null); }}
+                    onKeyDown=${e => e.key === 'Enter' && nameSlug && goToStep(2)}
+                    placeholder="e.g. jarvis, scout, oracle"
+                    style="font-size:16px;padding:12px 16px"
+                  />
+                  ${nameSlug && nameSlug !== name && html`
+                    <div class="text-xs mt-1.5" style="color:#484f58">
+                      Will be created as: <span style="color:#58a6ff;font-family:ui-monospace,monospace">${nameSlug}</span>
+                    </div>
+                  `}
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold mb-2 uppercase tracking-wider" style="color:#8b949e">Display Name</label>
+                  <input
+                    type="text"
+                    value=${displayName}
+                    onInput=${e => setDisplayName(e.target.value)}
+                    placeholder="e.g. My Code Reviewer"
+                    style="font-size:16px;padding:12px 16px"
+                  />
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold mb-2 uppercase tracking-wider" style="color:#8b949e">Description</label>
+                  <input
+                    type="text"
+                    value=${description}
+                    onInput=${e => setDescription(e.target.value)}
+                    placeholder="What does this agent do?"
+                    style="font-size:16px;padding:12px 16px"
+                  />
+                </div>
+
+                ${error && html`
+                  <div class="p-3 rounded-lg text-sm" style="background:rgba(248,81,73,0.1);border:1px solid rgba(248,81,73,0.3);color:#f85149">${error}</div>
+                `}
+
+                <button
+                  class="btn btn-primary w-full justify-center"
+                  style="padding:14px;font-size:15px;border-radius:10px"
+                  onClick=${() => nameSlug ? goToStep(2) : setError('Agent ID is required')}
+                  disabled=${!nameSlug}
+                >
+                  Next \u{2192}
+                </button>
+              </div>
+            `}
+
+            <!-- ── Step 2: Personality & Tools ── -->
+            ${step === 2 && html`
+              <div class="space-y-5">
+                <div>
+                  <label class="block text-xs font-semibold mb-2 uppercase tracking-wider" style="color:#8b949e">Tool Access</label>
+                  <div class="grid grid-cols-2 gap-2">
+                    ${Object.entries(TOOL_PRESET_INFO).map(([key, info]) => html`
+                      <button
+                        key=${key}
+                        class="p-3 rounded-lg text-left transition-all"
+                        style="background:${toolPreset === key ? 'rgba(88,166,255,0.1)' : '#161b22'};border:1px solid ${toolPreset === key ? 'rgba(88,166,255,0.4)' : '#30363d'};cursor:pointer"
+                        onClick=${() => setToolPreset(key)}
+                      >
+                        <div class="text-sm font-medium" style="color:${toolPreset === key ? '#58a6ff' : '#e6edf3'}">${info.label}</div>
+                        <div class="text-xs mt-0.5" style="color:#484f58">${info.desc}</div>
+                      </button>
+                    `)}
+                  </div>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold mb-2 uppercase tracking-wider" style="color:#8b949e">Model</label>
+                  <div class="flex gap-2">
+                    ${['sonnet', 'opus', 'haiku'].map(m => html`
+                      <button
+                        key=${m}
+                        class="flex-1 py-2.5 rounded-lg text-sm font-medium transition-all"
+                        style="background:${model === m ? 'rgba(88,166,255,0.15)' : '#161b22'};color:${model === m ? '#58a6ff' : '#8b949e'};border:1px solid ${model === m ? 'rgba(88,166,255,0.4)' : '#30363d'};cursor:pointer"
+                        onClick=${() => setModel(m)}
+                      >
+                        ${m.charAt(0).toUpperCase() + m.slice(1)}
+                      </button>
+                    `)}
+                  </div>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold mb-2 uppercase tracking-wider" style="color:#8b949e">
+                    Personality (SOUL.md)
+                  </label>
+                  <div class="text-xs mb-2" style="color:#484f58">
+                    Define how your agent thinks and works. Core Principles are locked after creation.
+                  </div>
+                  <textarea
+                    ref=${inputRef}
+                    value=${soulContent}
+                    onInput=${e => setSoulContent(e.target.value)}
+                    placeholder="Describe your agent's personality, principles, and working style..."
+                    style="font-size:13px;padding:12px 16px;min-height:200px;resize:vertical;font-family:ui-monospace,monospace;line-height:1.5"
+                  />
+                </div>
+
+                ${error && html`
+                  <div class="p-3 rounded-lg text-sm" style="background:rgba(248,81,73,0.1);border:1px solid rgba(248,81,73,0.3);color:#f85149">${error}</div>
+                `}
+
+                <button
+                  class="btn btn-primary w-full justify-center"
+                  style="padding:14px;font-size:15px;border-radius:10px"
+                  onClick=${() => goToStep(3)}
+                >
+                  Next \u{2192}
+                </button>
+              </div>
+            `}
+
+            <!-- ── Step 3: Heartbeat & Review ── -->
+            ${step === 3 && html`
+              <div class="space-y-5">
+                <div>
+                  <div class="flex items-center justify-between mb-2">
+                    <label class="text-xs font-semibold uppercase tracking-wider" style="color:#8b949e">Heartbeat</label>
+                    <button
+                      class="text-xs px-3 py-1 rounded-full transition-all"
+                      style="background:${heartbeatEnabled ? 'rgba(63,185,80,0.15)' : '#161b22'};color:${heartbeatEnabled ? '#3fb950' : '#484f58'};border:1px solid ${heartbeatEnabled ? 'rgba(63,185,80,0.4)' : '#30363d'};cursor:pointer"
+                      onClick=${() => setHeartbeatEnabled(!heartbeatEnabled)}
+                    >
+                      ${heartbeatEnabled ? 'Enabled' : 'Disabled'}
+                    </button>
+                  </div>
+                  ${heartbeatEnabled && html`
+                    <div class="flex gap-2 mt-3">
+                      ${['15m', '30m', '1h', '4h', 'daily'].map(iv => html`
+                        <button
+                          key=${iv}
+                          class="flex-1 py-2 rounded-lg text-xs font-medium transition-all"
+                          style="background:${heartbeatInterval === iv ? 'rgba(88,166,255,0.15)' : '#161b22'};color:${heartbeatInterval === iv ? '#58a6ff' : '#8b949e'};border:1px solid ${heartbeatInterval === iv ? 'rgba(88,166,255,0.4)' : '#30363d'};cursor:pointer"
+                          onClick=${() => setHeartbeatInterval(iv)}
+                        >
+                          ${iv}
+                        </button>
+                      `)}
+                    </div>
+                  `}
+                </div>
+
+                ${heartbeatEnabled && html`
+                  <div>
+                    <label class="block text-xs font-semibold mb-2 uppercase tracking-wider" style="color:#8b949e">
+                      Heartbeat Checklist
+                    </label>
+                    <textarea
+                      value=${heartbeatContent}
+                      onInput=${e => setHeartbeatContent(e.target.value)}
+                      placeholder="What should the agent check on each heartbeat?"
+                      style="font-size:13px;padding:12px 16px;min-height:120px;resize:vertical;font-family:ui-monospace,monospace;line-height:1.5"
+                    />
+                  </div>
+                `}
+
+                <!-- Summary -->
+                <div class="p-4 rounded-lg" style="background:#161b22;border:1px solid #30363d">
+                  <div class="text-xs font-semibold mb-3 uppercase tracking-wider" style="color:#484f58">Review</div>
+                  <div class="space-y-2 text-sm" style="color:#8b949e">
+                    <div class="flex justify-between">
+                      <span>Agent ID</span>
+                      <span style="color:#58a6ff;font-family:ui-monospace,monospace">${nameSlug}</span>
+                    </div>
+                    ${displayName && html`
+                      <div class="flex justify-between">
+                        <span>Display Name</span>
+                        <span style="color:#e6edf3">${displayName}</span>
+                      </div>
+                    `}
+                    ${description && html`
+                      <div class="flex justify-between">
+                        <span>Description</span>
+                        <span style="color:#e6edf3">${description}</span>
+                      </div>
+                    `}
+                    <div class="flex justify-between">
+                      <span>Tools</span>
+                      <span style="color:#e6edf3">${TOOL_PRESET_INFO[toolPreset]?.label || toolPreset}</span>
+                    </div>
+                    <div class="flex justify-between">
+                      <span>Model</span>
+                      <span style="color:#e6edf3">${model}</span>
+                    </div>
+                    <div class="flex justify-between">
+                      <span>Heartbeat</span>
+                      <span style="color:#e6edf3">${heartbeatEnabled ? heartbeatInterval : 'Off'}</span>
+                    </div>
+                    <div class="flex justify-between">
+                      <span>SOUL.md</span>
+                      <span style="color:#e6edf3">${soulContent ? (soulContent.length + ' chars') : 'Default'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- What gets created -->
+                <div class="p-4 rounded-lg" style="background:#161b22;border:1px solid #30363d">
+                  <div class="text-xs font-semibold mb-2 uppercase tracking-wider" style="color:#484f58">What gets created</div>
+                  <div class="space-y-1 text-xs font-mono" style="color:#8b949e">
+                    <div>~/.clade/agents/${nameSlug}/SOUL.md</div>
+                    <div>~/.clade/agents/${nameSlug}/MEMORY.md</div>
+                    <div>~/.clade/agents/${nameSlug}/HEARTBEAT.md</div>
+                  </div>
+                </div>
+
+                ${error && html`
+                  <div class="p-3 rounded-lg text-sm" style="background:rgba(248,81,73,0.1);border:1px solid rgba(248,81,73,0.3);color:#f85149">${error}</div>
+                `}
+
+                <button
+                  class="btn btn-primary w-full justify-center"
+                  style="padding:14px;font-size:15px;border-radius:10px"
+                  onClick=${create}
+                  disabled=${creating || !nameSlug}
+                >
+                  ${creating ? html`<${Spinner} size=${14} /> Creating...` : 'Create Agent'}
+                </button>
+              </div>
+            `}
+          </div>
+        </div>
+      `;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     //  PAGE 1: Dashboard
     // ═══════════════════════════════════════════════════════════════════
 
-    function DashboardPage({ health, agents, sessions, cronJobs }) {
+    function DashboardPage({ health, agents, sessions, cronJobs, onNavigateToAgent }) {
       const activeSessions = sessions.filter(s => s.status === 'active').length;
 
       const stats = [
@@ -787,15 +1199,24 @@
                 : html`
                   <div class="space-y-2">
                     ${agents.map(a => html`
-                      <div key=${a.id} class="flex items-center justify-between py-2 px-3 rounded" style="background:#161b22">
+                      <div key=${a.id}
+                        class="flex items-center justify-between py-2 px-3 rounded cursor-pointer transition-colors"
+                        style="background:#161b22"
+                        onClick=${() => onNavigateToAgent && onNavigateToAgent(a.id)}
+                        onMouseEnter=${(e) => e.currentTarget.style.background = '#1c2433'}
+                        onMouseLeave=${(e) => e.currentTarget.style.background = '#161b22'}
+                      >
                         <div class="flex items-center gap-3 min-w-0">
-                          <span>\u{1F916}</span>
+                          <span>${a.emoji || '\u{1F916}'}</span>
                           <div class="min-w-0">
                             <div class="text-sm font-medium truncate" style="color:#e6edf3">${a.name}</div>
                             <div class="text-xs truncate" style="color:#8b949e">${a.description || a.id}</div>
                           </div>
                         </div>
-                        <span class="badge badge-blue flex-shrink-0">${a.toolPreset}</span>
+                        <div class="flex items-center gap-2 flex-shrink-0">
+                          <span class="badge badge-blue">${a.toolPreset}</span>
+                          <span style="color:#484f58;font-size:14px">\u{203A}</span>
+                        </div>
                       </div>
                     `)}
                   </div>
@@ -811,11 +1232,18 @@
     //  PAGE 2: Agents
     // ═══════════════════════════════════════════════════════════════════
 
-    function AgentsPage({ agents, onRefresh, onNavigate }) {
-      const [selectedId, setSelectedId] = useState(null);
+    function AgentsPage({ agents, onRefresh, onNavigate, initialSelectedId, onAgentDeleted }) {
+      const [selectedId, setSelectedId] = useState(initialSelectedId || null);
       const [showCreate, setShowCreate] = useState(false);
 
-      // Auto-select first agent
+      // Use initialSelectedId when it changes (e.g. navigating from dashboard)
+      useEffect(() => {
+        if (initialSelectedId && agents.find(a => a.id === initialSelectedId)) {
+          setSelectedId(initialSelectedId);
+        }
+      }, [initialSelectedId]);
+
+      // Auto-select first agent if none selected
       useEffect(() => {
         if (agents.length > 0 && (!selectedId || !agents.find(a => a.id === selectedId))) {
           setSelectedId(agents[0].id);
@@ -864,7 +1292,7 @@
           <!-- Agent detail panel -->
           <div class="flex-1 overflow-y-auto">
             ${selectedAgent
-              ? html`<${AgentDetail} agent=${selectedAgent} onRefresh=${onRefresh} />`
+              ? html`<${AgentDetail} agent=${selectedAgent} onRefresh=${onRefresh} onDeleted=${onAgentDeleted} />`
               : html`<${EmptyState} icon="\u{1F916}" title="Select an agent" subtitle="Choose from the list to view details" />`
             }
           </div>
@@ -874,8 +1302,10 @@
 
     // ── Agent detail with tabs ───────────────────────────────────────
 
-    function AgentDetail({ agent, onRefresh }) {
+    function AgentDetail({ agent, onRefresh, onDeleted }) {
       const [tab, setTab] = useState('soul');
+      const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+      const [deleting, setDeleting] = useState(false);
       const tabs = [
         { id: 'soul',      label: 'Soul' },
         { id: 'identity',  label: 'Identity' },
@@ -884,15 +1314,57 @@
         { id: 'heartbeat', label: 'Heartbeat' },
       ];
 
+      const handleDelete = async () => {
+        setDeleting(true);
+        try {
+          await api('/agents/' + agent.id, { method: 'DELETE' });
+          showToast('Agent "' + agent.id + '" deleted', 'success');
+          setShowDeleteConfirm(false);
+          onDeleted && onDeleted();
+        } catch (e) {
+          showToast('Delete failed: ' + e.message, 'error');
+        }
+        setDeleting(false);
+      };
+
       return html`
         <div class="p-5">
-          <div class="flex items-center gap-3 mb-4">
-            <div class="flex items-center justify-center rounded-full" style="width:40px;height:40px;background:#282e36;font-size:20px">\u{1F916}</div>
-            <div>
-              <h2 class="text-lg font-semibold" style="color:#e6edf3">${agent.name}</h2>
-              <div class="text-xs" style="color:#8b949e">${agent.id} \u{00B7} ${agent.model || 'sonnet'} \u{00B7} ${agent.toolPreset}</div>
+          <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-3">
+              <div class="flex items-center justify-center rounded-full" style="width:40px;height:40px;background:#282e36;font-size:20px">${agent.emoji || '\u{1F916}'}</div>
+              <div>
+                <h2 class="text-lg font-semibold" style="color:#e6edf3">${agent.name}</h2>
+                <div class="text-xs" style="color:#8b949e">${agent.id} \u{00B7} ${agent.model || 'sonnet'} \u{00B7} ${agent.toolPreset}</div>
+              </div>
             </div>
+            <button
+              class="text-xs px-3 py-1.5 rounded transition-colors"
+              style="color:#f85149;border:1px solid rgba(248,81,73,0.3);background:transparent;cursor:pointer"
+              onMouseEnter=${(e) => { e.currentTarget.style.background = 'rgba(248,81,73,0.15)'; }}
+              onMouseLeave=${(e) => { e.currentTarget.style.background = 'transparent'; }}
+              onClick=${() => setShowDeleteConfirm(true)}
+            >Delete Agent</button>
           </div>
+
+          ${showDeleteConfirm && html`
+            <div class="mb-4 p-4 rounded-lg" style="background:rgba(248,81,73,0.1);border:1px solid rgba(248,81,73,0.3)">
+              <div class="text-sm font-medium mb-2" style="color:#f85149">Delete "${agent.name}"?</div>
+              <div class="text-xs mb-3" style="color:#8b949e">This will remove the agent from config. Agent files in ~/.clade/agents/${agent.id}/ will remain on disk.</div>
+              <div class="flex items-center gap-2">
+                <button
+                  class="text-xs px-3 py-1.5 rounded font-medium"
+                  style="background:#f85149;color:#fff;border:none;cursor:pointer"
+                  onClick=${handleDelete}
+                  disabled=${deleting}
+                >${deleting ? 'Deleting...' : 'Yes, delete'}</button>
+                <button
+                  class="text-xs px-3 py-1.5 rounded"
+                  style="background:#282e36;color:#8b949e;border:1px solid #30363d;cursor:pointer"
+                  onClick=${() => setShowDeleteConfirm(false)}
+                >Cancel</button>
+              </div>
+            </div>
+          `}
 
           <${TabBar} tabs=${tabs} active=${tab} onChange=${setTab} />
 
@@ -1892,6 +2364,7 @@
     function App() {
       // ── State ────────────────────────────────────────────────────
       const [page, setPage]         = useState('dashboard');
+      const [selectedAgentId, setSelectedAgentId] = useState(null);
       const [connected, setConn]    = useState(false);
       const [health, setHealth]     = useState(null);
       const [agents, setAgents]     = useState([]);
@@ -1967,6 +2440,12 @@
         return () => clearInterval(t);
       }, [fetchHealth]);
 
+      // Navigate to a specific agent's config page
+      const navigateToAgent = useCallback((agentId) => {
+        setSelectedAgentId(agentId);
+        setPage('agents');
+      }, []);
+
       // ── Page renderer ────────────────────────────────────────────
       const renderPage = () => {
         // Show welcome / onboarding when no agents exist
@@ -1976,9 +2455,9 @@
 
         switch (page) {
           case 'dashboard':
-            return html`<${DashboardPage} health=${health} agents=${agents} sessions=${sessions} cronJobs=${cronJobs} />`;
+            return html`<${DashboardPage} health=${health} agents=${agents} sessions=${sessions} cronJobs=${cronJobs} onNavigateToAgent=${navigateToAgent} />`;
           case 'agents':
-            return html`<${AgentsPage} agents=${agents} onRefresh=${fetchAgents} onNavigate=${setPage} />`;
+            return html`<${AgentsPage} agents=${agents} onRefresh=${fetchAgents} onNavigate=${setPage} initialSelectedId=${selectedAgentId} onAgentDeleted=${() => { setSelectedAgentId(null); fetchAll(); }} />`;
           case 'sessions':
             return html`<${SessionsPage} sessions=${sessions} onRefresh=${fetchSessions} />`;
           case 'skills':
@@ -1997,7 +2476,7 @@
       // ── Render ───────────────────────────────────────────────────
       return html`
         <div class="flex h-screen" style="background:#0f1117">
-          <${Sidebar} page=${page} setPage=${setPage} agents=${agents} />
+          <${Sidebar} page=${page} setPage=${setPage} agents=${agents} onNavigateToAgent=${navigateToAgent} />
           <div class="flex flex-col flex-1 min-w-0">
             <${TopBar} connected=${connected} health=${health} agents=${agents} />
             <main class="flex-1 overflow-y-auto" style="background:#0f1117">

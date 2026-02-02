@@ -188,6 +188,17 @@ async function startPlaceholderServer(
   const { default: Fastify } = await import('fastify');
   const fastify = Fastify({ logger: false });
 
+  // ── WebSocket support for admin dashboard ─────────────────────
+  const wsMod = await import('@fastify/websocket').catch(() => null);
+  const wsClients = new Set<import('ws').WebSocket>();
+  if (wsMod) {
+    await fastify.register(wsMod.default);
+    fastify.get('/ws/admin', { websocket: true }, (socket) => {
+      wsClients.add(socket);
+      socket.on('close', () => wsClients.delete(socket));
+    });
+  }
+
   // ── Health check ──────────────────────────────────────────────
   fastify.get('/health', async () => ({
     status: 'ok',
@@ -195,15 +206,9 @@ async function startPlaceholderServer(
     uptime: process.uptime(),
   }));
 
-  // ── Config API (sanitized) ────────────────────────────────────
+  // ── Config API ───────────────────────────────────────────────
   fastify.get('/api/config', async () => {
-    const agents = config.agents ?? {};
-    return {
-      agents: Object.keys(agents as Record<string, unknown>),
-      channels: Object.keys(
-        (config.channels ?? {}) as Record<string, unknown>,
-      ),
-    };
+    return { config };
   });
 
   // ── Stub API endpoints so the admin UI doesn't get errors ─────
@@ -218,6 +223,162 @@ async function startPlaceholderServer(
         toolPreset: a.toolPreset ?? 'full',
       })),
     };
+  });
+
+  // ── Get specific agent ────────────────────────────────────
+  fastify.get<{ Params: { id: string } }>('/api/agents/:id', async (req, reply) => {
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const { id } = req.params;
+    const a = agents[id];
+    if (!a) {
+      reply.status(404);
+      return { error: `Agent "${id}" not found` };
+    }
+    return { agent: { id, ...a } };
+  });
+
+  // ── Get agent SOUL.md ───────────────────────────────────────
+  fastify.get<{ Params: { id: string } }>('/api/agents/:id/soul', async (req, reply) => {
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const { id } = req.params;
+    if (!agents[id]) {
+      reply.status(404);
+      return { error: `Agent "${id}" not found` };
+    }
+    const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+    const soulPath = join(cladeHome, 'agents', id, 'SOUL.md');
+    try {
+      const content = readFileSync(soulPath, 'utf-8');
+      return { agentId: id, content };
+    } catch {
+      return { agentId: id, content: '' };
+    }
+  });
+
+  // ── Update agent SOUL.md ────────────────────────────────────
+  fastify.put<{ Params: { id: string } }>('/api/agents/:id/soul', async (req, reply) => {
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const { id } = req.params;
+    if (!agents[id]) {
+      reply.status(404);
+      return { error: `Agent "${id}" not found` };
+    }
+    const body = req.body as Record<string, unknown>;
+    const content = body.content;
+    if (typeof content !== 'string') {
+      reply.status(400);
+      return { error: 'content must be a string' };
+    }
+    const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+    const soulPath = join(cladeHome, 'agents', id, 'SOUL.md');
+    writeFileSync(soulPath, content, 'utf-8');
+    return { success: true };
+  });
+
+  // ── Get agent HEARTBEAT.md ──────────────────────────────────
+  fastify.get<{ Params: { id: string } }>('/api/agents/:id/heartbeat', async (req, reply) => {
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const { id } = req.params;
+    if (!agents[id]) {
+      reply.status(404);
+      return { error: `Agent "${id}" not found` };
+    }
+    const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+    const hbPath = join(cladeHome, 'agents', id, 'HEARTBEAT.md');
+    try {
+      const content = readFileSync(hbPath, 'utf-8');
+      return { agentId: id, content };
+    } catch {
+      return { agentId: id, content: '' };
+    }
+  });
+
+  // ── Update agent HEARTBEAT.md ───────────────────────────────
+  fastify.put<{ Params: { id: string } }>('/api/agents/:id/heartbeat', async (req, reply) => {
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const { id } = req.params;
+    if (!agents[id]) {
+      reply.status(404);
+      return { error: `Agent "${id}" not found` };
+    }
+    const body = req.body as Record<string, unknown>;
+    const content = body.content;
+    if (typeof content !== 'string') {
+      reply.status(400);
+      return { error: 'content must be a string' };
+    }
+    const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+    const hbPath = join(cladeHome, 'agents', id, 'HEARTBEAT.md');
+    writeFileSync(hbPath, content, 'utf-8');
+    return { success: true };
+  });
+
+  // ── Get agent memory ────────────────────────────────────────
+  fastify.get<{ Params: { id: string } }>('/api/agents/:id/memory', async (req, reply) => {
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const { id } = req.params;
+    if (!agents[id]) {
+      reply.status(404);
+      return { error: `Agent "${id}" not found` };
+    }
+    const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+    const memPath = join(cladeHome, 'agents', id, 'MEMORY.md');
+    try {
+      const content = readFileSync(memPath, 'utf-8');
+      return { agentId: id, content };
+    } catch {
+      return { agentId: id, content: '' };
+    }
+  });
+
+  // ── Update agent config (PUT) ───────────────────────────────
+  fastify.put<{ Params: { id: string } }>('/api/agents/:id', async (req, reply) => {
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const { id } = req.params;
+    if (!agents[id]) {
+      reply.status(404);
+      return { error: `Agent "${id}" not found` };
+    }
+    const body = req.body as Record<string, unknown>;
+    agents[id] = { ...agents[id], ...body };
+    (config as Record<string, unknown>).agents = agents;
+    const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+    const configPath = join(cladeHome, 'config.json');
+    writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+    return { agent: { id, ...agents[id] } };
+  });
+
+  // ── Delete agent ────────────────────────────────────────────
+  fastify.delete<{ Params: { id: string } }>('/api/agents/:id', async (req, reply) => {
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const { id } = req.params;
+    if (!agents[id]) {
+      reply.status(404);
+      return { error: `Agent "${id}" not found` };
+    }
+    delete agents[id];
+    (config as Record<string, unknown>).agents = agents;
+    const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+    const configPath = join(cladeHome, 'config.json');
+    writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+    return { success: true };
+  });
+
+  // ── Get full config ─────────────────────────────────────────
+  fastify.get('/api/config/full', async () => config);
+
+  // ── Update full config ──────────────────────────────────────
+  fastify.put('/api/config', async (req, reply) => {
+    const body = req.body as Record<string, unknown>;
+    if (!body || typeof body !== 'object') {
+      reply.status(400);
+      return { error: 'Invalid config' };
+    }
+    Object.assign(config, body);
+    const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+    const configPath = join(cladeHome, 'config.json');
+    writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+    return { success: true };
   });
 
   fastify.get('/api/sessions', async () => ({ sessions: [] }));
@@ -240,13 +401,13 @@ async function startPlaceholderServer(
 
   // ── Agent creation API ─────────────────────────────────────
   fastify.post('/api/agents', async (req, reply) => {
-    const body = req.body as Record<string, string> | null;
+    const body = req.body as Record<string, unknown> | null;
     if (!body || !body.name) {
       reply.status(400);
       return { error: 'Agent name is required' };
     }
 
-    const agentName = body.name.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+    const agentName = String(body.name).toLowerCase().replace(/[^a-z0-9_-]/g, '-');
     const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
 
     if (agents[agentName]) {
@@ -254,29 +415,54 @@ async function startPlaceholderServer(
       return { error: `Agent "${agentName}" already exists` };
     }
 
-    // Build agent config from template (or defaults)
-    const templateId = body.template || 'coding';
-    const template = getTemplate(templateId);
+    // Build agent config from template or custom fields
+    const templateId = String(body.template || 'coding');
+    const isCustom = templateId === 'custom';
+    const template = isCustom ? undefined : getTemplate(templateId);
     let agentConfig: Record<string, unknown>;
+
+    // Identity defaults per template type
+    const IDENTITY_DEFAULTS: Record<string, { creature: string; vibe: string; emoji: string }> = {
+      coding:   { creature: 'Code architect', vibe: 'precise, focused, pragmatic', emoji: '\u{1F4BB}' },
+      research: { creature: 'Knowledge seeker', vibe: 'curious, thorough, analytical', emoji: '\u{1F50D}' },
+      ops:      { creature: 'System sentinel', vibe: 'vigilant, calm, reliable', emoji: '\u{1F4E1}' },
+      pm:       { creature: 'Project navigator', vibe: 'organized, clear, supportive', emoji: '\u{1F4CB}' },
+      custom:   { creature: 'AI assistant', vibe: 'helpful, adaptive, thoughtful', emoji: '\u{2728}' },
+    };
+    const identityDefaults = IDENTITY_DEFAULTS[templateId] || IDENTITY_DEFAULTS['custom'];
 
     if (template) {
       const built = configFromTemplate(template, {
-        name: body.description || template.name,
-        model: body.model,
+        name: String(body.description || template.name),
+        model: body.model ? String(body.model) : undefined,
       });
-      agentConfig = { ...built, name: body.description || template.name };
-    } else {
       agentConfig = {
-        name: body.description || agentName,
-        description: '',
-        model: body.model || 'sonnet',
-        toolPreset: 'full',
+        ...built,
+        name: body.description || template.name,
+        creature: identityDefaults.creature,
+        vibe: identityDefaults.vibe,
+        emoji: identityDefaults.emoji,
+        avatar: '',
+      };
+    } else {
+      // Custom agent — use fields from request body
+      const hbEnabled = body.heartbeatEnabled !== undefined ? Boolean(body.heartbeatEnabled) : true;
+      const hbInterval = body.heartbeatInterval ? String(body.heartbeatInterval) : '30m';
+      agentConfig = {
+        name: String(body.description || agentName),
+        description: String(body.agentDescription || ''),
+        model: String(body.model || 'sonnet'),
+        toolPreset: String(body.toolPreset || 'full'),
         customTools: [],
         skills: [],
-        heartbeat: { enabled: true, interval: '30m', mode: 'check', suppressOk: true },
+        heartbeat: { enabled: hbEnabled, interval: hbInterval, mode: 'check', suppressOk: true },
         reflection: { enabled: true, interval: 10 },
         maxTurns: 25,
         notifications: { minSeverity: 'info', batchDigest: false, digestIntervalMinutes: 30 },
+        creature: identityDefaults.creature,
+        vibe: identityDefaults.vibe,
+        emoji: identityDefaults.emoji,
+        avatar: '',
       };
     }
 
@@ -287,11 +473,12 @@ async function startPlaceholderServer(
     mkdirSync(join(agentDir, 'soul-history'), { recursive: true });
 
     // Write SOUL.md, MEMORY.md, HEARTBEAT.md
-    const soulContent = template?.soulSeed ?? DEFAULT_SOUL;
-    const heartbeatContent = template?.heartbeatSeed ?? DEFAULT_HEARTBEAT;
-    writeFileSync(join(agentDir, 'SOUL.md'), soulContent, 'utf-8');
+    // Custom agents can provide their own content; templates use seeds; fallback to defaults
+    const soulOut = (isCustom && body.soulContent) ? String(body.soulContent) : (template?.soulSeed ?? DEFAULT_SOUL);
+    const hbOut = (isCustom && body.heartbeatContent) ? String(body.heartbeatContent) : (template?.heartbeatSeed ?? DEFAULT_HEARTBEAT);
+    writeFileSync(join(agentDir, 'SOUL.md'), soulOut, 'utf-8');
     writeFileSync(join(agentDir, 'MEMORY.md'), '# Memory\n\n_Curated knowledge and observations._\n', 'utf-8');
-    writeFileSync(join(agentDir, 'HEARTBEAT.md'), heartbeatContent, 'utf-8');
+    writeFileSync(join(agentDir, 'HEARTBEAT.md'), hbOut, 'utf-8');
 
     // Update config.json
     agents[agentName] = agentConfig;
@@ -299,7 +486,7 @@ async function startPlaceholderServer(
     const configPath = join(cladeHome, 'config.json');
     writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
 
-    console.log(`  [ok] Created agent "${agentName}" (template: ${templateId})`);
+    console.log(`  [ok] Created agent "${agentName}" (${isCustom ? 'custom' : 'template: ' + templateId})`);
 
     return {
       agent: {
