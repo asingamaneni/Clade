@@ -86,7 +86,7 @@ export async function createGateway(deps: GatewayDeps) {
       const html = readFileSync(resolvedAdminPath, 'utf-8');
       reply.type('text/html').send(html);
     } else {
-      reply.type('text/html').send(`<!DOCTYPE html><html><head><title>TeamAgents Admin</title></head><body style="background:#0f1117;color:#e6edf3;font-family:system-ui;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0"><div style="text-align:center"><h1>TeamAgents Admin</h1><p style="color:#8b949e">Dashboard UI is loading. Refresh in a moment.</p><p style="color:#8b949e;font-size:0.875rem">API available at <a href="/health" style="color:#58a6ff">/health</a></p></div></body></html>`);
+      reply.type('text/html').send(`<!DOCTYPE html><html><head><title>Clade Admin</title></head><body style="background:#0f1117;color:#e6edf3;font-family:system-ui;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0"><div style="text-align:center"><h1>Clade Admin</h1><p style="color:#8b949e">Dashboard UI is loading. Refresh in a moment.</p><p style="color:#8b949e;font-size:0.875rem">API available at <a href="/health" style="color:#58a6ff">/health</a></p></div></body></html>`);
     }
   });
 

@@ -20,7 +20,7 @@ import { searchNpmRegistry } from './registry.js';
 // ---------------------------------------------------------------------------
 
 const baseDir =
-  process.env['TEAMAGENTS_HOME'] ?? join(homedir(), '.teamagents');
+  process.env['CLADE_HOME'] ?? join(homedir(), '.clade');
 
 const skillsDir = join(baseDir, 'skills');
 const activeDir = join(skillsDir, 'active');
@@ -127,7 +127,7 @@ function listSkillsInDir(
 // ---------------------------------------------------------------------------
 
 const server = new McpServer({
-  name: 'teamagents-skills',
+  name: 'clade-skills',
   version: '0.1.0',
 });
 

@@ -24,7 +24,7 @@ export interface Agent {
   /** Absolute path to this agent's HEARTBEAT.md file. */
   heartbeatPath: string;
 
-  /** Absolute path to this agent's root directory (~/.teamagents/agents/<id>). */
+  /** Absolute path to this agent's root directory (~/.clade/agents/<id>). */
   baseDir: string;
 }
 

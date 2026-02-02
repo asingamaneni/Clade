@@ -77,7 +77,15 @@ export const AgentConfigSchema = z.object({
   skills: z.array(z.string()).default([]),
 
   /** Heartbeat / proactive monitoring configuration. */
-  heartbeat: HeartbeatConfigSchema.default({}),
+  heartbeat: HeartbeatConfigSchema.default({ enabled: true }),
+
+  /** Reflection cycle configuration — how the agent self-improves. */
+  reflection: z.object({
+    /** Whether reflection is enabled. */
+    enabled: z.boolean().default(true),
+    /** Number of sessions between reflections. */
+    interval: z.number().int().positive().default(10),
+  }).default({}),
 
   /** Maximum autonomous turns per invocation. */
   maxTurns: z.number().int().positive().default(25),
@@ -166,8 +174,8 @@ export const RoutingRuleSchema = z.object({
 export type RoutingRule = z.infer<typeof RoutingRuleSchema>;
 
 export const RoutingConfigSchema = z.object({
-  /** Agent to use when no routing rule matches. */
-  defaultAgent: z.string().default('main'),
+  /** Agent to use when no routing rule matches. Set during agent creation. */
+  defaultAgent: z.string().default(''),
 
   /** Ordered routing rules. First match wins. */
   rules: z.array(RoutingRuleSchema).default([]),
@@ -191,20 +199,13 @@ export type SkillsConfig = z.infer<typeof SkillsConfigSchema>;
 // ---------------------------------------------------------------------------
 
 export const ConfigSchema = z.object({
+  /** Schema version for config migration support. */
+  version: z.number().int().default(2),
+
+  /** Agents are user-created. No pre-defined agents — starts empty. */
   agents: z
     .record(z.string(), AgentConfigSchema)
-    .default({
-      main: {
-        name: 'Main Assistant',
-        description: 'General-purpose personal assistant',
-        model: 'sonnet',
-        toolPreset: 'full',
-        customTools: [],
-        skills: ['memory', 'sessions'],
-        heartbeat: { enabled: false },
-        maxTurns: 25,
-      },
-    }),
+    .default({}),
 
   channels: ChannelsConfigSchema.default({}),
 
@@ -213,6 +214,6 @@ export const ConfigSchema = z.object({
   routing: RoutingConfigSchema.default({}),
 
   skills: SkillsConfigSchema.default({}),
-});
+}).passthrough();
 
 export type Config = z.infer<typeof ConfigSchema>;

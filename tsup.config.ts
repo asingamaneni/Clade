@@ -3,7 +3,7 @@ import { defineConfig } from 'tsup';
 export default defineConfig({
   entry: {
     index: 'src/index.ts',
-    'bin/teamagents': 'bin/teamagents.ts',
+    'bin/clade': 'bin/clade.ts',
     'mcp/memory-server': 'src/mcp/memory/server.ts',
     'mcp/sessions-server': 'src/mcp/sessions/server.ts',
     'mcp/messaging-server': 'src/mcp/messaging/server.ts',

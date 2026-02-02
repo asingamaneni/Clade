@@ -8,13 +8,13 @@ import { registerWorkCommand } from './commands/work.js';
 import { registerDoctorCommand } from './commands/doctor.js';
 
 /**
- * Create and configure the TeamAgents CLI program.
+ * Create and configure the Clade CLI program.
  */
 export function createCli(): Command {
   const program = new Command();
 
   program
-    .name('teamagents')
+    .name('clade')
     .description(
       'Multi-agent orchestration platform built on the Claude CLI',
     )

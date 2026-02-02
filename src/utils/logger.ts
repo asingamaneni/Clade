@@ -38,7 +38,7 @@ const MODULE_COLOR = '\x1b[35m'; // magenta
 // Global minimum level (can be changed at runtime)
 // ---------------------------------------------------------------------------
 
-let globalMinLevel: LogLevel = (process.env['TEAMAGENTS_LOG_LEVEL'] as LogLevel | undefined) ?? 'info';
+let globalMinLevel: LogLevel = (process.env['CLADE_LOG_LEVEL'] as LogLevel | undefined) ?? 'info';
 
 /**
  * Set the minimum log level globally. Messages below this level are silently

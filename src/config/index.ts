@@ -10,11 +10,11 @@ import { ConfigError } from '../utils/errors.js';
 // ---------------------------------------------------------------------------
 
 /**
- * Root directory for all TeamAgents data.
- * Respects the TEAMAGENTS_HOME env var; defaults to ~/.teamagents.
+ * Root directory for all Clade data.
+ * Respects the CLADE_HOME env var; defaults to ~/.clade.
  */
 export function getConfigDir(): string {
-  return process.env['TEAMAGENTS_HOME'] || join(homedir(), '.teamagents');
+  return process.env['CLADE_HOME'] || join(homedir(), '.clade');
 }
 
 /**
@@ -35,7 +35,7 @@ export function getConfigPath(): string {
  * Path to the SQLite database.
  */
 export function getDatabasePath(): string {
-  return join(getConfigDir(), 'teamagents.db');
+  return join(getConfigDir(), 'clade.db');
 }
 
 /**
@@ -125,7 +125,7 @@ export function saveConfig(config: Config): void {
 }
 
 /**
- * Ensure the full directory tree for TeamAgents data exists.
+ * Ensure the full directory tree for Clade data exists.
  * Called once at startup.
  */
 export function ensureDirectories(): void {

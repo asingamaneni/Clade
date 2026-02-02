@@ -9,7 +9,7 @@ import { writeFileSync, mkdirSync, rmSync, existsSync, readFileSync } from 'node
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-const TEST_DIR = join(tmpdir(), `teamagents-test-ralph-${Date.now()}`);
+const TEST_DIR = join(tmpdir(), `clade-test-ralph-${Date.now()}`);
 
 describe('RalphEngine', () => {
   let engine: RalphEngine;

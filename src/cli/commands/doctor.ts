@@ -4,9 +4,9 @@ import { homedir } from 'node:os';
 import { execSync } from 'node:child_process';
 import type { Command } from 'commander';
 
-const TEAMAGENTS_HOME = join(homedir(), '.teamagents');
-const CONFIG_PATH = join(TEAMAGENTS_HOME, 'config.json');
-const DB_PATH = join(TEAMAGENTS_HOME, 'data', 'teamagents.db');
+const CLADE_HOME = join(homedir(), '.clade');
+const CONFIG_PATH = join(CLADE_HOME, 'config.json');
+const DB_PATH = join(CLADE_HOME, 'data', 'clade.db');
 
 interface CheckResult {
   name: string;
@@ -57,7 +57,7 @@ async function runDoctor(opts: {
   }
 
   // Print results
-  console.log(`\n  TeamAgents Doctor\n`);
+  console.log(`\n  Clade Doctor\n`);
 
   let hasFailure = false;
   let hasWarning = false;
@@ -81,7 +81,7 @@ async function runDoctor(opts: {
 
   if (hasFailure) {
     console.log(
-      '  Some checks failed. Fix the issues above and run "teamagents doctor" again.',
+      '  Some checks failed. Fix the issues above and run "clade doctor" again.',
     );
   } else if (hasWarning) {
     console.log(
@@ -156,7 +156,7 @@ function checkConfig(): CheckResult {
       name: 'Config',
       status: 'fail',
       message: 'config.json not found',
-      detail: 'Run "teamagents setup" to create the configuration.',
+      detail: 'Run "clade setup" to create the configuration.',
     };
   }
 
@@ -170,7 +170,7 @@ function checkConfig(): CheckResult {
         name: 'Config',
         status: 'warn',
         message: 'Config loaded but no agents defined',
-        detail: 'Run "teamagents agent add <name>" to create an agent.',
+        detail: 'Run "clade agent add <name>" to create an agent.',
       };
     }
 
@@ -195,10 +195,10 @@ function checkConfig(): CheckResult {
 
 function checkDirectoryStructure(): CheckResult {
   const requiredDirs = [
-    TEAMAGENTS_HOME,
-    join(TEAMAGENTS_HOME, 'agents'),
-    join(TEAMAGENTS_HOME, 'skills'),
-    join(TEAMAGENTS_HOME, 'data'),
+    CLADE_HOME,
+    join(CLADE_HOME, 'agents'),
+    join(CLADE_HOME, 'skills'),
+    join(CLADE_HOME, 'data'),
   ];
 
   const missing = requiredDirs.filter((d) => !existsSync(d));
@@ -220,13 +220,13 @@ function checkDirectoryStructure(): CheckResult {
 }
 
 function checkAgents(): CheckResult {
-  const agentsDir = join(TEAMAGENTS_HOME, 'agents');
+  const agentsDir = join(CLADE_HOME, 'agents');
   if (!existsSync(agentsDir)) {
     return {
       name: 'Agents',
       status: 'warn',
       message: 'No agents directory',
-      detail: 'Run "teamagents setup" to initialize.',
+      detail: 'Run "clade setup" to initialize.',
     };
   }
 
@@ -240,7 +240,7 @@ function checkAgents(): CheckResult {
         name: 'Agents',
         status: 'warn',
         message: 'No agents found',
-        detail: 'Run "teamagents agent add <name>" to create an agent.',
+        detail: 'Run "clade agent add <name>" to create an agent.',
       };
     }
 
@@ -287,7 +287,7 @@ function checkSqlite(): CheckResult {
   }
 
   // Check if data directory is writable
-  const dataDir = join(TEAMAGENTS_HOME, 'data');
+  const dataDir = join(CLADE_HOME, 'data');
   if (!existsSync(dataDir)) {
     return {
       name: 'SQLite',
@@ -404,8 +404,8 @@ function checkChannels(): CheckResult {
 }
 
 function checkSkills(): CheckResult {
-  const activeDir = join(TEAMAGENTS_HOME, 'skills', 'active');
-  const pendingDir = join(TEAMAGENTS_HOME, 'skills', 'pending');
+  const activeDir = join(CLADE_HOME, 'skills', 'active');
+  const pendingDir = join(CLADE_HOME, 'skills', 'pending');
 
   let activeCount = 0;
   let pendingCount = 0;
@@ -435,7 +435,7 @@ function checkSkills(): CheckResult {
       name: 'Skills',
       status: 'warn',
       message: `${activeCount} active, ${pendingCount} pending approval`,
-      detail: `Run "teamagents skill list --pending" to see pending skills.`,
+      detail: `Run "clade skill list --pending" to see pending skills.`,
     };
   }
 

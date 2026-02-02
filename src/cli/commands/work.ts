@@ -5,7 +5,7 @@ import { RalphEngine } from '../../engine/ralph.js';
 import type { RalphConfig, RalphProgressEvent, RalphResult } from '../../engine/ralph.js';
 import type { Command } from 'commander';
 
-const TEAMAGENTS_HOME = join(homedir(), '.teamagents');
+const CLADE_HOME = join(homedir(), '.clade');
 
 interface WorkOptions {
   agent?: string;
@@ -72,14 +72,14 @@ async function runWork(opts: WorkOptions): Promise<void> {
 
   // Load agent SOUL.md if available
   let systemPrompt: string | undefined;
-  const soulPath = join(TEAMAGENTS_HOME, 'agents', agentId, 'SOUL.md');
+  const soulPath = join(CLADE_HOME, 'agents', agentId, 'SOUL.md');
   if (existsSync(soulPath)) {
     systemPrompt = readFileSync(soulPath, 'utf-8');
   }
 
   // Load agent model from config if available
   let agentModel: string | undefined;
-  const configPath = join(TEAMAGENTS_HOME, 'config.json');
+  const configPath = join(CLADE_HOME, 'config.json');
   if (existsSync(configPath)) {
     try {
       const raw = readFileSync(configPath, 'utf-8');

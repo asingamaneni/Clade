@@ -12,11 +12,11 @@ import { execSync } from 'node:child_process';
 import inquirer from 'inquirer';
 import type { Command } from 'commander';
 
-const TEAMAGENTS_HOME = join(homedir(), '.teamagents');
-const SKILLS_DIR = join(TEAMAGENTS_HOME, 'skills');
+const CLADE_HOME = join(homedir(), '.clade');
+const SKILLS_DIR = join(CLADE_HOME, 'skills');
 const ACTIVE_DIR = join(SKILLS_DIR, 'active');
 const PENDING_DIR = join(SKILLS_DIR, 'pending');
-const CONFIG_PATH = join(TEAMAGENTS_HOME, 'config.json');
+const CONFIG_PATH = join(CLADE_HOME, 'config.json');
 
 interface SkillConfig {
   name: string;
@@ -142,7 +142,7 @@ async function listSkills(opts: {
 
   if (skills.length === 0) {
     console.log(
-      'No skills installed. Run "teamagents skill add <package>" to add one.',
+      'No skills installed. Run "clade skill add <package>" to add one.',
     );
     return;
   }
@@ -249,7 +249,7 @@ async function addSkill(
       `\nSkill "${skillName}" installed and pending approval.`,
     );
     console.log(
-      `Run "teamagents skill approve ${skillName}" to activate it.\n`,
+      `Run "clade skill approve ${skillName}" to activate it.\n`,
     );
   }
 }
@@ -320,7 +320,7 @@ async function approveSkill(name: string): Promise<void> {
 
   if (!existsSync(pendingPath)) {
     throw new Error(
-      `Skill "${name}" not found in pending. Run "teamagents skill list --pending" to see pending skills.`,
+      `Skill "${name}" not found in pending. Run "clade skill list --pending" to see pending skills.`,
     );
   }
 
@@ -386,7 +386,7 @@ function loadConfig(): Record<string, unknown> {
 }
 
 function saveConfig(config: Record<string, unknown>): void {
-  mkdirSync(TEAMAGENTS_HOME, { recursive: true });
+  mkdirSync(CLADE_HOME, { recursive: true });
   writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
 }
 

@@ -1,20 +1,20 @@
 // ---------------------------------------------------------------------------
-// Custom error types for TeamAgents
+// Custom error types for Clade
 //
 // Each error carries a `code` string for programmatic matching and inherits
-// from the base `TeamAgentsError` so callers can catch broad or narrow.
+// from the base `CladeError` so callers can catch broad or narrow.
 // ---------------------------------------------------------------------------
 
 /**
- * Base error class for all TeamAgents errors.
+ * Base error class for all Clade errors.
  * Provides a machine-readable `code` alongside the human-readable `message`.
  */
-export class TeamAgentsError extends Error {
+export class CladeError extends Error {
   public readonly code: string;
 
   constructor(message: string, code: string) {
     super(message);
-    this.name = 'TeamAgentsError';
+    this.name = 'CladeError';
     this.code = code;
     // Restore the prototype chain (necessary when extending built-ins).
     Object.setPrototypeOf(this, new.target.prototype);
@@ -25,7 +25,7 @@ export class TeamAgentsError extends Error {
 // Configuration errors
 // ---------------------------------------------------------------------------
 
-export class ConfigError extends TeamAgentsError {
+export class ConfigError extends CladeError {
   constructor(message: string) {
     super(message, 'CONFIG_ERROR');
     this.name = 'ConfigError';
@@ -59,7 +59,7 @@ export class ConfigValidationError extends ConfigError {
 // Session errors
 // ---------------------------------------------------------------------------
 
-export class SessionError extends TeamAgentsError {
+export class SessionError extends CladeError {
   constructor(message: string) {
     super(message, 'SESSION_ERROR');
     this.name = 'SessionError';
@@ -90,7 +90,7 @@ export class SessionSpawnError extends SessionError {
 // Channel errors
 // ---------------------------------------------------------------------------
 
-export class ChannelError extends TeamAgentsError {
+export class ChannelError extends CladeError {
   public readonly channel: string;
 
   constructor(channel: string, message: string) {
@@ -118,7 +118,7 @@ export class ChannelSendError extends ChannelError {
 // Agent errors
 // ---------------------------------------------------------------------------
 
-export class AgentError extends TeamAgentsError {
+export class AgentError extends CladeError {
   public readonly agentId: string;
 
   constructor(agentId: string, message: string) {
@@ -146,7 +146,7 @@ export class AgentConfigError extends AgentError {
 // Store / database errors
 // ---------------------------------------------------------------------------
 
-export class StoreError extends TeamAgentsError {
+export class StoreError extends CladeError {
   constructor(message: string) {
     super(message, 'STORE_ERROR');
     this.name = 'StoreError';

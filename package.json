@@ -1,17 +1,17 @@
 {
-  "name": "teamagents",
+  "name": "clade",
   "version": "0.1.0",
   "description": "Multi-agent orchestration platform built natively on Claude Code CLI",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "teamagents": "dist/bin/teamagents.js"
+    "clade": "dist/bin/clade.js"
   },
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "start": "node dist/bin/teamagents.js start",
+    "start": "node dist/bin/clade.js start",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:unit": "vitest run --dir tests/unit",

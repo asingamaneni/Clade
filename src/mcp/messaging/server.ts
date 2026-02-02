@@ -7,7 +7,7 @@ import { createConnection } from 'node:net';
 // Environment
 // ---------------------------------------------------------------------------
 
-const socketPath = process.env['TEAMAGENTS_IPC_SOCKET'] ?? '';
+const socketPath = process.env['CLADE_IPC_SOCKET'] ?? '';
 
 // ---------------------------------------------------------------------------
 // IPC communication over Unix socket
@@ -20,7 +20,7 @@ interface IpcResponse {
 }
 
 /**
- * Send a JSON message to the main TeamAgents process via Unix socket
+ * Send a JSON message to the main Clade process via Unix socket
  * and wait for the JSON response.
  */
 async function sendIpc(message: object): Promise<IpcResponse> {
@@ -28,7 +28,7 @@ async function sendIpc(message: object): Promise<IpcResponse> {
     return {
       ok: false,
       error:
-        'TEAMAGENTS_IPC_SOCKET not set. Messaging requires the main TeamAgents process.',
+        'CLADE_IPC_SOCKET not set. Messaging requires the main Clade process.',
     };
   }
 
@@ -75,7 +75,7 @@ async function sendIpc(message: object): Promise<IpcResponse> {
 // ---------------------------------------------------------------------------
 
 const server = new McpServer({
-  name: 'teamagents-messaging',
+  name: 'clade-messaging',
   version: '0.1.0',
 });
 

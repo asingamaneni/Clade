@@ -12,17 +12,17 @@ import { mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-const TEST_HOME = join(tmpdir(), `teamagents-test-agents-${Date.now()}`);
+const TEST_HOME = join(tmpdir(), `clade-test-agents-${Date.now()}`);
 
 describe('AgentRegistry', () => {
   beforeEach(() => {
-    process.env['TEAMAGENTS_HOME'] = TEST_HOME;
+    process.env['CLADE_HOME'] = TEST_HOME;
     mkdirSync(TEST_HOME, { recursive: true });
     mkdirSync(join(TEST_HOME, 'agents'), { recursive: true });
   });
 
   afterEach(() => {
-    delete process.env['TEAMAGENTS_HOME'];
+    delete process.env['CLADE_HOME'];
     if (existsSync(TEST_HOME)) {
       rmSync(TEST_HOME, { recursive: true, force: true });
     }

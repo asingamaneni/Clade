@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TeamAgents Admin</title>
+  <title>Clade Admin</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -411,7 +411,7 @@
           <!-- Logo -->
           <div class="px-4 py-4 flex items-center gap-2.5" style="border-bottom:1px solid #30363d">
             <span class="text-lg">\u{1F52E}</span>
-            <span class="font-bold text-sm" style="color:#e6edf3;letter-spacing:-0.01em">TeamAgents</span>
+            <span class="font-bold text-sm" style="color:#e6edf3;letter-spacing:-0.01em">Clade</span>
           </div>
 
           <!-- Navigation -->
@@ -449,7 +449,7 @@
 
           <!-- Footer -->
           <div class="px-4 py-3 text-xs" style="border-top:1px solid #30363d;color:#484f58">
-            TeamAgents v0.1.0
+            Clade v0.1.0
           </div>
         </aside>
       `;
@@ -463,7 +463,7 @@
       const port = health?.port || location.port || '7890';
       return html`
         <header class="flex items-center justify-between px-6" style="height:48px;min-height:48px;background:#161b22;border-bottom:1px solid #30363d">
-          <h1 class="text-sm font-semibold" style="color:#e6edf3">TeamAgents Admin</h1>
+          <h1 class="text-sm font-semibold" style="color:#e6edf3">Clade Admin</h1>
           <div class="flex items-center gap-5 text-xs" style="color:#8b949e">
             <div class="flex items-center gap-2">
               <${StatusDot} connected=${connected} />
@@ -1634,7 +1634,7 @@
 
           <p class="text-xs mt-3" style="color:#484f58">
             Validated against the Zod schema on save. Changes take effect immediately.
-            File: ~/.teamagents/config.json
+            File: ~/.clade/config.json
           </p>
         </div>
       `;

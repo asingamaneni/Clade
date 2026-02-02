@@ -18,19 +18,20 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 // Use a temporary directory for all config tests
-const TEST_HOME = join(tmpdir(), `teamagents-test-config-${Date.now()}`);
+const TEST_HOME = join(tmpdir(), `clade-test-config-${Date.now()}`);
 
 describe('Config Schema', () => {
   it('should parse empty object with all defaults', () => {
     const config = ConfigSchema.parse({});
 
     expect(config.agents).toBeDefined();
-    expect(config.agents['main']).toBeDefined();
-    expect(config.agents['main']!.name).toBe('Main Assistant');
+    // No pre-defined agents — starts empty
+    expect(Object.keys(config.agents)).toHaveLength(0);
     expect(config.channels).toBeDefined();
     expect(config.gateway.port).toBe(7890);
     expect(config.gateway.host).toBe('127.0.0.1');
-    expect(config.routing.defaultAgent).toBe('main');
+    expect(config.routing.defaultAgent).toBe('');
+    expect(config.version).toBe(2);
   });
 
   it('should validate a fully specified config', () => {
@@ -125,7 +126,7 @@ describe('Config Schema', () => {
     };
 
     const config = ConfigSchema.parse(input);
-    expect(config.agents['test']!.heartbeat.enabled).toBe(false);
+    expect(config.agents['test']!.heartbeat.enabled).toBe(true);
     expect(config.agents['test']!.heartbeat.interval).toBe('30m');
     expect(config.agents['test']!.heartbeat.suppressOk).toBe(true);
     expect(config.agents['test']!.heartbeat.mode).toBe('check');
@@ -167,12 +168,12 @@ describe('Environment Variable Expansion', () => {
 
 describe('Config Load/Save Round-trip', () => {
   beforeEach(() => {
-    process.env['TEAMAGENTS_HOME'] = TEST_HOME;
+    process.env['CLADE_HOME'] = TEST_HOME;
     mkdirSync(TEST_HOME, { recursive: true });
   });
 
   afterEach(() => {
-    delete process.env['TEAMAGENTS_HOME'];
+    delete process.env['CLADE_HOME'];
     if (existsSync(TEST_HOME)) {
       rmSync(TEST_HOME, { recursive: true, force: true });
     }
@@ -180,7 +181,8 @@ describe('Config Load/Save Round-trip', () => {
 
   it('should return default config when no file exists', () => {
     const config = loadConfig();
-    expect(config.agents['main']).toBeDefined();
+    // No pre-defined agents — starts empty
+    expect(Object.keys(config.agents)).toHaveLength(0);
     expect(config.gateway.port).toBe(7890);
   });
 
@@ -190,8 +192,8 @@ describe('Config Load/Save Round-trip', () => {
     expect(existsSync(getConfigPath())).toBe(true);
 
     const reloaded = loadConfig();
-    expect(reloaded.agents['main']!.name).toBe(config.agents['main']!.name);
     expect(reloaded.gateway.port).toBe(config.gateway.port);
+    expect(Object.keys(reloaded.agents)).toEqual(Object.keys(config.agents));
   });
 
   it('should save custom config and reload it', () => {

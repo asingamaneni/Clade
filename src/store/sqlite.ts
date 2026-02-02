@@ -179,7 +179,7 @@ const FTS_TRIGGERS_SQL = `
 // ---------------------------------------------------------------------------
 
 /**
- * SQLite persistence layer for TeamAgents.
+ * SQLite persistence layer for Clade.
  *
  * Uses better-sqlite3 (synchronous API). All methods are blocking by design --
  * SQLite is fast enough that async overhead would hurt more than help.

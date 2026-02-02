@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import type { Command } from 'commander';
 
-const TEAMAGENTS_HOME = join(homedir(), '.teamagents');
+const CLADE_HOME = join(homedir(), '.clade');
 
 interface StartOptions {
   port?: string;
@@ -14,7 +14,7 @@ interface StartOptions {
 export function registerStartCommand(program: Command): void {
   program
     .command('start')
-    .description('Start the TeamAgents gateway server')
+    .description('Start the Clade gateway server')
     .option('-p, --port <port>', 'Override gateway port')
     .option('--host <host>', 'Override gateway host')
     .option('-v, --verbose', 'Enable verbose logging')
@@ -33,11 +33,11 @@ export function registerStartCommand(program: Command): void {
 
 async function runStart(opts: StartOptions): Promise<void> {
   // Load config
-  const configPath = join(TEAMAGENTS_HOME, 'config.json');
+  const configPath = join(CLADE_HOME, 'config.json');
   if (!existsSync(configPath)) {
     console.error(
-      'Error: TeamAgents is not configured.\n' +
-        'Run "teamagents setup" first.\n',
+      'Error: Clade is not configured.\n' +
+        'Run "clade setup" first.\n',
     );
     process.exit(1);
   }
@@ -64,7 +64,7 @@ async function runStart(opts: StartOptions): Promise<void> {
     console.log('Gateway config:', { port, host });
   }
 
-  console.log(`\n  TeamAgents Gateway\n`);
+  console.log(`\n  Clade Gateway\n`);
   console.log(`  Starting server on ${host}:${port}...\n`);
 
   // Graceful shutdown handler
@@ -140,9 +140,9 @@ async function startPlaceholderServer(
     reply.type('text/html');
     return `<!DOCTYPE html>
 <html>
-<head><title>TeamAgents</title></head>
+<head><title>Clade</title></head>
 <body style="font-family: system-ui; max-width: 600px; margin: 50px auto; padding: 0 20px;">
-  <h1>TeamAgents Gateway</h1>
+  <h1>Clade Gateway</h1>
   <p>Server is running. The admin dashboard will be available here once built.</p>
   <h3>Status</h3>
   <ul>

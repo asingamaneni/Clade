@@ -305,13 +305,13 @@ export class SessionManager {
         command: 'node',
         args: [scriptPath],
         env: {
-          TEAMAGENTS_AGENT_ID: agentId,
-          TEAMAGENTS_HOME: homeDir,
+          CLADE_AGENT_ID: agentId,
+          CLADE_HOME: homeDir,
         },
       };
     }
 
-    // Add agent-specific third-party skills from ~/.teamagents/skills/active/
+    // Add agent-specific third-party skills from ~/.clade/skills/active/
     if (agentCfg.skills && agentCfg.skills.length > 0) {
       const skillsDir = join(homeDir, 'skills', 'active');
       for (const skillName of agentCfg.skills) {
@@ -337,7 +337,7 @@ export class SessionManager {
     }
 
     // Write to a temp file
-    const tmpDir = join(tmpdir(), 'teamagents-mcp');
+    const tmpDir = join(tmpdir(), 'clade-mcp');
     mkdirSync(tmpDir, { recursive: true });
     const tmpPath = join(tmpDir, `${agentId}-${randomUUID()}.json`);
     writeFileSync(tmpPath, JSON.stringify(mcpConfig, null, 2), 'utf-8');

@@ -1,4 +1,4 @@
-# TeamAgents - Implementation Tasks
+# Clade - Implementation Tasks
 
 ## Phase 1: Core Engine + CLI
 
@@ -33,7 +33,7 @@
 - [x] Test: spawn mock, parse known stream-json output
 
 ### 1.5 Agent Registry
-- [x] Load agents from ~/.teamagents/agents/ (src/agents/registry.ts)
+- [x] Load agents from ~/.clade/agents/ (src/agents/registry.ts)
 - [x] Agent type definitions (src/agents/types.ts)
 - [x] Tool presets: potato, coding, messaging, full, custom (src/agents/presets.ts)
 - [x] SOUL.md loading
@@ -58,12 +58,12 @@
 
 ### 1.8 CLI Commands
 - [x] Commander.js setup (src/cli/index.ts)
-- [x] `teamagents setup` - interactive wizard (src/cli/commands/setup.ts)
-- [x] `teamagents start` - launch gateway (src/cli/commands/start.ts)
-- [x] `teamagents ask` - one-off question (src/cli/commands/ask.ts)
-- [x] `teamagents agent` - add/remove/list/edit (src/cli/commands/agent.ts)
-- [x] `teamagents doctor` - health check (src/cli/commands/doctor.ts)
-- [x] bin/teamagents.ts entry point
+- [x] `clade setup` - interactive wizard (src/cli/commands/setup.ts)
+- [x] `clade start` - launch gateway (src/cli/commands/start.ts)
+- [x] `clade ask` - one-off question (src/cli/commands/ask.ts)
+- [x] `clade agent` - add/remove/list/edit (src/cli/commands/agent.ts)
+- [x] `clade doctor` - health check (src/cli/commands/doctor.ts)
+- [x] bin/clade.ts entry point
 - [x] Test: CLI parses args, commands execute
 
 ### 1.9 WebChat Channel
@@ -170,7 +170,7 @@
 - [x] Test: parse plan, execute task, verify, commit, loop
 
 ### 3.4 CLI: work command
-- [x] `teamagents work --agent <name> --plan <path>` (src/cli/commands/work.ts)
+- [x] `clade work --agent <name> --plan <path>` (src/cli/commands/work.ts)
 - [x] Progress display in terminal
 - [x] Ctrl+C graceful shutdown
 - [x] Test: CLI launches RALPH loop, shows progress

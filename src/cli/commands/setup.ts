@@ -5,11 +5,11 @@ import { execSync } from 'node:child_process';
 import inquirer from 'inquirer';
 import type { Command } from 'commander';
 
-const TEAMAGENTS_HOME = join(homedir(), '.teamagents');
+const CLADE_HOME = join(homedir(), '.clade');
 
 const DEFAULT_SOUL = `# Main Assistant
 
-You are the main TeamAgents assistant. You are helpful, concise, and accurate.
+You are the main Clade assistant. You are helpful, concise, and accurate.
 
 ## Personality
 - Professional and friendly
@@ -50,7 +50,7 @@ interface SetupAnswers {
 export function registerSetupCommand(program: Command): void {
   program
     .command('setup')
-    .description('Interactive setup wizard for TeamAgents')
+    .description('Interactive setup wizard for Clade')
     .option('--non-interactive', 'Use defaults without prompting')
     .action(async (opts: { nonInteractive?: boolean }) => {
       try {
@@ -73,7 +73,7 @@ export function registerSetupCommand(program: Command): void {
 }
 
 async function runSetup(nonInteractive: boolean): Promise<void> {
-  console.log('\n  TeamAgents Setup Wizard\n');
+  console.log('\n  Clade Setup Wizard\n');
 
   // Step 1: Check claude CLI
   console.log('Checking prerequisites...\n');
@@ -98,7 +98,7 @@ async function runSetup(nonInteractive: boolean): Promise<void> {
   }
 
   // Check if already set up
-  const alreadySetup = existsSync(join(TEAMAGENTS_HOME, 'config.json'));
+  const alreadySetup = existsSync(join(CLADE_HOME, 'config.json'));
   if (alreadySetup && !nonInteractive) {
     const { confirmSetup } = await inquirer.prompt<
       Pick<SetupAnswers, 'confirmSetup'>
@@ -107,7 +107,7 @@ async function runSetup(nonInteractive: boolean): Promise<void> {
         type: 'confirm',
         name: 'confirmSetup',
         message:
-          'TeamAgents is already configured. Re-run setup? (existing config will be backed up)',
+          'Clade is already configured. Re-run setup? (existing config will be backed up)',
         default: false,
       },
     ]);
@@ -117,11 +117,11 @@ async function runSetup(nonInteractive: boolean): Promise<void> {
     }
     // Backup existing config
     const backupPath = join(
-      TEAMAGENTS_HOME,
+      CLADE_HOME,
       `config.backup.${Date.now()}.json`,
     );
     const existing = readFileSync(
-      join(TEAMAGENTS_HOME, 'config.json'),
+      join(CLADE_HOME, 'config.json'),
       'utf-8',
     );
     writeFileSync(backupPath, existing, 'utf-8');
@@ -132,7 +132,7 @@ async function runSetup(nonInteractive: boolean): Promise<void> {
 
   // Step 2: Create directory structure
   createDirectoryStructure();
-  console.log('  [ok] Created ~/.teamagents/ directory structure');
+  console.log('  [ok] Created ~/.clade/ directory structure');
 
   // Step 3: Agent setup
   let agentName = 'main';
@@ -268,7 +268,7 @@ async function runSetup(nonInteractive: boolean): Promise<void> {
   });
 
   writeFileSync(
-    join(TEAMAGENTS_HOME, 'config.json'),
+    join(CLADE_HOME, 'config.json'),
     JSON.stringify(config, null, 2),
     'utf-8',
   );
@@ -277,12 +277,12 @@ async function runSetup(nonInteractive: boolean): Promise<void> {
   // Step 6: Success message
   console.log('\n  Setup complete!\n');
   console.log('  Next steps:');
-  console.log('    teamagents start       Start the gateway server');
+  console.log('    clade start       Start the gateway server');
   console.log(
-    '    teamagents ask "hi"    Send a quick message to your agent',
+    '    clade ask "hi"    Send a quick message to your agent',
   );
   console.log(
-    '    teamagents doctor      Check that everything is working',
+    '    clade doctor      Check that everything is working',
   );
   console.log('');
 }
@@ -314,13 +314,13 @@ function checkClaudeAuth(): boolean {
 
 function createDirectoryStructure(): void {
   const dirs = [
-    TEAMAGENTS_HOME,
-    join(TEAMAGENTS_HOME, 'agents'),
-    join(TEAMAGENTS_HOME, 'skills'),
-    join(TEAMAGENTS_HOME, 'skills', 'active'),
-    join(TEAMAGENTS_HOME, 'skills', 'pending'),
-    join(TEAMAGENTS_HOME, 'data'),
-    join(TEAMAGENTS_HOME, 'logs'),
+    CLADE_HOME,
+    join(CLADE_HOME, 'agents'),
+    join(CLADE_HOME, 'skills'),
+    join(CLADE_HOME, 'skills', 'active'),
+    join(CLADE_HOME, 'skills', 'pending'),
+    join(CLADE_HOME, 'data'),
+    join(CLADE_HOME, 'logs'),
   ];
 
   for (const dir of dirs) {
@@ -329,7 +329,7 @@ function createDirectoryStructure(): void {
 }
 
 function createAgent(name: string): void {
-  const agentDir = join(TEAMAGENTS_HOME, 'agents', name);
+  const agentDir = join(CLADE_HOME, 'agents', name);
   mkdirSync(agentDir, { recursive: true });
   mkdirSync(join(agentDir, 'memory'), { recursive: true });
 
@@ -417,7 +417,7 @@ function buildConfig(opts: BuildConfigOptions): Record<string, unknown> {
     },
     logging: {
       level: 'info',
-      file: join(TEAMAGENTS_HOME, 'logs', 'teamagents.log'),
+      file: join(CLADE_HOME, 'logs', 'clade.log'),
     },
   };
 }

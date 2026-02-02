@@ -22,9 +22,9 @@ import {
 // Environment
 // ---------------------------------------------------------------------------
 
-const agentId = process.env['TEAMAGENTS_AGENT_ID'] ?? 'default';
+const agentId = process.env['CLADE_AGENT_ID'] ?? 'default';
 const baseDir =
-  process.env['TEAMAGENTS_HOME'] ?? join(homedir(), '.teamagents');
+  process.env['CLADE_HOME'] ?? join(homedir(), '.clade');
 
 const agentDir = join(baseDir, 'agents', agentId);
 mkdirSync(join(agentDir, 'memory'), { recursive: true });
@@ -44,7 +44,7 @@ store.reindexAll(agentDir);
 // ---------------------------------------------------------------------------
 
 const server = new McpServer({
-  name: 'teamagents-memory',
+  name: 'clade-memory',
   version: '0.1.0',
 });
 

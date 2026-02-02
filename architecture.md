@@ -1,15 +1,15 @@
-# TeamAgents Architecture
+# Clade Architecture
 
 ## System Overview
 
-TeamAgents is a multi-agent orchestration platform that uses the `claude` CLI as its
+Clade is a multi-agent orchestration platform that uses the `claude` CLI as its
 AI engine. Instead of reimplementing an LLM runtime, it spawns Claude Code subprocesses
 and focuses on what Claude Code doesn't have: multi-agent identity, persistent memory,
 channel routing, proactive scheduling, and autonomous work loops.
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
-│                        TeamAgents Gateway                          │
+│                        Clade Gateway                          │
 │                    (Fastify HTTP + WebSocket)                      │
 │                     http://localhost:7890                           │
 ├────────────────────────────────────────────────────────────────────┤
@@ -88,7 +88,7 @@ channel routing, proactive scheduling, and autonomous work loops.
 
 ### 1. Engine (src/engine/)
 
-The engine is the heart of TeamAgents. It wraps the `claude` CLI.
+The engine is the heart of Clade. It wraps the `claude` CLI.
 
 #### claude-cli.ts
 
@@ -151,7 +151,7 @@ RALPH loop for autonomous work:
 
 ### 2. Agents (src/agents/)
 
-Each agent is a directory under `~/.teamagents/agents/<name>/`:
+Each agent is a directory under `~/.clade/agents/<name>/`:
 - `SOUL.md` — Personality, identity, behavioral guidelines
 - `HEARTBEAT.md` — What to check on each heartbeat cycle
 - `MEMORY.md` — Curated long-term memory
@@ -159,7 +159,7 @@ Each agent is a directory under `~/.teamagents/agents/<name>/`:
 - `PLAN.md` — (optional) RALPH loop task list
 - `progress.md` — (optional) RALPH accumulated learnings
 
-Agent config stored in `~/.teamagents/config.json`:
+Agent config stored in `~/.clade/config.json`:
 ```json
 {
   "agents": {
@@ -192,7 +192,7 @@ Tool presets map to `--allowedTools` arrays:
 Four custom MCP servers, each a stdio process:
 
 #### Memory MCP (src/mcp/memory/)
-- Stores in `~/.teamagents/agents/<agentId>/MEMORY.md` and `memory/*.md`
+- Stores in `~/.clade/agents/<agentId>/MEMORY.md` and `memory/*.md`
 - SQLite FTS5 index for full-text search
 - Chunks files at ~400 tokens with 80-token overlap for search
 - Auto-creates daily log files
@@ -209,7 +209,7 @@ Four custom MCP servers, each a stdio process:
 
 #### Skills MCP (src/mcp/skills/)
 - Searches npm registry for MCP server packages
-- Stages new skills in `~/.teamagents/skills/pending/`
+- Stages new skills in `~/.clade/skills/pending/`
 - Requires human approval before activation
 - Can create custom skills (agent writes MCP server config)
 
@@ -362,7 +362,7 @@ CREATE VIRTUAL TABLE memory_fts USING fts5(
    │  claude -p "Check my PRs"
    │    --resume sess_abc123
    │    --append-system-prompt <SOUL.md content>
-   │    --mcp-config /tmp/teamagents-work-mcp.json
+   │    --mcp-config /tmp/clade-work-mcp.json
    │    --allowedTools "Read,Edit,Bash,Glob,Grep,mcp__memory__*,mcp__sessions__*"
    │    --output-format stream-json
    │    --max-turns 15
@@ -381,7 +381,7 @@ CREATE VIRTUAL TABLE memory_fts USING fts5(
    │
 2. Check active hours (skip if outside 09:00-22:00)
    │
-3. Read ~/.teamagents/agents/main/HEARTBEAT.md
+3. Read ~/.clade/agents/main/HEARTBEAT.md
    │
 4. Build prompt:
    │  "Heartbeat check. Here is your checklist:\n\n<HEARTBEAT.md>\n\n
@@ -398,7 +398,7 @@ CREATE VIRTUAL TABLE memory_fts USING fts5(
 ## Data Flow: RALPH Loop
 
 ```
-1. User runs: teamagents work --agent coder --plan ./PLAN.md
+1. User runs: clade work --agent coder --plan ./PLAN.md
    │  OR: cron job triggers work mode for agent "coder"
    │
 2. RALPH engine reads PLAN.md:
@@ -430,7 +430,7 @@ CREATE VIRTUAL TABLE memory_fts USING fts5(
 1. **SOUL.md is read-only**: Injected via `--append-system-prompt`, not a workspace file.
    Agents cannot modify their own personality.
 
-2. **Config is read-only**: `~/.teamagents/config.json` is never in the agent's workspace.
+2. **Config is read-only**: `~/.clade/config.json` is never in the agent's workspace.
    The Skills MCP server provides read-only access to relevant config.
 
 3. **Skill approval gate**: Agent-requested skills go to `pending/` and require human

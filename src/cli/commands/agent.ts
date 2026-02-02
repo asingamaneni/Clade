@@ -11,13 +11,13 @@ import { homedir } from 'node:os';
 import inquirer from 'inquirer';
 import type { Command } from 'commander';
 
-const TEAMAGENTS_HOME = join(homedir(), '.teamagents');
-const AGENTS_DIR = join(TEAMAGENTS_HOME, 'agents');
-const CONFIG_PATH = join(TEAMAGENTS_HOME, 'config.json');
+const CLADE_HOME = join(homedir(), '.clade');
+const AGENTS_DIR = join(CLADE_HOME, 'agents');
+const CONFIG_PATH = join(CLADE_HOME, 'config.json');
 
 const DEFAULT_SOUL_TEMPLATE = (name: string) => `# ${name}
 
-You are ${name}, a TeamAgents assistant.
+You are ${name}, a Clade assistant.
 
 ## Personality
 - Professional and helpful
@@ -276,7 +276,7 @@ async function listAgents(opts: { json?: boolean }): Promise<void> {
   const agentIds = Object.keys(agents);
 
   if (agentIds.length === 0) {
-    console.log('No agents configured. Run "teamagents agent add <name>" to create one.');
+    console.log('No agents configured. Run "clade agent add <name>" to create one.');
     return;
   }
 
@@ -370,7 +370,7 @@ async function editAgent(name: string): Promise<void> {
 
   if (!agent) {
     throw new Error(
-      `Agent "${name}" not found. Run "teamagents agent list" to see available agents.`,
+      `Agent "${name}" not found. Run "clade agent list" to see available agents.`,
     );
   }
 
@@ -468,7 +468,7 @@ function loadConfig(): Record<string, unknown> {
 }
 
 function saveConfig(config: Record<string, unknown>): void {
-  mkdirSync(TEAMAGENTS_HOME, { recursive: true });
+  mkdirSync(CLADE_HOME, { recursive: true });
   writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
 }
 

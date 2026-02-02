@@ -5,7 +5,7 @@ import { ClaudeCliRunner } from '../../engine/claude-cli.js';
 import type { ClaudeOptions } from '../../engine/claude-cli.js';
 import type { Command } from 'commander';
 
-const TEAMAGENTS_HOME = join(homedir(), '.teamagents');
+const CLADE_HOME = join(homedir(), '.clade');
 
 interface AskOptions {
   agent?: string;
@@ -43,14 +43,14 @@ async function runAsk(prompt: string, opts: AskOptions): Promise<void> {
 
   // Load agent SOUL.md if available
   let systemPrompt: string | undefined;
-  const soulPath = join(TEAMAGENTS_HOME, 'agents', agentId, 'SOUL.md');
+  const soulPath = join(CLADE_HOME, 'agents', agentId, 'SOUL.md');
   if (existsSync(soulPath)) {
     systemPrompt = readFileSync(soulPath, 'utf-8');
   }
 
   // Load agent config for model/tools if available
   let agentModel: string | undefined;
-  const configPath = join(TEAMAGENTS_HOME, 'config.json');
+  const configPath = join(CLADE_HOME, 'config.json');
   if (existsSync(configPath)) {
     try {
       const raw = readFileSync(configPath, 'utf-8');

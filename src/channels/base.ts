@@ -71,7 +71,7 @@ export abstract class BaseChannelAdapter implements ChannelAdapter {
 
   /**
    * Subclasses call this to forward a platform-specific event into the
-   * generic TeamAgents message pipeline.
+   * generic Clade message pipeline.
    */
   protected async handleInbound(message: InboundMessage): Promise<void> {
     if (!this.handler) return;
