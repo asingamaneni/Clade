@@ -135,7 +135,8 @@ async function runSetup(nonInteractive: boolean): Promise<void> {
   console.log('  [ok] Created ~/.clade/ directory structure');
 
   // Step 3: Agent setup
-  let agentName = 'main';
+  let agentName = '';
+  let createAgent_ = false;
   if (!nonInteractive) {
     const agentAnswers = await inquirer.prompt<
       Pick<SetupAnswers, 'createDefaultAgent' | 'agentName'>
@@ -143,7 +144,7 @@ async function runSetup(nonInteractive: boolean): Promise<void> {
       {
         type: 'confirm',
         name: 'createDefaultAgent',
-        message: 'Create a default "main" agent?',
+        message: 'Create a default agent?',
         default: true,
       },
       {
@@ -158,12 +159,17 @@ async function runSetup(nonInteractive: boolean): Promise<void> {
           'Use lowercase letters, numbers, hyphens, and underscores only',
       },
     ]);
+    createAgent_ = agentAnswers.createDefaultAgent;
     agentName = agentAnswers.agentName || 'main';
   }
 
-  // Create default agent
-  createAgent(agentName);
-  console.log(`  [ok] Created agent "${agentName}" with SOUL.md`);
+  // Create agent only if requested
+  if (createAgent_ && agentName) {
+    createAgent(agentName);
+    console.log(`  [ok] Created agent "${agentName}" with SOUL.md`);
+  } else if (!nonInteractive) {
+    console.log('  [ok] No agents created (add later with "clade agent add <name>")');
+  }
 
   // Step 4: Channel configuration
   let telegramToken = '';
@@ -389,30 +395,34 @@ function buildConfig(opts: BuildConfigOptions): Record<string, unknown> {
     };
   }
 
+  const agents: Record<string, unknown> = {};
+  if (opts.agentName) {
+    agents[opts.agentName] = {
+      name: opts.agentName === 'main' ? 'Main Assistant' : opts.agentName,
+      description: 'General-purpose assistant',
+      model: 'sonnet',
+      toolPreset: 'full',
+      customTools: [],
+      skills: [],
+      heartbeat: {
+        enabled: true,
+        interval: '30m',
+        mode: 'check',
+        suppressOk: true,
+      },
+    };
+  }
+
   return {
-    version: 1,
+    version: 2,
     gateway: {
       port: opts.gatewayPort,
       host: '0.0.0.0',
     },
-    agents: {
-      [opts.agentName]: {
-        name: opts.agentName === 'main' ? 'Main Assistant' : opts.agentName,
-        description: 'General-purpose assistant',
-        model: 'sonnet',
-        toolPreset: 'full',
-        customTools: [],
-        skills: [],
-        heartbeat: {
-          enabled: false,
-          interval: '30m',
-          suppressOk: true,
-        },
-      },
-    },
+    agents,
     channels,
     routing: {
-      defaultAgent: opts.agentName,
+      defaultAgent: opts.agentName || '',
       rules: [],
     },
     logging: {

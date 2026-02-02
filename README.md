@@ -20,23 +20,36 @@ The name "Clade" means *a group of organisms that share a common ancestor* — a
 ## Quick Start
 
 ```bash
-# Install globally
+# Install
 npm install -g clade
 
-# Run the setup wizard
-clade setup
-
-# Create your first agent
-clade agent create
-
-# Start the gateway (enables channels, heartbeat, web UI)
+# Start the gateway — auto-creates config if first run
 clade start
 
-# Or just ask a quick question
-clade ask "What's the status of the project?"
+# Open the admin dashboard in your browser
+clade ui
+
+# Browse the documentation
+clade docs --serve
+```
+
+That's it. Three commands to a running dashboard. No setup wizard required.
+
+### Adding Agents
+
+```bash
+# Interactive setup (configure channels, create agents)
+clade setup
+
+# Or create agents directly
+clade agent create --name jarvis --template coding
+clade agent create --name ravi --template research
+
+# Quick one-off question
+clade ask --agent jarvis "What's the status of the tests?"
 
 # Give an agent autonomous work
-clade work --agent coder --plan ./PLAN.md
+clade work --agent ravi --plan ./PLAN.md
 ```
 
 ## How It Works
@@ -143,6 +156,18 @@ clade start
 ### Web Chat
 Enabled by default at `http://localhost:7890/admin` — no setup needed.
 
+### @mention Routing
+
+With multiple agents, route messages by mentioning them by name:
+
+```
+@jarvis deploy the staging branch
+@ravi research competitor pricing
+@manu review the auth PR
+```
+
+Mentions are case-insensitive and work on all channels. If no agent is mentioned, the message goes to the default agent or follows your routing rules.
+
 ## Agent Collaboration
 
 Agents can work together:
@@ -156,8 +181,10 @@ Agents can work together:
 
 | Command | Description |
 |---------|-------------|
-| `clade setup` | Interactive setup wizard |
-| `clade start` | Start the gateway (channels, heartbeat, web UI) |
+| `clade start` | Start the gateway (auto-creates config on first run) |
+| `clade setup` | Interactive setup wizard (channels, agents) |
+| `clade ui` | Open admin dashboard in your browser |
+| `clade docs --serve` | Start local documentation site |
 | `clade ask "..."` | Quick one-off question to an agent |
 | `clade agent create` | Create a new agent from template |
 | `clade agent list` | List all agents |

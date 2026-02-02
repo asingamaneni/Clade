@@ -1,9 +1,7 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import type { Command } from 'commander';
-
-const CLADE_HOME = join(homedir(), '.clade');
 
 interface StartOptions {
   port?: string;
@@ -32,14 +30,12 @@ export function registerStartCommand(program: Command): void {
 }
 
 async function runStart(opts: StartOptions): Promise<void> {
-  // Load config
-  const configPath = join(CLADE_HOME, 'config.json');
+  const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+  const configPath = join(cladeHome, 'config.json');
+
+  // Auto-bootstrap if no config exists
   if (!existsSync(configPath)) {
-    console.error(
-      'Error: Clade is not configured.\n' +
-        'Run "clade setup" first.\n',
-    );
-    process.exit(1);
+    bootstrapDefaultConfig(cladeHome, configPath);
   }
 
   let config: Record<string, unknown>;
@@ -98,10 +94,55 @@ async function runStart(opts: StartOptions): Promise<void> {
       // Gateway not yet implemented -- start a minimal placeholder
       await startPlaceholderServer(port, host, config);
     }
-  } catch (err: unknown) {
+  } catch {
     // If gateway module is not available, start minimal server
     await startPlaceholderServer(port, host, config);
   }
+}
+
+/**
+ * Create a minimal default config so `clade start` works out of the box.
+ * No agents, no channels — just the gateway.
+ */
+function bootstrapDefaultConfig(cladeHome: string, configPath: string): void {
+  console.log('  No config found. Creating default configuration...\n');
+
+  // Create directory structure
+  const dirs = [
+    cladeHome,
+    join(cladeHome, 'agents'),
+    join(cladeHome, 'skills'),
+    join(cladeHome, 'skills', 'active'),
+    join(cladeHome, 'skills', 'pending'),
+    join(cladeHome, 'data'),
+    join(cladeHome, 'logs'),
+  ];
+  for (const dir of dirs) {
+    mkdirSync(dir, { recursive: true });
+  }
+
+  const config = {
+    version: 2,
+    agents: {},
+    channels: {
+      webchat: { enabled: true },
+    },
+    gateway: {
+      port: 7890,
+      host: '0.0.0.0',
+    },
+    routing: {
+      defaultAgent: '',
+      rules: [],
+    },
+  };
+
+  writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+  console.log(`  [ok] Created ${configPath}`);
+  console.log('  [ok] Created ~/.clade/ directory structure');
+  console.log('');
+  console.log('  Tip: Add agents with "clade agent add <name>"');
+  console.log('  Tip: Run "clade setup" for interactive channel configuration\n');
 }
 
 /**
