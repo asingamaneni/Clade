@@ -17,7 +17,10 @@
     "test:unit": "vitest run --dir tests/unit",
     "test:integration": "vitest run --dir tests/integration",
     "lint": "tsc --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.2",
@@ -40,6 +43,7 @@
     "@types/node": "^22.13.1",
     "tsup": "^8.3.6",
     "typescript": "^5.7.3",
+    "vitepress": "^1.6.4",
     "vitest": "^3.0.5"
   },
   "engines": {
