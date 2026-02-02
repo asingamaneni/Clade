@@ -14,9 +14,16 @@ agents evolving from a common AI foundation, specializing over time.
 
 - **[architecture.md](./architecture.md)** — Full system architecture, data flows, SQL schema
 - **[README.md](./README.md)** — User-facing quickstart and installation guide
+- **[docs/](./docs/)** — VitePress documentation site (run `clade docs --serve` to view)
 - **[tasks.md](./tasks.md)** — Implementation task tracker
 
-> **Important**: When making architectural changes, update both this file AND architecture.md.
+> **Important**: When making changes to features, architecture, CLI commands, config schema,
+> or any user-facing behavior, update **all three** of these files as needed:
+> - **CLAUDE.md** — Keep the architecture summary, directory structure, and design decisions current
+> - **architecture.md** — Update system diagrams, component docs, data flows, and SQL schema
+> - **README.md** — Update the user-facing quickstart, CLI reference, and feature descriptions
+>
+> These files must stay in sync. A change to one usually means the others need updating too.
 
 ## Architecture Summary
 
@@ -30,6 +37,7 @@ agents evolving from a common AI foundation, specializing over time.
 - **Collaboration**: Delegation, shared memory, pub/sub message bus between agents
 - **Portability**: Export/import agents as `.agent.tar.gz` bundles
 - **Platform**: Native OS interaction (notifications, clipboard, screenshots) via platform MCP
+- **Routing**: @mention-based agent routing (`@jarvis do this` routes to jarvis agent)
 - **Tools**: Claude Code's native tools (Read/Edit/Bash/Glob/Grep) + 5 custom MCP servers
 
 ## Tech Stack
@@ -40,7 +48,8 @@ agents evolving from a common AI foundation, specializing over time.
 - **HTTP/WS Server**: Fastify + @fastify/websocket
 - **Database**: better-sqlite3 (synchronous, zero setup)
 - **Validation**: Zod schemas for all config/types
-- **Testing**: Vitest (14 test files, 308+ tests)
+- **Testing**: Vitest (17 test suites, 426+ tests)
+- **Docs**: VitePress (locally servable, 22 pages)
 - **Admin UI**: Preact + HTM + Tailwind CSS (self-contained HTML, no build step)
 - **Channels**: grammy (Telegram), @slack/bolt (Slack), discord.js (Discord)
 
@@ -48,7 +57,7 @@ agents evolving from a common AI foundation, specializing over time.
 
 ```
 src/
-├── cli/           # CLI commands (start, setup, agent, skill, work, ask, doctor)
+├── cli/           # CLI commands (start, setup, agent, skill, work, ask, doctor, ui, docs)
 ├── engine/        # Core: claude-cli.ts wrapper, session manager, RALPH loop, compat layer
 ├── agents/        # Agent registry, presets, types, templates, reflection, collaboration, portability
 ├── gateway/       # Fastify HTTP + WS server, REST API routes, admin.html
