@@ -1,602 +1,1768 @@
 <!DOCTYPE html>
 <html lang="en" class="dark">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TeamAgents Admin</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<script>
-tailwind.config = {
-  darkMode: 'class',
-  theme: { extend: { colors: {
-    surface: { DEFAULT: '#0f1117', 100: '#161b22', 200: '#1c2128', 300: '#282e36' },
-    border: { DEFAULT: '#30363d' },
-    accent: { DEFAULT: '#58a6ff' },
-  }}}
-}
-</script>
-<style>
-body { background: #0f1117; color: #e6edf3; font-family: system-ui, -apple-system, sans-serif; margin: 0; }
-.toggle { position: relative; width: 44px; height: 24px; appearance: none; background: #30363d; border-radius: 12px; cursor: pointer; transition: background 0.2s; }
-.toggle:checked { background: #58a6ff; }
-.toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; background: #e6edf3; border-radius: 50%; transition: transform 0.2s; }
-.toggle:checked::after { transform: translateX(20px); }
-.card { background: #1c2128; border: 1px solid #30363d; border-radius: 8px; padding: 16px; }
-.btn { padding: 6px 14px; border-radius: 6px; font-size: 14px; cursor: pointer; border: 1px solid #30363d; background: #282e36; color: #e6edf3; transition: all 0.15s; }
-.btn:hover { background: #30363d; }
-.btn-primary { background: #1f6feb; border-color: #1f6feb; }
-.btn-primary:hover { background: #388bfd; }
-.btn-success { background: #238636; border-color: #238636; }
-.btn-success:hover { background: #2ea043; }
-.btn-danger { background: #da3633; border-color: #da3633; }
-.btn-danger:hover { background: #f85149; }
-.btn-warning { background: #9e6a03; border-color: #9e6a03; }
-.btn-warning:hover { background: #d29922; }
-.preset-btn { padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: 2px solid transparent; transition: all 0.15s; }
-.tab { padding: 8px 16px; cursor: pointer; border-bottom: 2px solid transparent; color: #8b949e; transition: all 0.15s; }
-.tab:hover { color: #e6edf3; }
-.tab.active { color: #58a6ff; border-color: #58a6ff; }
-.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 500; }
-.badge-green { background: rgba(63,185,80,0.15); color: #3fb950; }
-.badge-yellow { background: rgba(210,153,34,0.15); color: #d29922; }
-.badge-red { background: rgba(248,81,73,0.15); color: #f85149; }
-.badge-blue { background: rgba(88,166,255,0.15); color: #58a6ff; }
-textarea, input, select { background: #0f1117; border: 1px solid #30363d; border-radius: 6px; padding: 8px 12px; color: #e6edf3; font-size: 14px; width: 100%; box-sizing: border-box; }
-textarea:focus, input:focus, select:focus { outline: none; border-color: #58a6ff; }
-textarea { font-family: ui-monospace, 'SF Mono', monospace; resize: vertical; }
-::-webkit-scrollbar { width: 8px; }
-::-webkit-scrollbar-track { background: #0f1117; }
-::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TeamAgents Admin</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            surface: { DEFAULT: '#0f1117', 100: '#161b22', 200: '#1c2128', 300: '#282e36' },
+            border: { DEFAULT: '#30363d' },
+            accent: { DEFAULT: '#58a6ff' },
+          },
+          fontFamily: {
+            mono: ['ui-monospace', '"SF Mono"', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 0;
+      background: #0f1117;
+      color: #e6edf3;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      overflow: hidden;
+      height: 100vh;
+    }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #484f58; }
+
+    /* ── Toggle switch (rounded pill) ─────────────────────── */
+    .toggle-track {
+      position: relative;
+      width: 44px;
+      height: 24px;
+      background: #30363d;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: background 0.2s ease;
+      flex-shrink: 0;
+    }
+    .toggle-track.active { background: #3fb950; }
+    .toggle-track::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 20px;
+      height: 20px;
+      background: #e6edf3;
+      border-radius: 50%;
+      transition: transform 0.2s ease;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    }
+    .toggle-track.active::after { transform: translateX(20px); }
+    .toggle-track.disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── Page transition ──────────────────────────────────── */
+    .page-enter { animation: pageIn 0.15s ease-out; }
+    @keyframes pageIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Form elements ────────────────────────────────────── */
+    input[type="text"], input[type="password"], input[type="number"], input[type="time"],
+    textarea, select {
+      background: #0f1117;
+      border: 1px solid #30363d;
+      color: #e6edf3;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.15s;
+      width: 100%;
+    }
+    input:focus, textarea:focus, select:focus { border-color: #58a6ff; }
+    select option { background: #1c2128; color: #e6edf3; }
+    textarea { resize: vertical; font-family: inherit; }
+    textarea.mono-editor {
+      font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    /* ── Badges ────────────────────────────────────────────── */
+    .badge {
+      display: inline-flex; align-items: center;
+      padding: 2px 10px; border-radius: 9999px;
+      font-size: 12px; font-weight: 500;
+    }
+    .badge-green  { background: rgba(63,185,80,0.15);  color: #3fb950; }
+    .badge-yellow { background: rgba(210,153,34,0.15);  color: #d29922; }
+    .badge-red    { background: rgba(248,81,73,0.15);   color: #f85149; }
+    .badge-blue   { background: rgba(88,166,255,0.15);  color: #58a6ff; }
+    .badge-purple { background: rgba(188,140,255,0.15); color: #bc8cff; }
+    .badge-gray   { background: rgba(139,148,158,0.15); color: #8b949e; }
+
+    /* ── Buttons ───────────────────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 8px 16px; border-radius: 6px; font-size: 14px; font-weight: 500;
+      cursor: pointer; border: 1px solid transparent; transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary   { background: #238636; color: #fff; border-color: rgba(63,185,80,0.4); }
+    .btn-primary:hover:not(:disabled)   { background: #2ea043; }
+    .btn-danger    { background: rgba(248,81,73,0.1); color: #f85149; border-color: rgba(248,81,73,0.4); }
+    .btn-danger:hover:not(:disabled)    { background: rgba(248,81,73,0.2); }
+    .btn-secondary { background: #21262d; color: #c9d1d9; border-color: #30363d; }
+    .btn-secondary:hover:not(:disabled) { background: #30363d; }
+    .btn-accent    { background: rgba(88,166,255,0.1); color: #58a6ff; border-color: rgba(88,166,255,0.4); }
+    .btn-accent:hover:not(:disabled)    { background: rgba(88,166,255,0.2); }
+
+    /* ── Sidebar nav ──────────────────────────────────────── */
+    .nav-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 16px; color: #8b949e; cursor: pointer;
+      border-radius: 6px; margin: 1px 8px; transition: all 0.12s;
+      font-size: 14px; user-select: none;
+    }
+    .nav-item:hover { background: #1c2128; color: #e6edf3; }
+    .nav-item.active { background: rgba(88,166,255,0.1); color: #58a6ff; }
+
+    /* ── Toasts ────────────────────────────────────────────── */
+    .toast-container {
+      position: fixed; top: 16px; right: 16px; z-index: 9999;
+      display: flex; flex-direction: column; gap: 8px; pointer-events: none;
+    }
+    .toast {
+      padding: 12px 20px; border-radius: 8px; font-size: 14px;
+      animation: toastIn 0.2s ease-out, toastOut 0.3s ease-in 2.7s forwards;
+      max-width: 400px; pointer-events: auto;
+    }
+    .toast-success { background: rgba(63,185,80,0.15); border: 1px solid rgba(63,185,80,0.3); color: #3fb950; }
+    .toast-error   { background: rgba(248,81,73,0.15); border: 1px solid rgba(248,81,73,0.3); color: #f85149; }
+    .toast-info    { background: rgba(88,166,255,0.15); border: 1px solid rgba(88,166,255,0.3); color: #58a6ff; }
+    @keyframes toastIn  { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: translateX(0); } }
+    @keyframes toastOut { from { opacity: 1; } to { opacity: 0; transform: translateY(-10px); } }
+
+    /* ── Preset buttons ───────────────────────────────────── */
+    .preset-btn {
+      padding: 6px 18px; border-radius: 9999px; font-size: 13px; font-weight: 600;
+      cursor: pointer; border: 2px solid transparent; transition: all 0.15s; user-select: none;
+    }
+    .preset-btn.selected { box-shadow: 0 0 0 1px currentColor; }
+    .preset-potato    { background: rgba(210,153,34,0.15);  color: #d29922; border-color: rgba(210,153,34,0.3); }
+    .preset-potato:hover, .preset-potato.selected    { background: rgba(210,153,34,0.3); }
+    .preset-coding    { background: rgba(88,166,255,0.15);  color: #58a6ff; border-color: rgba(88,166,255,0.3); }
+    .preset-coding:hover, .preset-coding.selected    { background: rgba(88,166,255,0.3); }
+    .preset-messaging { background: rgba(63,185,80,0.15);   color: #3fb950; border-color: rgba(63,185,80,0.3); }
+    .preset-messaging:hover, .preset-messaging.selected { background: rgba(63,185,80,0.3); }
+    .preset-full      { background: rgba(188,140,255,0.15); color: #bc8cff; border-color: rgba(188,140,255,0.3); }
+    .preset-full:hover, .preset-full.selected        { background: rgba(188,140,255,0.3); }
+
+    /* ── Tool card ─────────────────────────────────────────── */
+    .tool-card {
+      background: #1c2128; border: 1px solid #30363d; border-radius: 8px;
+      padding: 12px 14px; display: flex; align-items: center;
+      justify-content: space-between; gap: 12px; transition: border-color 0.15s;
+    }
+    .tool-card.enabled { border-color: rgba(63,185,80,0.4); }
+    .tool-card:hover { border-color: #484f58; }
+    .tool-card.enabled:hover { border-color: rgba(63,185,80,0.6); }
+
+    /* ── Stat card ─────────────────────────────────────────── */
+    .stat-card {
+      background: #1c2128; border: 1px solid #30363d; border-radius: 10px;
+      padding: 20px 24px; display: flex; flex-direction: column; gap: 8px;
+      border-left: 3px solid transparent; transition: transform 0.1s;
+    }
+    .stat-card:hover { transform: translateY(-1px); }
+
+    /* ── Misc ──────────────────────────────────────────────── */
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
 </head>
 <body>
-<div id="app"></div>
-<script type="module">
-import { h, render } from 'https://esm.sh/preact@10.19.3';
-import { useState, useEffect, useCallback, useRef } from 'https://esm.sh/preact@10.19.3/hooks';
-import htm from 'https://esm.sh/htm@3.1.1';
-const html = htm.bind(h);
+  <div id="app"></div>
 
-const api = async (path, opts = {}) => {
-  try {
-    const res = await fetch('/api' + path, { headers: { 'Content-Type': 'application/json' }, ...opts });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
-  } catch (e) { console.error('API error:', e); return null; }
-};
+  <script type="module">
+    // ═══════════════════════════════════════════════════════════════════
+    // Imports
+    // ═══════════════════════════════════════════════════════════════════
+    import { h, render } from 'https://esm.sh/preact@10.19.3';
+    import { useState, useEffect, useRef, useCallback, useMemo } from 'https://esm.sh/preact@10.19.3/hooks';
+    import htm from 'https://esm.sh/htm@3.1.1';
+    const html = htm.bind(h);
 
-// ── Tool definitions ────────────────────────────────────────
-const TOOL_CATEGORIES = {
-  'Fs': [
-    { id: 'Read', desc: 'Read file contents' },
-    { id: 'Edit', desc: 'Make precise edits to files' },
-    { id: 'Write', desc: 'Create or overwrite files' },
-    { id: 'Glob', desc: 'Search files by pattern' },
-  ],
-  'Runtime': [
-    { id: 'Bash', desc: 'Run shell commands' },
-    { id: 'Task', desc: 'Spawn sub-agents' },
-  ],
-  'Web': [
-    { id: 'WebSearch', desc: 'Search the web' },
-    { id: 'WebFetch', desc: 'Fetch and extract web content' },
-  ],
-  'Memory': [
-    { id: 'mcp__memory__store', desc: 'Store memory entries' },
-    { id: 'mcp__memory__search', desc: 'Search memory' },
-    { id: 'mcp__memory__get', desc: 'Read memory files' },
-    { id: 'mcp__memory__list', desc: 'List memory files' },
-  ],
-  'Sessions': [
-    { id: 'mcp__sessions__list', desc: 'List sessions' },
-    { id: 'mcp__sessions__spawn', desc: 'Spawn sub-agent' },
-    { id: 'mcp__sessions__send', desc: 'Send to session' },
-    { id: 'mcp__sessions__status', desc: 'Session status' },
-    { id: 'mcp__sessions__agents_list', desc: 'List agents' },
-  ],
-  'Messaging': [
-    { id: 'mcp__messaging__send_message', desc: 'Send channel message' },
-    { id: 'mcp__messaging__send_typing', desc: 'Show typing indicator' },
-  ],
-  'Skills': [
-    { id: 'mcp__skills__search', desc: 'Search skill registry' },
-    { id: 'mcp__skills__install', desc: 'Install a skill' },
-    { id: 'mcp__skills__list', desc: 'List skills' },
-    { id: 'mcp__skills__create', desc: 'Create custom skill' },
-  ],
-};
+    // ═══════════════════════════════════════════════════════════════════
+    // API Helper
+    // ═══════════════════════════════════════════════════════════════════
 
-const PRESETS = {
-  potato: { label: 'Potato', color: '#d29922', tools: [] },
-  coding: { label: 'Coding', color: '#58a6ff', tools: ['Read','Edit','Write','Glob','Bash','Grep','mcp__memory__store','mcp__memory__search','mcp__memory__get','mcp__memory__list','mcp__sessions__list','mcp__sessions__status'] },
-  messaging: { label: 'Messaging', color: '#3fb950', tools: ['mcp__memory__store','mcp__memory__search','mcp__sessions__list','mcp__sessions__status','mcp__messaging__send_message','mcp__messaging__send_typing'] },
-  full: { label: 'Full', color: '#bc8cff', tools: Object.values(TOOL_CATEGORIES).flat().map(t => t.id) },
-};
+    const api = async (path, opts = {}) => {
+      const res = await fetch('/api' + path, {
+        headers: { 'Content-Type': 'application/json' },
+        ...opts,
+        body: opts.body ? JSON.stringify(opts.body) : undefined,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+      return data;
+    };
 
-// ── Components ──────────────────────────────────────────────
+    const healthApi = () => fetch('/health').then(r => r.json()).catch(() => null);
 
-function App() {
-  const [page, setPage] = useState('dashboard');
-  const [agents, setAgents] = useState({});
-  const [health, setHealth] = useState(null);
-  const [sessions, setSessions] = useState([]);
-  const [skills, setSkills] = useState([]);
-  const [cronJobs, setCronJobs] = useState([]);
+    // ═══════════════════════════════════════════════════════════════════
+    // Tool definitions & presets (matches src/agents/presets.ts)
+    // ═══════════════════════════════════════════════════════════════════
 
-  const refresh = useCallback(async () => {
-    const [h, a, sess, sk, cj] = await Promise.all([
-      fetch('/health').then(r => r.json()).catch(() => null),
-      api('/agents'),
-      api('/sessions'),
-      api('/skills'),
-      api('/cron'),
-    ]);
-    if (h) setHealth(h);
-    if (a?.agents) setAgents(a.agents);
-    if (sess?.sessions) setSessions(sess.sessions);
-    if (sk?.skills) setSkills(sk.skills);
-    if (cj?.jobs) setCronJobs(cj.jobs);
-  }, []);
+    const TOOL_CATEGORIES = [
+      {
+        name: 'Fs',
+        label: 'File System',
+        icon: '\u{1F4C1}',
+        tools: [
+          { id: 'Read',         desc: 'Read files from the local filesystem' },
+          { id: 'Edit',         desc: 'Exact string replacements in files' },
+          { id: 'Write',        desc: 'Create or overwrite files on disk' },
+          { id: 'Glob',         desc: 'Fast glob-based file pattern matching' },
+          { id: 'Grep',         desc: 'Regex content search powered by ripgrep' },
+          { id: 'NotebookEdit', desc: 'Edit Jupyter notebook cells' },
+        ],
+      },
+      {
+        name: 'Runtime',
+        label: 'Runtime',
+        icon: '\u{2699}\u{FE0F}',
+        tools: [
+          { id: 'Bash',      desc: 'Execute shell commands with timeout' },
+          { id: 'Task',      desc: 'Spawn sub-agent tasks in parallel' },
+          { id: 'TodoWrite', desc: 'Structured task list management' },
+        ],
+      },
+      {
+        name: 'Web',
+        label: 'Web Access',
+        icon: '\u{1F310}',
+        tools: [
+          { id: 'WebFetch',  desc: 'Fetch URLs and extract content via AI' },
+          { id: 'WebSearch', desc: 'Search the web for current information' },
+        ],
+      },
+      {
+        name: 'Memory',
+        label: 'Memory MCP',
+        icon: '\u{1F9E0}',
+        tools: [
+          { id: 'mcp__memory__*', desc: 'Memory read, write, search, and list tools' },
+        ],
+      },
+      {
+        name: 'Sessions',
+        label: 'Sessions MCP',
+        icon: '\u{1F4AC}',
+        tools: [
+          { id: 'mcp__sessions__*', desc: 'Session spawn, list, send, and status tools' },
+        ],
+      },
+      {
+        name: 'Messaging',
+        label: 'Messaging MCP',
+        icon: '\u{1F4E8}',
+        tools: [
+          { id: 'mcp__messaging__*', desc: 'Cross-channel message sending tools' },
+        ],
+      },
+      {
+        name: 'Skills',
+        label: 'Skills MCP',
+        icon: '\u{1F9E9}',
+        tools: [
+          { id: 'mcp__skills__*', desc: 'Dynamic skill search and installation' },
+        ],
+      },
+    ];
 
-  useEffect(() => { refresh(); const t = setInterval(refresh, 10000); return () => clearInterval(t); }, []);
+    const ALL_TOOL_IDS = TOOL_CATEGORIES.flatMap(c => c.tools.map(t => t.id));
 
-  const navItems = [
-    { id: 'dashboard', icon: '◉', label: 'Dashboard' },
-    { id: 'agents', icon: '⚙', label: 'Agents' },
-    { id: 'sessions', icon: '◎', label: 'Sessions' },
-    { id: 'skills', icon: '✦', label: 'Skills' },
-    { id: 'channels', icon: '◻', label: 'Channels' },
-    { id: 'cron', icon: '⏱', label: 'Cron' },
-    { id: 'config', icon: '⚡', label: 'Config' },
-  ];
+    const PRESET_MAP = {
+      potato: [],
+      coding: [
+        'Read', 'Edit', 'Write', 'Bash', 'Glob', 'Grep', 'NotebookEdit',
+        'mcp__memory__*', 'mcp__sessions__*',
+      ],
+      messaging: [
+        'mcp__memory__*', 'mcp__sessions__*', 'mcp__messaging__*',
+      ],
+      full: [...ALL_TOOL_IDS],
+    };
 
-  const agentCount = Object.keys(agents).length;
+    function detectPreset(tools) {
+      for (const [name, list] of Object.entries(PRESET_MAP)) {
+        if (list.length === tools.length && list.every(t => tools.includes(t))) return name;
+      }
+      return 'custom';
+    }
 
-  return html`
-    <div style="display:flex; min-height:100vh">
-      <!-- Sidebar -->
-      <div style="width:240px; background:#161b22; border-right:1px solid #30363d; display:flex; flex-direction:column; flex-shrink:0">
-        <div style="padding:16px; border-bottom:1px solid #30363d">
-          <div style="font-weight:700; font-size:16px; display:flex; align-items:center; gap:8px">
-            <span style="color:#58a6ff">⬡</span> TeamAgents Admin
-          </div>
-          <div style="font-size:12px; color:#8b949e; margin-top:6px; display:flex; align-items:center; gap:6px">
-            <span style="width:8px;height:8px;border-radius:50%;background:${health ? '#3fb950' : '#f85149'};display:inline-block"></span>
-            ${health ? 'Connected' : 'Disconnected'}
-            <span style="margin-left:4px">:7890</span>
-            <span style="margin-left:auto">${agentCount} agents</span>
-          </div>
-        </div>
-        <nav style="padding:8px">
-          ${navItems.map(item => html`
-            <div onClick=${() => setPage(item.id)}
-              style="padding:8px 12px; border-radius:6px; cursor:pointer; margin-bottom:2px; display:flex; align-items:center; gap:10px; font-size:14px;
-                background:${page === item.id ? '#282e36' : 'transparent'}; color:${page === item.id ? '#e6edf3' : '#8b949e'};"
-              onMouseEnter=${(e) => { if(page !== item.id) e.target.style.background='#1c2128'; }}
-              onMouseLeave=${(e) => { if(page !== item.id) e.target.style.background='transparent'; }}>
-              <span style="width:20px; text-align:center">${item.icon}</span> ${item.label}
-            </div>
+    // ═══════════════════════════════════════════════════════════════════
+    // Toast notifications
+    // ═══════════════════════════════════════════════════════════════════
+
+    let _toastId = 0;
+    let _setToasts = null;
+
+    function showToast(message, type) {
+      if (!_setToasts) return;
+      const id = ++_toastId;
+      _setToasts(prev => [...prev, { id, message, type: type || 'info' }]);
+      setTimeout(() => _setToasts(prev => prev.filter(t => t.id !== id)), 3200);
+    }
+
+    function ToastContainer() {
+      const [toasts, setToasts] = useState([]);
+      _setToasts = setToasts;
+      return html`
+        <div class="toast-container">
+          ${toasts.map(t => html`
+            <div key=${t.id} class="toast toast-${t.type}">${t.message}</div>
           `)}
-        </nav>
-      </div>
-
-      <!-- Main -->
-      <div style="flex:1; overflow-y:auto; padding:24px; max-width:1200px">
-        ${page === 'dashboard' && html`<${Dashboard} health=${health} agents=${agents} sessions=${sessions} cronJobs=${cronJobs} />`}
-        ${page === 'agents' && html`<${AgentsPage} agents=${agents} refresh=${refresh} />`}
-        ${page === 'sessions' && html`<${SessionsPage} sessions=${sessions} />`}
-        ${page === 'skills' && html`<${SkillsPage} skills=${skills} refresh=${refresh} />`}
-        ${page === 'channels' && html`<${ChannelsPage} health=${health} />`}
-        ${page === 'cron' && html`<${CronPage} cronJobs=${cronJobs} agents=${agents} refresh=${refresh} />`}
-        ${page === 'config' && html`<${ConfigPage} />`}
-      </div>
-    </div>
-  `;
-}
-
-function Dashboard({ health, agents, sessions, cronJobs }) {
-  const stats = [
-    { label: 'Uptime', value: health ? Math.floor(health.uptime / 60) + 'm' : '--', color: '#58a6ff' },
-    { label: 'Agents', value: Object.keys(agents).length, color: '#bc8cff' },
-    { label: 'Sessions', value: sessions.length, color: '#3fb950' },
-    { label: 'Cron Jobs', value: cronJobs.length, color: '#d29922' },
-  ];
-  return html`
-    <h1 style="font-size:24px; font-weight:700; margin-bottom:24px">Dashboard</h1>
-    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:16px; margin-bottom:32px">
-      ${stats.map(s => html`
-        <div class="card" style="border-left:3px solid ${s.color}">
-          <div style="color:#8b949e; font-size:13px; margin-bottom:8px">${s.label}</div>
-          <div style="font-size:28px; font-weight:700">${s.value}</div>
         </div>
-      `)}
-    </div>
-    <h2 style="font-size:18px; font-weight:600; margin-bottom:12px">Agents</h2>
-    <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:12px">
-      ${Object.entries(agents).map(([id, a]) => html`
-        <div class="card" style="display:flex; align-items:center; gap:12px">
-          <div style="width:40px;height:40px;border-radius:50%;background:#282e36;display:flex;align-items:center;justify-content:center;font-size:20px">⬡</div>
-          <div>
-            <div style="font-weight:600">${a.name || id}</div>
-            <div style="font-size:12px; color:#8b949e">${a.toolPreset} · ${a.model}</div>
-          </div>
+      `;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Shared UI components
+    // ═══════════════════════════════════════════════════════════════════
+
+    function Toggle({ active, onToggle, disabled }) {
+      return html`
+        <div
+          class="toggle-track ${active ? 'active' : ''} ${disabled ? 'disabled' : ''}"
+          onClick=${() => !disabled && onToggle && onToggle(!active)}
+        />
+      `;
+    }
+
+    function StatusDot({ connected, size }) {
+      const s = size || 8;
+      return html`<span style="display:inline-block;width:${s}px;height:${s}px;border-radius:50%;background:${connected ? '#3fb950' : '#f85149'};flex-shrink:0" />`;
+    }
+
+    function Spinner({ size }) {
+      const s = size || 16;
+      return html`<span style="display:inline-block;width:${s}px;height:${s}px;border:2px solid #30363d;border-top-color:#58a6ff;border-radius:50%;animation:spin 0.6s linear infinite" />`;
+    }
+
+    function EmptyState({ icon, title, subtitle }) {
+      return html`
+        <div class="flex flex-col items-center justify-center py-16 text-center">
+          <div class="text-4xl mb-3 opacity-40">${icon}</div>
+          <div class="text-base font-medium" style="color:#8b949e">${title}</div>
+          ${subtitle && html`<div class="text-sm mt-1" style="color:#484f58">${subtitle}</div>`}
         </div>
-      `)}
-    </div>
-  `;
-}
+      `;
+    }
 
-function AgentsPage({ agents, refresh }) {
-  const ids = Object.keys(agents);
-  const [selected, setSelected] = useState(ids[0] || '');
-  const [tab, setTab] = useState('soul');
-  const [soul, setSoul] = useState('');
-  const [tools, setTools] = useState([]);
-  const [saving, setSaving] = useState(false);
-  const agent = agents[selected];
+    function TabBar({ tabs, active, onChange }) {
+      return html`
+        <div class="flex gap-0" style="border-bottom:1px solid #30363d">
+          ${tabs.map(tab => html`
+            <button
+              key=${tab.id}
+              onClick=${() => onChange(tab.id)}
+              class="px-4 py-2.5 text-sm font-medium transition-colors relative"
+              style="color:${active === tab.id ? '#e6edf3' : '#8b949e'};background:transparent;border:none;cursor:pointer"
+            >
+              ${tab.label}
+              ${active === tab.id && html`
+                <div class="absolute bottom-0 left-0 right-0" style="height:2px;background:#58a6ff;border-radius:1px" />
+              `}
+            </button>
+          `)}
+        </div>
+      `;
+    }
 
-  useEffect(() => { if (ids.length && !ids.includes(selected)) setSelected(ids[0]); }, [agents]);
-  useEffect(() => {
-    if (!selected) return;
-    api('/agents/' + selected + '/soul').then(d => { if (d?.content) setSoul(d.content); });
-    const preset = agents[selected]?.toolPreset || 'full';
-    setTools(PRESETS[preset]?.tools || PRESETS.full.tools);
-  }, [selected]);
+    function LoadingState({ text }) {
+      return html`<div class="flex items-center gap-2 py-12 justify-center" style="color:#8b949e"><${Spinner} /> ${text || 'Loading...'}</div>`;
+    }
 
-  const saveSoul = async () => {
-    setSaving(true);
-    await api('/agents/' + selected + '/soul', { method: 'PUT', body: JSON.stringify({ content: soul }) });
-    setSaving(false);
-  };
-  const applyPreset = (key) => setTools([...(PRESETS[key]?.tools || [])]);
-  const toggleTool = (id) => setTools(t => t.includes(id) ? t.filter(x => x !== id) : [...t, id]);
+    // ═══════════════════════════════════════════════════════════════════
+    // Layout: Sidebar
+    // ═══════════════════════════════════════════════════════════════════
 
-  const tabs = ['Soul', 'Tools', 'Memory', 'Heartbeat'];
+    const NAV_ITEMS = [
+      { id: 'dashboard', label: 'Dashboard',  icon: '\u{1F4CA}' },
+      { id: 'agents',    label: 'Agents',     icon: '\u{1F916}' },
+      { id: 'sessions',  label: 'Sessions',   icon: '\u{1F4AC}' },
+      { id: 'skills',    label: 'Skills',     icon: '\u{1F9E9}' },
+      { id: 'channels',  label: 'Channels',   icon: '\u{1F4E1}' },
+      { id: 'cron',      label: 'Cron',       icon: '\u{23F0}'  },
+      { id: 'config',    label: 'Config',     icon: '\u{2699}\u{FE0F}' },
+    ];
 
-  return html`
-    <div style="display:flex; gap:20px">
-      <!-- Agent list -->
-      <div style="width:180px; flex-shrink:0">
-        <h2 style="font-size:14px; color:#8b949e; text-transform:uppercase; letter-spacing:1px; margin-bottom:12px">Agents</h2>
-        ${ids.map(id => html`
-          <div onClick=${() => setSelected(id)}
-            style="padding:10px 12px; border-radius:6px; cursor:pointer; margin-bottom:4px;
-              background:${selected === id ? '#282e36' : 'transparent'}; border:${selected === id ? '1px solid #30363d' : '1px solid transparent'}">
-            <div style="font-weight:${selected === id ? '600' : '400'}">${agents[id]?.name || id}</div>
-            <div style="font-size:11px; color:#8b949e">${agents[id]?.skills?.length || 0} skills</div>
+    function Sidebar({ page, setPage, agents }) {
+      return html`
+        <aside class="flex flex-col h-full" style="width:240px;min-width:240px;background:#161b22;border-right:1px solid #30363d">
+          <!-- Logo -->
+          <div class="px-4 py-4 flex items-center gap-2.5" style="border-bottom:1px solid #30363d">
+            <span class="text-lg">\u{1F52E}</span>
+            <span class="font-bold text-sm" style="color:#e6edf3;letter-spacing:-0.01em">TeamAgents</span>
           </div>
-        `)}
-      </div>
 
-      <!-- Editor -->
-      <div style="flex:1">
-        ${agent && html`
-          <div style="margin-bottom:16px">
-            <h1 style="font-size:20px; font-weight:700">${agent.name || selected}</h1>
-            <p style="color:#8b949e; font-size:13px">${agent.description || 'No description'}</p>
+          <!-- Navigation -->
+          <nav class="flex-1 py-2 overflow-y-auto">
+            <div class="px-4 pt-2 pb-1.5 text-xs font-semibold uppercase tracking-wider" style="color:#484f58">Navigation</div>
+            ${NAV_ITEMS.map(item => html`
+              <div
+                key=${item.id}
+                class="nav-item ${page === item.id ? 'active' : ''}"
+                onClick=${() => setPage(item.id)}
+              >
+                <span class="text-base" style="width:20px;text-align:center">${item.icon}</span>
+                <span>${item.label}</span>
+              </div>
+            `)}
+
+            ${agents.length > 0 && html`
+              <div class="px-4 pt-5 pb-1.5 text-xs font-semibold uppercase tracking-wider" style="color:#484f58">Agents</div>
+              ${agents.map(a => html`
+                <div
+                  key=${a.id}
+                  class="nav-item"
+                  style="font-size:13px"
+                  onClick=${() => setPage('agents')}
+                >
+                  <span class="text-sm" style="width:20px;text-align:center">\u{1F916}</span>
+                  <span class="truncate flex-1">${a.name || a.id}</span>
+                  ${a.skills && a.skills.length > 0 && html`
+                    <span class="text-xs px-1.5 rounded" style="background:#282e36;color:#8b949e">${a.skills.length}</span>
+                  `}
+                </div>
+              `)}
+            `}
+          </nav>
+
+          <!-- Footer -->
+          <div class="px-4 py-3 text-xs" style="border-top:1px solid #30363d;color:#484f58">
+            TeamAgents v0.1.0
           </div>
-          <div style="display:flex; gap:0; border-bottom:1px solid #30363d; margin-bottom:20px">
-            ${tabs.map(t => html`
-              <div class="tab ${tab === t.toLowerCase() ? 'active' : ''}" onClick=${() => setTab(t.toLowerCase())}>${t}</div>
+        </aside>
+      `;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Layout: TopBar
+    // ═══════════════════════════════════════════════════════════════════
+
+    function TopBar({ connected, health, agents }) {
+      const port = health?.port || location.port || '7890';
+      return html`
+        <header class="flex items-center justify-between px-6" style="height:48px;min-height:48px;background:#161b22;border-bottom:1px solid #30363d">
+          <h1 class="text-sm font-semibold" style="color:#e6edf3">TeamAgents Admin</h1>
+          <div class="flex items-center gap-5 text-xs" style="color:#8b949e">
+            <div class="flex items-center gap-2">
+              <${StatusDot} connected=${connected} />
+              <span>${connected ? 'Connected' : 'Disconnected'}</span>
+            </div>
+            <span>Port ${port}</span>
+            <span>${agents.length} agent${agents.length !== 1 ? 's' : ''}</span>
+            ${health && html`<span>Uptime ${fmtUptime(health.uptime)}</span>`}
+          </div>
+        </header>
+      `;
+    }
+
+    function fmtUptime(sec) {
+      if (!sec && sec !== 0) return '--';
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = Math.floor(sec % 60);
+      if (h > 0) return h + 'h ' + m + 'm';
+      if (m > 0) return m + 'm ' + s + 's';
+      return s + 's';
+    }
+
+    function fmtDate(d) {
+      if (!d) return '--';
+      try { return new Date(d).toLocaleString(); } catch { return String(d); }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  PAGE 1: Dashboard
+    // ═══════════════════════════════════════════════════════════════════
+
+    function DashboardPage({ health, agents, sessions, cronJobs }) {
+      const activeSessions = sessions.filter(s => s.status === 'active').length;
+
+      const stats = [
+        { label: 'Uptime',          value: fmtUptime(health?.uptime), color: '#58a6ff', icon: '\u{23F1}\u{FE0F}' },
+        { label: 'Active Agents',   value: agents.length,             color: '#3fb950', icon: '\u{1F916}' },
+        { label: 'Active Sessions', value: activeSessions,            color: '#bc8cff', icon: '\u{1F4AC}' },
+        { label: 'Cron Jobs',       value: cronJobs.length,           color: '#d29922', icon: '\u{23F0}'  },
+      ];
+
+      return html`
+        <div class="page-enter p-6">
+          <h2 class="text-xl font-semibold mb-6" style="color:#e6edf3">Dashboard</h2>
+
+          <!-- Stats grid -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            ${stats.map(s => html`
+              <div key=${s.label} class="stat-card" style="border-left-color:${s.color}">
+                <div class="flex items-center gap-2">
+                  <span class="text-lg">${s.icon}</span>
+                  <span class="text-xs font-medium uppercase tracking-wider" style="color:#8b949e">${s.label}</span>
+                </div>
+                <div class="text-2xl font-bold" style="color:#e6edf3">${s.value != null ? s.value : '--'}</div>
+              </div>
             `)}
           </div>
 
-          ${tab === 'soul' && html`
-            <textarea rows="20" value=${soul} onInput=${(e) => setSoul(e.target.value)}
-              style="font-size:13px; line-height:1.6; margin-bottom:12px" />
-            <button class="btn btn-primary" onClick=${saveSoul} disabled=${saving}>
-              ${saving ? 'Saving...' : 'Save'}
-            </button>
-          `}
+          <!-- Two-column overview -->
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Recent sessions -->
+            <div class="rounded-lg p-5" style="background:#1c2128;border:1px solid #30363d">
+              <h3 class="text-sm font-semibold mb-3" style="color:#e6edf3">Recent Sessions</h3>
+              ${sessions.length === 0
+                ? html`<div class="text-sm" style="color:#8b949e">No sessions yet.</div>`
+                : html`
+                  <div class="space-y-2">
+                    ${sessions.slice(0, 6).map(s => html`
+                      <div key=${s.id} class="flex items-center justify-between py-2 px-3 rounded" style="background:#161b22">
+                        <div class="flex items-center gap-3 min-w-0">
+                          <span class="font-mono text-xs flex-shrink-0" style="color:#58a6ff">${s.id.slice(0,8)}...</span>
+                          <span class="text-sm truncate" style="color:#e6edf3">${s.agentId || s.agent_id || '--'}</span>
+                        </div>
+                        <span class="badge flex-shrink-0 ${s.status === 'active' ? 'badge-green' : s.status === 'idle' ? 'badge-yellow' : 'badge-gray'}">${s.status}</span>
+                      </div>
+                    `)}
+                  </div>
+                `
+              }
+            </div>
 
-          ${tab === 'tools' && html`
-            <div style="margin-bottom:16px">
-              <div style="font-size:13px; color:#8b949e; margin-bottom:8px">
-                Tool Access · ${tools.length}/${Object.values(TOOL_CATEGORIES).flat().length} tools enabled
+            <!-- Agents overview -->
+            <div class="rounded-lg p-5" style="background:#1c2128;border:1px solid #30363d">
+              <h3 class="text-sm font-semibold mb-3" style="color:#e6edf3">Agents</h3>
+              ${agents.length === 0
+                ? html`<div class="text-sm" style="color:#8b949e">No agents configured.</div>`
+                : html`
+                  <div class="space-y-2">
+                    ${agents.map(a => html`
+                      <div key=${a.id} class="flex items-center justify-between py-2 px-3 rounded" style="background:#161b22">
+                        <div class="flex items-center gap-3 min-w-0">
+                          <span>\u{1F916}</span>
+                          <div class="min-w-0">
+                            <div class="text-sm font-medium truncate" style="color:#e6edf3">${a.name}</div>
+                            <div class="text-xs truncate" style="color:#8b949e">${a.description || a.id}</div>
+                          </div>
+                        </div>
+                        <span class="badge badge-blue flex-shrink-0">${a.toolPreset}</span>
+                      </div>
+                    `)}
+                  </div>
+                `
+              }
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  PAGE 2: Agents
+    // ═══════════════════════════════════════════════════════════════════
+
+    function AgentsPage({ agents, onRefresh }) {
+      const [selectedId, setSelectedId] = useState(null);
+
+      // Auto-select first agent
+      useEffect(() => {
+        if (agents.length > 0 && (!selectedId || !agents.find(a => a.id === selectedId))) {
+          setSelectedId(agents[0].id);
+        }
+      }, [agents]);
+
+      const selectedAgent = agents.find(a => a.id === selectedId);
+
+      return html`
+        <div class="page-enter flex h-full">
+          <!-- Agent sub-sidebar -->
+          <div class="flex flex-col py-3" style="width:200px;min-width:200px;border-right:1px solid #30363d;background:#161b22">
+            <div class="px-3 pb-2 text-xs font-semibold uppercase tracking-wider" style="color:#484f58">Agents</div>
+            <div class="flex-1 overflow-y-auto">
+              ${agents.length === 0
+                ? html`<div class="px-3 py-4 text-sm" style="color:#8b949e">No agents</div>`
+                : agents.map(a => html`
+                  <div
+                    key=${a.id}
+                    class="flex items-center gap-2 px-3 py-2.5 mx-2 rounded cursor-pointer transition-colors text-sm"
+                    style="background:${selectedId === a.id ? 'rgba(88,166,255,0.1)' : 'transparent'};color:${selectedId === a.id ? '#58a6ff' : '#8b949e'}"
+                    onClick=${() => setSelectedId(a.id)}
+                  >
+                    <span>\u{1F916}</span>
+                    <span class="truncate flex-1">${a.name || a.id}</span>
+                    ${a.skills && a.skills.length > 0 && html`
+                      <span class="text-xs opacity-60">${a.skills.length}sk</span>
+                    `}
+                  </div>
+                `)
+              }
+            </div>
+          </div>
+
+          <!-- Agent detail panel -->
+          <div class="flex-1 overflow-y-auto">
+            ${selectedAgent
+              ? html`<${AgentDetail} agent=${selectedAgent} onRefresh=${onRefresh} />`
+              : html`<${EmptyState} icon="\u{1F916}" title="Select an agent" subtitle="Choose from the list to view details" />`
+            }
+          </div>
+        </div>
+      `;
+    }
+
+    // ── Agent detail with tabs ───────────────────────────────────────
+
+    function AgentDetail({ agent, onRefresh }) {
+      const [tab, setTab] = useState('soul');
+      const tabs = [
+        { id: 'soul',      label: 'Soul' },
+        { id: 'identity',  label: 'Identity' },
+        { id: 'tools',     label: 'Tools' },
+        { id: 'memory',    label: 'Memory' },
+        { id: 'heartbeat', label: 'Heartbeat' },
+      ];
+
+      return html`
+        <div class="p-5">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="flex items-center justify-center rounded-full" style="width:40px;height:40px;background:#282e36;font-size:20px">\u{1F916}</div>
+            <div>
+              <h2 class="text-lg font-semibold" style="color:#e6edf3">${agent.name}</h2>
+              <div class="text-xs" style="color:#8b949e">${agent.id} \u{00B7} ${agent.model || 'sonnet'} \u{00B7} ${agent.toolPreset}</div>
+            </div>
+          </div>
+
+          <${TabBar} tabs=${tabs} active=${tab} onChange=${setTab} />
+
+          <div class="pt-4">
+            ${tab === 'soul'      && html`<${SoulTab} agentId=${agent.id} />`}
+            ${tab === 'identity'  && html`<${IdentityTab} agentId=${agent.id} />`}
+            ${tab === 'tools'     && html`<${ToolsTab} agent=${agent} onRefresh=${onRefresh} />`}
+            ${tab === 'memory'    && html`<${MemoryTab} agentId=${agent.id} />`}
+            ${tab === 'heartbeat' && html`<${HeartbeatTab} agentId=${agent.id} />`}
+          </div>
+        </div>
+      `;
+    }
+
+    // ── Soul Tab ─────────────────────────────────────────────────────
+
+    function SoulTab({ agentId }) {
+      const [content, setContent] = useState('');
+      const [loading, setLoading] = useState(true);
+      const [saving, setSaving] = useState(false);
+
+      useEffect(() => {
+        setLoading(true);
+        api('/agents/' + agentId + '/soul')
+          .then(d => setContent(d.content || ''))
+          .catch(e => showToast('Failed to load SOUL.md: ' + e.message, 'error'))
+          .finally(() => setLoading(false));
+      }, [agentId]);
+
+      const save = async () => {
+        setSaving(true);
+        try {
+          await api('/agents/' + agentId + '/soul', { method: 'PUT', body: { content } });
+          showToast('SOUL.md saved successfully', 'success');
+        } catch (e) { showToast('Save failed: ' + e.message, 'error'); }
+        setSaving(false);
+      };
+
+      if (loading) return html`<${LoadingState} text="Loading SOUL.md..." />`;
+
+      return html`
+        <div>
+          <textarea
+            class="mono-editor w-full"
+            style="min-height:420px;max-height:70vh"
+            value=${content}
+            onInput=${e => setContent(e.target.value)}
+            placeholder="# SOUL.md - Who You Are..."
+            spellcheck="false"
+          />
+          <div class="flex items-center justify-between mt-3">
+            <span class="text-xs" style="color:#484f58">${content.length} characters</span>
+            <button class="btn btn-primary" onClick=${save} disabled=${saving}>
+              ${saving ? 'Saving...' : 'Save SOUL.md'}
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    // ── Identity Tab ─────────────────────────────────────────────────
+
+    function IdentityTab({ agentId }) {
+      const [form, setForm] = useState({ name: '', creature: '', vibe: '', emoji: '', avatar: '' });
+      const [loading, setLoading] = useState(true);
+      const [saving, setSaving] = useState(false);
+
+      useEffect(() => {
+        setLoading(true);
+        api('/agents/' + agentId)
+          .then(d => {
+            const a = d.agent || {};
+            setForm({
+              name:     a.name     || '',
+              creature: a.creature || '',
+              vibe:     a.vibe     || '',
+              emoji:    a.emoji    || '',
+              avatar:   a.avatar   || '',
+            });
+          })
+          .catch(e => showToast('Failed to load identity: ' + e.message, 'error'))
+          .finally(() => setLoading(false));
+      }, [agentId]);
+
+      const upd = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
+
+      const save = async () => {
+        setSaving(true);
+        try {
+          await api('/agents/' + agentId, { method: 'PUT', body: form });
+          showToast('Identity saved', 'success');
+        } catch (e) { showToast('Save failed: ' + e.message, 'error'); }
+        setSaving(false);
+      };
+
+      if (loading) return html`<${LoadingState} text="Loading identity..." />`;
+
+      const fields = [
+        { key: 'name',     label: 'Name',     ph: 'e.g. Sparky' },
+        { key: 'creature', label: 'Creature',  ph: 'e.g. AI familiar, ghost in the machine' },
+        { key: 'vibe',     label: 'Vibe',      ph: 'e.g. sharp, warm, chaotic' },
+        { key: 'emoji',    label: 'Emoji',     ph: 'Pick one that feels right' },
+        { key: 'avatar',   label: 'Avatar',    ph: 'URL or workspace-relative path' },
+      ];
+
+      return html`
+        <div class="max-w-lg space-y-4">
+          ${fields.map(f => html`
+            <div key=${f.key}>
+              <label class="block text-xs font-medium mb-1.5" style="color:#8b949e">${f.label}</label>
+              <input type="text" value=${form[f.key]} onInput=${e => upd(f.key, e.target.value)} placeholder=${f.ph} />
+            </div>
+          `)}
+          <div class="flex justify-end pt-2">
+            <button class="btn btn-primary" onClick=${save} disabled=${saving}>
+              ${saving ? 'Saving...' : 'Save Identity'}
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    // ── Tools Tab (THE critical visual element) ──────────────────────
+
+    function ToolsTab({ agent, onRefresh }) {
+      const initial = useMemo(() => {
+        if (agent.toolPreset === 'custom') return agent.customTools || [];
+        return PRESET_MAP[agent.toolPreset] || PRESET_MAP.full;
+      }, [agent.id, agent.toolPreset]);
+
+      const [enabled, setEnabled] = useState([...initial]);
+      const [saving, setSaving] = useState(false);
+      const preset = detectPreset(enabled);
+
+      useEffect(() => { setEnabled([...initial]); }, [initial]);
+
+      const toggle = (id) => {
+        setEnabled(prev => prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id]);
+      };
+
+      const applyPreset = (name) => setEnabled([...PRESET_MAP[name]]);
+
+      const save = async () => {
+        setSaving(true);
+        try {
+          const p = detectPreset(enabled);
+          const body = p !== 'custom'
+            ? { toolPreset: p, customTools: [] }
+            : { toolPreset: 'custom', customTools: enabled };
+          await api('/agents/' + agent.id, { method: 'PUT', body });
+          showToast('Tool configuration saved', 'success');
+          onRefresh && onRefresh();
+        } catch (e) { showToast('Save failed: ' + e.message, 'error'); }
+        setSaving(false);
+      };
+
+      const totalEnabled = enabled.length;
+      const totalTools = ALL_TOOL_IDS.length;
+
+      return html`
+        <div>
+          <!-- Preset buttons row -->
+          <div class="flex items-center flex-wrap gap-2 mb-6">
+            <button class="preset-btn preset-potato ${preset === 'potato' ? 'selected' : ''}" onClick=${() => applyPreset('potato')}>
+              \u{1F954} Potato
+            </button>
+            <button class="preset-btn preset-coding ${preset === 'coding' ? 'selected' : ''}" onClick=${() => applyPreset('coding')}>
+              \u{1F4BB} Coding
+            </button>
+            <button class="preset-btn preset-messaging ${preset === 'messaging' ? 'selected' : ''}" onClick=${() => applyPreset('messaging')}>
+              \u{1F4E8} Messaging
+            </button>
+            <button class="preset-btn preset-full ${preset === 'full' ? 'selected' : ''}" onClick=${() => applyPreset('full')}>
+              \u{1F680} Full
+            </button>
+            ${preset === 'custom' && html`
+              <span class="text-xs font-mono px-3 py-1 rounded" style="background:rgba(139,148,158,0.1);color:#8b949e">custom</span>
+            `}
+            <span class="ml-auto text-xs" style="color:#484f58">${totalEnabled}/${totalTools} tools enabled</span>
+          </div>
+
+          <!-- Tool category sections -->
+          <div class="space-y-6">
+            ${TOOL_CATEGORIES.map(cat => {
+              const catEnabled = cat.tools.filter(t => enabled.includes(t.id)).length;
+              return html`
+                <div key=${cat.name}>
+                  <div class="flex items-center gap-2 mb-3">
+                    <span class="text-base">${cat.icon}</span>
+                    <h4 class="text-sm font-semibold" style="color:#e6edf3">${cat.label}</h4>
+                    <span class="text-xs px-1.5 rounded" style="background:${catEnabled === cat.tools.length ? 'rgba(63,185,80,0.15)' : catEnabled > 0 ? 'rgba(210,153,34,0.15)' : 'rgba(139,148,158,0.1)'};color:${catEnabled === cat.tools.length ? '#3fb950' : catEnabled > 0 ? '#d29922' : '#8b949e'}">
+                      ${catEnabled}/${cat.tools.length}
+                    </span>
+                  </div>
+                  <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    ${cat.tools.map(tool => {
+                      const on = enabled.includes(tool.id);
+                      return html`
+                        <div key=${tool.id} class="tool-card ${on ? 'enabled' : ''}">
+                          <div class="min-w-0">
+                            <div class="text-sm font-medium truncate" style="color:${on ? '#e6edf3' : '#8b949e'};font-family:ui-monospace,'SF Mono',SFMono-Regular,monospace;font-size:13px">
+                              ${tool.id}
+                            </div>
+                            <div class="text-xs mt-0.5 truncate" style="color:#484f58">${tool.desc}</div>
+                          </div>
+                          <${Toggle} active=${on} onToggle=${() => toggle(tool.id)} />
+                        </div>
+                      `;
+                    })}
+                  </div>
+                </div>
+              `;
+            })}
+          </div>
+
+          <!-- Save bar -->
+          <div class="flex items-center justify-between mt-6 pt-4" style="border-top:1px solid #30363d">
+            <span class="text-xs" style="color:#484f58">
+              Preset: <span style="color:#8b949e">${preset}</span>
+            </span>
+            <button class="btn btn-primary" onClick=${save} disabled=${saving}>
+              ${saving ? 'Saving...' : 'Save Tool Config'}
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    // ── Memory Tab ───────────────────────────────────────────────────
+
+    function MemoryTab({ agentId }) {
+      const [files, setFiles] = useState([]);
+      const [selFile, setSelFile] = useState(null);
+      const [content, setContent] = useState('');
+      const [loading, setLoading] = useState(true);
+      const [loadingFile, setLoadingFile] = useState(false);
+      const [query, setQuery] = useState('');
+      const [results, setResults] = useState(null);
+
+      useEffect(() => {
+        setLoading(true);
+        setSelFile(null);
+        setContent('');
+        setResults(null);
+        api('/agents/' + agentId + '/memory')
+          .then(d => setFiles(d.files || []))
+          .catch(e => showToast('Failed to load memory: ' + e.message, 'error'))
+          .finally(() => setLoading(false));
+      }, [agentId]);
+
+      const openFile = async (file) => {
+        setSelFile(file);
+        setLoadingFile(true);
+        setResults(null);
+        try {
+          const seg = file === 'MEMORY.md' ? 'MEMORY.md' : encodeURIComponent(file.replace('memory/', ''));
+          const d = await api('/agents/' + agentId + '/memory/' + seg);
+          setContent(d.content || '');
+        } catch (e) {
+          showToast('Failed to load file: ' + e.message, 'error');
+          setContent('');
+        }
+        setLoadingFile(false);
+      };
+
+      const search = async () => {
+        if (!query.trim()) return;
+        try {
+          const d = await api('/agents/' + agentId + '/memory/search', { method: 'POST', body: { query } });
+          setResults(d.results || []);
+          setSelFile(null);
+        } catch (e) { showToast('Search failed: ' + e.message, 'error'); }
+      };
+
+      if (loading) return html`<${LoadingState} text="Loading memory files..." />`;
+
+      return html`
+        <div>
+          <!-- Search bar -->
+          <div class="flex gap-2 mb-4">
+            <input
+              type="text" class="flex-1"
+              value=${query}
+              onInput=${e => setQuery(e.target.value)}
+              onKeyDown=${e => e.key === 'Enter' && search()}
+              placeholder="Search memory (FTS5)..."
+            />
+            <button class="btn btn-secondary" onClick=${search}>Search</button>
+          </div>
+
+          ${results !== null ? html`
+            <!-- Search results view -->
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-sm" style="color:#8b949e">${results.length} result${results.length !== 1 ? 's' : ''}</span>
+                <button class="text-xs" style="color:#58a6ff;background:none;border:none;cursor:pointer" onClick=${() => setResults(null)}>Clear results</button>
               </div>
-              <div style="display:flex; gap:8px; margin-bottom:20px">
-                ${Object.entries(PRESETS).map(([key, p]) => html`
-                  <button class="preset-btn" onClick=${() => applyPreset(key)}
-                    style="background:${p.color}22; color:${p.color}; border-color:${p.color}44">
-                    ${p.label}
-                  </button>
+              ${results.length === 0
+                ? html`<div class="text-sm py-4" style="color:#8b949e">No matching entries found.</div>`
+                : html`
+                  <div class="space-y-2">
+                    ${results.map((r, i) => html`
+                      <div key=${i} class="p-3 rounded-lg" style="background:#1c2128;border:1px solid #30363d">
+                        <div class="text-xs font-mono mb-1" style="color:#58a6ff">${r.file || r.file_path || r.filename || 'memory'}</div>
+                        <div class="text-sm" style="color:#e6edf3;white-space:pre-wrap">${r.snippet || r.chunk_text || r.content || JSON.stringify(r)}</div>
+                      </div>
+                    `)}
+                  </div>
+                `
+              }
+            </div>
+          ` : html`
+            <!-- File list + content viewer -->
+            <div class="flex gap-4" style="min-height:300px">
+              <div style="min-width:180px;max-width:200px" class="space-y-0.5 overflow-y-auto">
+                ${files.length === 0
+                  ? html`<div class="text-sm py-2" style="color:#8b949e">No files.</div>`
+                  : files.map(f => html`
+                    <div
+                      key=${f}
+                      class="px-3 py-2 rounded cursor-pointer text-sm truncate transition-colors"
+                      style="background:${selFile === f ? 'rgba(88,166,255,0.1)' : 'transparent'};color:${selFile === f ? '#58a6ff' : '#8b949e'}"
+                      onClick=${() => openFile(f)}
+                    >
+                      \u{1F4C4} ${f}
+                    </div>
+                  `)
+                }
+              </div>
+              <div class="flex-1 min-w-0">
+                ${selFile
+                  ? loadingFile
+                    ? html`<${LoadingState} text="Loading file..." />`
+                    : html`
+                      <div>
+                        <div class="text-xs font-mono mb-2" style="color:#8b949e">${selFile}</div>
+                        <pre
+                          class="p-4 rounded-lg text-sm overflow-auto"
+                          style="background:#0f1117;border:1px solid #30363d;color:#e6edf3;font-family:ui-monospace,'SF Mono',monospace;max-height:450px;white-space:pre-wrap;margin:0"
+                        >${content}</pre>
+                      </div>
+                    `
+                  : html`<div class="flex items-center justify-center h-full text-sm" style="color:#484f58">Select a file to view its contents.</div>`
+                }
+              </div>
+            </div>
+          `}
+        </div>
+      `;
+    }
+
+    // ── Heartbeat Tab ────────────────────────────────────────────────
+
+    function HeartbeatTab({ agentId }) {
+      const [content, setContent] = useState('');
+      const [interval, setInterval_] = useState('30m');
+      const [activeStart, setActiveStart] = useState('09:00');
+      const [activeEnd, setActiveEnd] = useState('22:00');
+      const [hbEnabled, setHbEnabled] = useState(false);
+      const [loading, setLoading] = useState(true);
+      const [saving, setSaving] = useState(false);
+
+      useEffect(() => {
+        setLoading(true);
+        Promise.all([
+          api('/agents/' + agentId + '/heartbeat').catch(() => ({ content: '' })),
+          api('/agents/' + agentId).catch(() => ({ agent: {} })),
+        ]).then(([hb, ag]) => {
+          setContent(hb.content || '');
+          const c = ag.agent?.heartbeat || {};
+          setInterval_(c.interval || '30m');
+          setActiveStart(c.activeHours?.start || '09:00');
+          setActiveEnd(c.activeHours?.end || '22:00');
+          setHbEnabled(!!c.enabled);
+        }).finally(() => setLoading(false));
+      }, [agentId]);
+
+      const save = async () => {
+        setSaving(true);
+        try {
+          await Promise.all([
+            api('/agents/' + agentId + '/heartbeat', { method: 'PUT', body: { content } }),
+            api('/agents/' + agentId, {
+              method: 'PUT',
+              body: {
+                heartbeat: {
+                  enabled: hbEnabled,
+                  interval,
+                  activeHours: { start: activeStart, end: activeEnd },
+                },
+              },
+            }),
+          ]);
+          showToast('Heartbeat settings saved', 'success');
+        } catch (e) { showToast('Save failed: ' + e.message, 'error'); }
+        setSaving(false);
+      };
+
+      if (loading) return html`<${LoadingState} text="Loading heartbeat..." />`;
+
+      return html`
+        <div class="max-w-2xl">
+          <!-- Enable toggle -->
+          <div class="flex items-center gap-3 mb-5">
+            <${Toggle} active=${hbEnabled} onToggle=${v => setHbEnabled(v)} />
+            <span class="text-sm font-medium" style="color:${hbEnabled ? '#3fb950' : '#8b949e'}">
+              Heartbeat ${hbEnabled ? 'enabled' : 'disabled'}
+            </span>
+          </div>
+
+          <!-- Settings row -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
+            <div>
+              <label class="block text-xs font-medium mb-1.5" style="color:#8b949e">Interval</label>
+              <select value=${interval} onChange=${e => setInterval_(e.target.value)}>
+                <option value="15m">15 minutes</option>
+                <option value="30m">30 minutes</option>
+                <option value="1h">1 hour</option>
+                <option value="4h">4 hours</option>
+                <option value="daily">Daily</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-medium mb-1.5" style="color:#8b949e">Active From</label>
+              <input type="time" value=${activeStart} onInput=${e => setActiveStart(e.target.value)} />
+            </div>
+            <div>
+              <label class="block text-xs font-medium mb-1.5" style="color:#8b949e">Active Until</label>
+              <input type="time" value=${activeEnd} onInput=${e => setActiveEnd(e.target.value)} />
+            </div>
+          </div>
+
+          <!-- HEARTBEAT.md editor -->
+          <div class="mb-4">
+            <label class="block text-xs font-medium mb-1.5" style="color:#8b949e">HEARTBEAT.md</label>
+            <textarea
+              class="mono-editor w-full"
+              style="min-height:260px"
+              value=${content}
+              onInput=${e => setContent(e.target.value)}
+              placeholder="# Heartbeat Checklist..."
+              spellcheck="false"
+            />
+          </div>
+
+          <div class="flex justify-end">
+            <button class="btn btn-primary" onClick=${save} disabled=${saving}>
+              ${saving ? 'Saving...' : 'Save Heartbeat'}
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  PAGE 3: Sessions
+    // ═══════════════════════════════════════════════════════════════════
+
+    function SessionsPage({ sessions, onRefresh }) {
+      const [expandedId, setExpandedId] = useState(null);
+      const [msgText, setMsgText] = useState('');
+      const [sending, setSending] = useState(false);
+      const [response, setResponse] = useState(null);
+
+      const toggleRow = (id) => {
+        setExpandedId(prev => prev === id ? null : id);
+        setMsgText('');
+        setResponse(null);
+      };
+
+      const sendMsg = async (sid) => {
+        if (!msgText.trim()) return;
+        setSending(true);
+        setResponse(null);
+        try {
+          const d = await api('/sessions/' + sid + '/send', { method: 'POST', body: { text: msgText } });
+          setResponse(d.response || 'Message sent successfully.');
+          setMsgText('');
+          showToast('Message sent', 'success');
+          onRefresh && onRefresh();
+        } catch (e) { showToast('Send failed: ' + e.message, 'error'); }
+        setSending(false);
+      };
+
+      const terminate = async (id, ev) => {
+        ev && ev.stopPropagation();
+        try {
+          await api('/sessions/' + id, { method: 'DELETE' });
+          showToast('Session terminated', 'success');
+          onRefresh && onRefresh();
+        } catch (e) { showToast('Terminate failed: ' + e.message, 'error'); }
+      };
+
+      return html`
+        <div class="page-enter p-6">
+          <div class="flex items-center justify-between mb-5">
+            <h2 class="text-xl font-semibold" style="color:#e6edf3">Sessions</h2>
+            <button class="btn btn-secondary" onClick=${onRefresh}>Refresh</button>
+          </div>
+
+          ${sessions.length === 0
+            ? html`<${EmptyState} icon="\u{1F4AC}" title="No sessions" subtitle="Sessions appear when agents start conversations" />`
+            : html`
+              <div class="rounded-lg overflow-hidden" style="border:1px solid #30363d">
+                <table class="w-full" style="border-collapse:collapse">
+                  <thead>
+                    <tr style="background:#161b22">
+                      <th class="text-left text-xs font-medium px-4 py-3" style="color:#8b949e">Session ID</th>
+                      <th class="text-left text-xs font-medium px-4 py-3" style="color:#8b949e">Agent</th>
+                      <th class="text-left text-xs font-medium px-4 py-3" style="color:#8b949e">Channel</th>
+                      <th class="text-left text-xs font-medium px-4 py-3" style="color:#8b949e">Status</th>
+                      <th class="text-left text-xs font-medium px-4 py-3" style="color:#8b949e">Last Active</th>
+                      <th class="text-right text-xs font-medium px-4 py-3" style="color:#8b949e">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${sessions.map(s => {
+                      const aid = s.agentId || s.agent_id || '--';
+                      const ch = s.channel || '--';
+                      const badge = s.status === 'active' ? 'badge-green' : s.status === 'idle' ? 'badge-yellow' : 'badge-gray';
+                      const isExpanded = expandedId === s.id;
+                      return html`
+                        <tr
+                          key=${s.id}
+                          class="cursor-pointer transition-colors"
+                          style="border-top:1px solid #30363d;background:${isExpanded ? '#1c2128' : 'transparent'}"
+                          onClick=${() => toggleRow(s.id)}
+                        >
+                          <td class="px-4 py-3 font-mono text-xs" style="color:#58a6ff">${s.id.length > 12 ? s.id.slice(0,12) + '\u{2026}' : s.id}</td>
+                          <td class="px-4 py-3 text-sm" style="color:#e6edf3">${aid}</td>
+                          <td class="px-4 py-3 text-sm" style="color:#8b949e">${ch}</td>
+                          <td class="px-4 py-3"><span class="badge ${badge}">${s.status}</span></td>
+                          <td class="px-4 py-3 text-xs" style="color:#8b949e">${fmtDate(s.lastActiveAt || s.last_active_at)}</td>
+                          <td class="px-4 py-3 text-right">
+                            ${s.status !== 'terminated' && html`
+                              <button class="btn btn-danger" style="padding:4px 10px;font-size:12px" onClick=${(e) => terminate(s.id, e)}>Terminate</button>
+                            `}
+                          </td>
+                        </tr>
+                        ${isExpanded && html`
+                          <tr key=${s.id + '-exp'}>
+                            <td colspan="6" class="px-4 py-4" style="border-top:1px solid #30363d;background:#161b22">
+                              <div class="flex gap-2 mb-3">
+                                <input
+                                  type="text" class="flex-1"
+                                  value=${msgText}
+                                  onInput=${e => setMsgText(e.target.value)}
+                                  onKeyDown=${e => e.key === 'Enter' && sendMsg(s.id)}
+                                  placeholder="Send a message to this session..."
+                                  onClick=${e => e.stopPropagation()}
+                                />
+                                <button class="btn btn-accent" onClick=${e => { e.stopPropagation(); sendMsg(s.id); }} disabled=${sending}>
+                                  ${sending ? 'Sending...' : 'Send'}
+                                </button>
+                              </div>
+                              ${response && html`
+                                <div class="p-3 rounded-lg text-sm overflow-auto" style="background:#0f1117;border:1px solid #30363d;color:#e6edf3;white-space:pre-wrap;max-height:200px" onClick=${e => e.stopPropagation()}>
+                                  ${response}
+                                </div>
+                              `}
+                            </td>
+                          </tr>
+                        `}
+                      `;
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            `
+          }
+        </div>
+      `;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  PAGE 4: Skills
+    // ═══════════════════════════════════════════════════════════════════
+
+    function SkillsPage({ skills, onRefresh }) {
+      const [pkgName, setPkgName] = useState('');
+      const [installing, setInstalling] = useState(false);
+
+      const active   = skills.filter(s => s.status === 'active');
+      const pending  = skills.filter(s => s.status === 'pending');
+      const disabled = skills.filter(s => s.status === 'disabled');
+
+      const approve = async (name) => {
+        try {
+          await api('/skills/' + encodeURIComponent(name) + '/approve', { method: 'POST' });
+          showToast('Skill "' + name + '" approved', 'success');
+          onRefresh && onRefresh();
+        } catch (e) { showToast('Approve failed: ' + e.message, 'error'); }
+      };
+
+      const reject = async (name) => {
+        try {
+          await api('/skills/' + encodeURIComponent(name) + '/reject', { method: 'POST' });
+          showToast('Skill "' + name + '" rejected', 'success');
+          onRefresh && onRefresh();
+        } catch (e) { showToast('Reject failed: ' + e.message, 'error'); }
+      };
+
+      const remove = async (name) => {
+        try {
+          await api('/skills/' + encodeURIComponent(name), { method: 'DELETE' });
+          showToast('Skill removed', 'success');
+          onRefresh && onRefresh();
+        } catch (e) { showToast('Remove failed: ' + e.message, 'error'); }
+      };
+
+      const install = async () => {
+        if (!pkgName.trim()) return;
+        setInstalling(true);
+        showToast('Skill install requested: ' + pkgName, 'info');
+        setPkgName('');
+        setInstalling(false);
+      };
+
+      return html`
+        <div class="page-enter p-6">
+          <div class="flex items-center justify-between mb-5">
+            <h2 class="text-xl font-semibold" style="color:#e6edf3">Skills</h2>
+            <button class="btn btn-secondary" onClick=${onRefresh}>Refresh</button>
+          </div>
+
+          <!-- Pending approval section -->
+          ${pending.length > 0 && html`
+            <div class="mb-6">
+              <h3 class="text-sm font-semibold mb-3 flex items-center gap-2" style="color:#d29922">
+                \u{23F3} Pending Approval (${pending.length})
+              </h3>
+              <div class="space-y-2">
+                ${pending.map(s => html`
+                  <div key=${s.name} class="flex items-center justify-between p-4 rounded-lg" style="background:#1c2128;border:1px solid rgba(210,153,34,0.3)">
+                    <div class="min-w-0">
+                      <div class="text-sm font-medium" style="color:#e6edf3">${s.name}</div>
+                      ${s.description && html`<div class="text-xs mt-0.5 truncate" style="color:#8b949e">${s.description}</div>`}
+                      ${(s.requestedBy || s.requested_by) && html`<div class="text-xs mt-0.5" style="color:#484f58">Requested by: ${s.requestedBy || s.requested_by}</div>`}
+                    </div>
+                    <div class="flex gap-2 flex-shrink-0 ml-4">
+                      <button class="btn btn-primary" style="padding:4px 14px;font-size:13px" onClick=${() => approve(s.name)}>Approve</button>
+                      <button class="btn btn-danger" style="padding:4px 14px;font-size:13px" onClick=${() => reject(s.name)}>Reject</button>
+                    </div>
+                  </div>
                 `)}
               </div>
             </div>
-            ${Object.entries(TOOL_CATEGORIES).map(([cat, catTools]) => html`
-              <div style="margin-bottom:20px">
-                <div style="font-size:13px; font-weight:600; color:#8b949e; margin-bottom:8px">
-                  ${cat} · ${catTools.filter(t => tools.includes(t.id)).length}/${catTools.length}
-                </div>
-                <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:8px">
-                  ${catTools.map(t => html`
-                    <div class="card" style="padding:10px 12px; display:flex; align-items:center; justify-content:space-between; gap:8px">
-                      <div>
-                        <div style="font-size:13px; font-weight:500">${t.id.replace('mcp__','').replace('__','.')}</div>
-                        <div style="font-size:11px; color:#8b949e">${t.desc}</div>
+          `}
+
+          <!-- Active skills section -->
+          <div class="mb-6">
+            <h3 class="text-sm font-semibold mb-3 flex items-center gap-2" style="color:#3fb950">
+              \u{2705} Active Skills (${active.length})
+            </h3>
+            ${active.length === 0
+              ? html`<div class="p-4 rounded-lg text-sm" style="background:#1c2128;border:1px solid rgba(63,185,80,0.2);color:#8b949e">No active skills installed.</div>`
+              : html`
+                <div class="space-y-2">
+                  ${active.map(s => html`
+                    <div key=${s.name} class="flex items-center justify-between p-4 rounded-lg" style="background:#1c2128;border:1px solid rgba(63,185,80,0.3)">
+                      <div class="min-w-0">
+                        <div class="text-sm font-medium" style="color:#e6edf3">${s.name}</div>
+                        ${s.description && html`<div class="text-xs mt-0.5 truncate" style="color:#8b949e">${s.description}</div>`}
                       </div>
-                      <input type="checkbox" class="toggle" checked=${tools.includes(t.id)} onChange=${() => toggleTool(t.id)} />
+                      <button class="btn btn-danger flex-shrink-0 ml-4" style="padding:4px 14px;font-size:13px" onClick=${() => remove(s.name)}>Remove</button>
                     </div>
                   `)}
                 </div>
+              `
+            }
+          </div>
+
+          <!-- Disabled skills -->
+          ${disabled.length > 0 && html`
+            <div class="mb-6">
+              <h3 class="text-sm font-semibold mb-3 flex items-center gap-2" style="color:#8b949e">
+                \u{26D4} Disabled (${disabled.length})
+              </h3>
+              <div class="space-y-2">
+                ${disabled.map(s => html`
+                  <div key=${s.name} class="flex items-center justify-between p-4 rounded-lg" style="background:#1c2128;border:1px solid #30363d">
+                    <span class="text-sm" style="color:#8b949e">${s.name}</span>
+                    <button class="btn btn-danger flex-shrink-0 ml-4" style="padding:4px 14px;font-size:13px" onClick=${() => remove(s.name)}>Remove</button>
+                  </div>
+                `)}
               </div>
-            `)}
+            </div>
           `}
 
-          ${tab === 'memory' && html`<${MemoryTab} agentId=${selected} />`}
+          <!-- Install skill form -->
+          <div class="mt-8 p-5 rounded-lg" style="background:#1c2128;border:1px solid #30363d">
+            <h3 class="text-sm font-semibold mb-3" style="color:#e6edf3">Install Skill</h3>
+            <div class="flex gap-2">
+              <input
+                type="text" class="flex-1"
+                value=${pkgName}
+                onInput=${e => setPkgName(e.target.value)}
+                onKeyDown=${e => e.key === 'Enter' && install()}
+                placeholder="npm package name (e.g. @mcp/weather-server)"
+              />
+              <button class="btn btn-primary" onClick=${install} disabled=${installing}>
+                ${installing ? 'Installing...' : 'Install'}
+              </button>
+            </div>
+            <p class="text-xs mt-2" style="color:#484f58">Skills are standard MCP servers from npm. New skills go to pending and require approval.</p>
+          </div>
+        </div>
+      `;
+    }
 
-          ${tab === 'heartbeat' && html`
-            <div class="card" style="margin-bottom:16px">
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px">
+    // ═══════════════════════════════════════════════════════════════════
+    //  PAGE 5: Channels
+    // ═══════════════════════════════════════════════════════════════════
+
+    function ChannelsPage({ channels, onRefresh }) {
+      const [tokens, setTokens] = useState({});
+
+      const CHANNEL_META = {
+        telegram: { icon: '\u{2708}\u{FE0F}',  label: 'Telegram',  tokenLabel: 'TELEGRAM_BOT_TOKEN', desc: 'Bot API via grammy' },
+        slack:    { icon: '\u{1F4AC}', label: 'Slack',     tokenLabel: 'SLACK_BOT_TOKEN',    desc: 'Socket Mode via @slack/bolt' },
+        discord:  { icon: '\u{1F3AE}', label: 'Discord',   tokenLabel: 'DISCORD_BOT_TOKEN',  desc: 'Bot integration via discord.js' },
+        webchat:  { icon: '\u{1F310}', label: 'WebChat',   tokenLabel: null,                  desc: 'Built-in browser WebSocket chat' },
+      };
+
+      const allChannels = Object.keys(CHANNEL_META).map(name => {
+        const found = channels.find(c => c.name === name);
+        return { name, connected: found ? found.connected : false };
+      });
+
+      const toggleConnect = async (name, connect) => {
+        try {
+          await api('/channels/' + name + '/' + (connect ? 'connect' : 'disconnect'), { method: 'POST' });
+          showToast(CHANNEL_META[name].label + ' ' + (connect ? 'connected' : 'disconnected'), 'success');
+          onRefresh && onRefresh();
+        } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+      };
+
+      return html`
+        <div class="page-enter p-6">
+          <div class="flex items-center justify-between mb-5">
+            <h2 class="text-xl font-semibold" style="color:#e6edf3">Channels</h2>
+            <button class="btn btn-secondary" onClick=${onRefresh}>Refresh</button>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            ${allChannels.map(ch => {
+              const meta = CHANNEL_META[ch.name];
+              return html`
+                <div key=${ch.name} class="p-5 rounded-lg" style="background:#1c2128;border:1px solid #30363d">
+                  <!-- Header -->
+                  <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center gap-3">
+                      <span class="text-xl">${meta.icon}</span>
+                      <div>
+                        <div class="font-semibold text-sm" style="color:#e6edf3">${meta.label}</div>
+                        <div class="text-xs" style="color:#484f58">${meta.desc}</div>
+                      </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <${StatusDot} connected=${ch.connected} />
+                      <span class="text-xs" style="color:${ch.connected ? '#3fb950' : '#8b949e'}">
+                        ${ch.connected ? 'Connected' : 'Disconnected'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <!-- Enable toggle -->
+                  <div class="flex items-center gap-3 mb-4">
+                    <span class="text-xs font-medium" style="color:#8b949e">Enable</span>
+                    <${Toggle} active=${ch.connected} onToggle=${v => toggleConnect(ch.name, v)} />
+                  </div>
+
+                  <!-- Token input (if applicable) -->
+                  ${meta.tokenLabel && html`
+                    <div>
+                      <label class="block text-xs font-medium mb-1.5" style="color:#8b949e">${meta.tokenLabel}</label>
+                      <input
+                        type="password"
+                        value=${tokens[ch.name] || ''}
+                        onInput=${e => setTokens(prev => ({ ...prev, [ch.name]: e.target.value }))}
+                        placeholder="\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}"
+                      />
+                    </div>
+                  `}
+                </div>
+              `;
+            })}
+          </div>
+        </div>
+      `;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  PAGE 6: Cron
+    // ═══════════════════════════════════════════════════════════════════
+
+    function CronPage({ cronJobs, agents, onRefresh }) {
+      const [showForm, setShowForm] = useState(false);
+      const [form, setForm] = useState({ name: '', schedule: '0 * * * *', agentId: '', prompt: '' });
+      const [creating, setCreating] = useState(false);
+
+      const upd = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
+
+      const createJob = async () => {
+        if (!form.name || !form.schedule || !form.agentId || !form.prompt) {
+          showToast('All fields are required', 'error');
+          return;
+        }
+        setCreating(true);
+        try {
+          await api('/cron', { method: 'POST', body: form });
+          showToast('Cron job created', 'success');
+          setForm({ name: '', schedule: '0 * * * *', agentId: '', prompt: '' });
+          setShowForm(false);
+          onRefresh && onRefresh();
+        } catch (e) { showToast('Create failed: ' + e.message, 'error'); }
+        setCreating(false);
+      };
+
+      const toggleJob = async (job) => {
+        try {
+          await api('/cron/' + job.id, { method: 'PUT', body: { enabled: !job.enabled } });
+          showToast('Job ' + (job.enabled ? 'disabled' : 'enabled'), 'success');
+          onRefresh && onRefresh();
+        } catch (e) { showToast('Toggle failed: ' + e.message, 'error'); }
+      };
+
+      const deleteJob = async (id) => {
+        try {
+          await api('/cron/' + id, { method: 'DELETE' });
+          showToast('Job deleted', 'success');
+          onRefresh && onRefresh();
+        } catch (e) { showToast('Delete failed: ' + e.message, 'error'); }
+      };
+
+      return html`
+        <div class="page-enter p-6">
+          <div class="flex items-center justify-between mb-5">
+            <h2 class="text-xl font-semibold" style="color:#e6edf3">Cron Jobs</h2>
+            <button class="btn ${showForm ? 'btn-secondary' : 'btn-primary'}" onClick=${() => setShowForm(!showForm)}>
+              ${showForm ? 'Cancel' : '+ Add Job'}
+            </button>
+          </div>
+
+          <!-- Add job form -->
+          ${showForm && html`
+            <div class="p-5 rounded-lg mb-6" style="background:#1c2128;border:1px solid #30363d">
+              <h3 class="text-sm font-semibold mb-4" style="color:#e6edf3">New Cron Job</h3>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                 <div>
-                  <label style="font-size:13px; color:#8b949e; display:block; margin-bottom:4px">Interval</label>
-                  <select value=${agent.heartbeat?.interval || '30m'}>
-                    <option value="15m">Every 15 minutes</option>
-                    <option value="30m">Every 30 minutes</option>
-                    <option value="1h">Every hour</option>
-                    <option value="4h">Every 4 hours</option>
-                    <option value="daily">Daily</option>
+                  <label class="block text-xs font-medium mb-1.5" style="color:#8b949e">Name</label>
+                  <input type="text" value=${form.name} onInput=${e => upd('name', e.target.value)} placeholder="e.g. daily-digest" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium mb-1.5" style="color:#8b949e">Schedule (cron)</label>
+                  <input type="text" value=${form.schedule} onInput=${e => upd('schedule', e.target.value)} placeholder="0 * * * *" style="font-family:ui-monospace,'SF Mono',monospace" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium mb-1.5" style="color:#8b949e">Agent</label>
+                  <select value=${form.agentId} onChange=${e => upd('agentId', e.target.value)}>
+                    <option value="">Select agent...</option>
+                    ${agents.map(a => html`<option key=${a.id} value=${a.id}>${a.name || a.id}</option>`)}
                   </select>
                 </div>
-                <div>
-                  <label style="font-size:13px; color:#8b949e; display:block; margin-bottom:4px">Enabled</label>
-                  <input type="checkbox" class="toggle" checked=${agent.heartbeat?.enabled || false} />
-                </div>
+              </div>
+              <div class="mb-4">
+                <label class="block text-xs font-medium mb-1.5" style="color:#8b949e">Prompt</label>
+                <textarea value=${form.prompt} onInput=${e => upd('prompt', e.target.value)} placeholder="What should the agent do on each run..." style="min-height:80px" />
+              </div>
+              <div class="flex justify-end">
+                <button class="btn btn-primary" onClick=${createJob} disabled=${creating}>
+                  ${creating ? 'Creating...' : 'Create Job'}
+                </button>
               </div>
             </div>
-            <label style="font-size:13px; color:#8b949e; display:block; margin-bottom:4px">HEARTBEAT.md</label>
-            <textarea rows="12" placeholder="# Heartbeat Checklist..." style="font-size:13px" />
           `}
-        `}
-      </div>
-    </div>
-  `;
-}
 
-function MemoryTab({ agentId }) {
-  const [files, setFiles] = useState([]);
-  const [content, setContent] = useState('');
-  const [selectedFile, setSelectedFile] = useState('');
-  const [query, setQuery] = useState('');
-
-  useEffect(() => {
-    api('/agents/' + agentId + '/memory').then(d => { if (d?.files) setFiles(d.files); });
-  }, [agentId]);
-
-  const viewFile = async (f) => {
-    setSelectedFile(f);
-    const d = await api('/agents/' + agentId + '/memory/' + encodeURIComponent(f));
-    if (d?.content) setContent(d.content);
-  };
-
-  const search = async () => {
-    if (!query) return;
-    const d = await api('/agents/' + agentId + '/memory/search', { method: 'POST', body: JSON.stringify({ query }) });
-    if (d?.results) setContent(d.results.map(r => `--- ${r.file_path}:${r.chunk_start} ---\n${r.chunk_text}`).join('\n\n'));
-  };
-
-  return html`
-    <div style="display:flex; gap:8px; margin-bottom:16px">
-      <input placeholder="Search memory..." value=${query} onInput=${(e) => setQuery(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && search()} style="flex:1" />
-      <button class="btn btn-primary" onClick=${search}>Search</button>
-    </div>
-    <div style="display:flex; gap:16px">
-      <div style="width:200px; flex-shrink:0">
-        ${files.map(f => html`
-          <div onClick=${() => viewFile(typeof f === 'string' ? f : f.name)} style="padding:6px 8px; cursor:pointer; border-radius:4px; font-size:13px; font-family:monospace;
-            background:${selectedFile === (typeof f === 'string' ? f : f.name) ? '#282e36' : 'transparent'}; color:#8b949e">
-            ${typeof f === 'string' ? f : f.name}
-          </div>
-        `)}
-      </div>
-      <pre style="flex:1; background:#0f1117; border:1px solid #30363d; border-radius:6px; padding:12px; font-size:13px; overflow:auto; white-space:pre-wrap; max-height:400px; margin:0">${content || 'Select a file to view'}</pre>
-    </div>
-  `;
-}
-
-function SessionsPage({ sessions }) {
-  return html`
-    <h1 style="font-size:24px; font-weight:700; margin-bottom:20px">Sessions</h1>
-    <div class="card" style="overflow-x:auto">
-      <table style="width:100%; border-collapse:collapse; font-size:14px">
-        <thead>
-          <tr style="border-bottom:1px solid #30363d">
-            <th style="text-align:left; padding:10px; color:#8b949e; font-weight:500">Session ID</th>
-            <th style="text-align:left; padding:10px; color:#8b949e; font-weight:500">Agent</th>
-            <th style="text-align:left; padding:10px; color:#8b949e; font-weight:500">Channel</th>
-            <th style="text-align:left; padding:10px; color:#8b949e; font-weight:500">Status</th>
-            <th style="text-align:left; padding:10px; color:#8b949e; font-weight:500">Last Active</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${sessions.length === 0 && html`<tr><td colspan="5" style="padding:20px; text-align:center; color:#8b949e">No active sessions</td></tr>`}
-          ${sessions.map(s => html`
-            <tr style="border-bottom:1px solid #30363d22">
-              <td style="padding:10px; font-family:monospace; font-size:12px">${(s.id || '').slice(0, 12)}...</td>
-              <td style="padding:10px">${s.agent_id}</td>
-              <td style="padding:10px">${s.channel || 'cli'}</td>
-              <td style="padding:10px"><span class="badge badge-${s.status === 'active' ? 'green' : 'yellow'}">${s.status}</span></td>
-              <td style="padding:10px; color:#8b949e; font-size:13px">${s.last_active_at || '--'}</td>
-            </tr>
-          `)}
-        </tbody>
-      </table>
-    </div>
-  `;
-}
-
-function SkillsPage({ skills, refresh }) {
-  const active = skills.filter(s => s.status === 'active');
-  const pending = skills.filter(s => s.status === 'pending');
-  const [pkg, setPkg] = useState('');
-
-  const approve = async (name) => { await api('/skills/' + name + '/approve', { method: 'POST' }); refresh(); };
-  const reject = async (name) => { await api('/skills/' + name + '/reject', { method: 'POST' }); refresh(); };
-  const install = async () => { if (!pkg) return; await api('/skills', { method: 'POST', body: JSON.stringify({ package: pkg }) }); setPkg(''); refresh(); };
-
-  return html`
-    <h1 style="font-size:24px; font-weight:700; margin-bottom:20px">Skills</h1>
-    ${pending.length > 0 && html`
-      <h2 style="font-size:16px; font-weight:600; margin-bottom:12px; color:#d29922">Pending Approval</h2>
-      <div style="margin-bottom:24px">
-        ${pending.map(s => html`
-          <div class="card" style="border-color:#9e6a03; margin-bottom:8px; display:flex; align-items:center; justify-content:space-between">
-            <div>
-              <span style="font-weight:600">${s.name}</span>
-              <span style="color:#8b949e; font-size:13px; margin-left:8px">${s.package || ''}</span>
-            </div>
-            <div style="display:flex; gap:8px">
-              <button class="btn btn-success" onClick=${() => approve(s.name)}>Approve</button>
-              <button class="btn btn-danger" onClick=${() => reject(s.name)}>Reject</button>
-            </div>
-          </div>
-        `)}
-      </div>
-    `}
-    <h2 style="font-size:16px; font-weight:600; margin-bottom:12px">Active Skills</h2>
-    ${active.length === 0 && html`<p style="color:#8b949e">No active skills</p>`}
-    ${active.map(s => html`
-      <div class="card" style="margin-bottom:8px; display:flex; align-items:center; justify-content:space-between">
-        <div>
-          <span style="font-weight:600">${s.name}</span>
-          <span class="badge badge-green" style="margin-left:8px">active</span>
+          <!-- Jobs table -->
+          ${cronJobs.length === 0
+            ? html`<${EmptyState} icon="\u{23F0}" title="No cron jobs" subtitle="Create a job to run agents on a schedule" />`
+            : html`
+              <div class="rounded-lg overflow-hidden" style="border:1px solid #30363d">
+                <table class="w-full" style="border-collapse:collapse">
+                  <thead>
+                    <tr style="background:#161b22">
+                      <th class="text-left text-xs font-medium px-4 py-3" style="color:#8b949e">Name</th>
+                      <th class="text-left text-xs font-medium px-4 py-3" style="color:#8b949e">Schedule</th>
+                      <th class="text-left text-xs font-medium px-4 py-3" style="color:#8b949e">Agent</th>
+                      <th class="text-left text-xs font-medium px-4 py-3" style="color:#8b949e">Enabled</th>
+                      <th class="text-left text-xs font-medium px-4 py-3" style="color:#8b949e">Last Run</th>
+                      <th class="text-right text-xs font-medium px-4 py-3" style="color:#8b949e">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${cronJobs.map(job => html`
+                      <tr key=${job.id} style="border-top:1px solid #30363d">
+                        <td class="px-4 py-3 text-sm font-medium" style="color:#e6edf3">${job.name}</td>
+                        <td class="px-4 py-3 text-xs font-mono" style="color:#8b949e">${job.schedule}</td>
+                        <td class="px-4 py-3 text-sm" style="color:#8b949e">${job.agentId || job.agent_id || '--'}</td>
+                        <td class="px-4 py-3">
+                          <${Toggle} active=${!!job.enabled} onToggle=${() => toggleJob(job)} />
+                        </td>
+                        <td class="px-4 py-3 text-xs" style="color:#8b949e">${fmtDate(job.lastRun || job.last_run_at) || 'Never'}</td>
+                        <td class="px-4 py-3 text-right">
+                          <button class="btn btn-danger" style="padding:4px 10px;font-size:12px" onClick=${() => deleteJob(job.id)}>Delete</button>
+                        </td>
+                      </tr>
+                    `)}
+                  </tbody>
+                </table>
+              </div>
+            `
+          }
         </div>
-        <span style="color:#8b949e; font-size:13px">${s.package || 'custom'}</span>
-      </div>
-    `)}
-    <div class="card" style="margin-top:24px">
-      <h3 style="font-size:14px; font-weight:600; margin-bottom:12px">Install Skill</h3>
-      <div style="display:flex; gap:8px">
-        <input placeholder="npm package name or URL" value=${pkg} onInput=${(e) => setPkg(e.target.value)} style="flex:1" />
-        <button class="btn btn-primary" onClick=${install}>Install</button>
-      </div>
-    </div>
-  `;
-}
+      `;
+    }
 
-function ChannelsPage({ health }) {
-  const channels = [
-    { id: 'telegram', name: 'Telegram', icon: '✈' },
-    { id: 'slack', name: 'Slack', icon: '#' },
-    { id: 'discord', name: 'Discord', icon: '⬡' },
-    { id: 'webchat', name: 'WebChat', icon: '◯' },
-  ];
-  return html`
-    <h1 style="font-size:24px; font-weight:700; margin-bottom:20px">Channels</h1>
-    <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:16px">
-      ${channels.map(ch => {
-        const connected = health?.channels?.[ch.id] || false;
-        return html`
-          <div class="card">
-            <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px">
-              <span style="font-size:24px">${ch.icon}</span>
-              <span style="font-weight:600; font-size:16px">${ch.name}</span>
-              <span style="margin-left:auto; width:10px; height:10px; border-radius:50%; background:${connected ? '#3fb950' : '#f85149'}"></span>
-            </div>
-            <div style="font-size:13px; color:#8b949e; margin-bottom:8px">
-              Status: <span style="color:${connected ? '#3fb950' : '#f85149'}">${connected ? 'Connected' : 'Disconnected'}</span>
-            </div>
-            <div style="display:flex; align-items:center; gap:8px">
-              <span style="font-size:13px; color:#8b949e">Enabled</span>
-              <input type="checkbox" class="toggle" checked=${connected} />
+    // ═══════════════════════════════════════════════════════════════════
+    //  PAGE 7: Config
+    // ═══════════════════════════════════════════════════════════════════
+
+    function ConfigPage() {
+      const [text, setText] = useState('');
+      const [loading, setLoading] = useState(true);
+      const [saving, setSaving] = useState(false);
+      const [parseErr, setParseErr] = useState(null);
+
+      const loadConfig = () => {
+        setLoading(true);
+        api('/config')
+          .then(d => { setText(JSON.stringify(d.config, null, 2)); setParseErr(null); })
+          .catch(e => showToast('Failed to load config: ' + e.message, 'error'))
+          .finally(() => setLoading(false));
+      };
+
+      useEffect(() => { loadConfig(); }, []);
+
+      const handleInput = (e) => {
+        const v = e.target.value;
+        setText(v);
+        try { JSON.parse(v); setParseErr(null); }
+        catch (err) { setParseErr(err.message); }
+      };
+
+      const save = async () => {
+        let parsed;
+        try { parsed = JSON.parse(text); }
+        catch (e) { showToast('Invalid JSON: ' + e.message, 'error'); return; }
+        setSaving(true);
+        try {
+          await api('/config', { method: 'PUT', body: parsed });
+          showToast('Configuration saved successfully', 'success');
+        } catch (e) { showToast('Save failed: ' + e.message, 'error'); }
+        setSaving(false);
+      };
+
+      if (loading) return html`<div class="page-enter p-6"><${LoadingState} text="Loading configuration..." /></div>`;
+
+      return html`
+        <div class="page-enter p-6">
+          <div class="flex items-center justify-between mb-5">
+            <h2 class="text-xl font-semibold" style="color:#e6edf3">Configuration</h2>
+            <div class="flex items-center gap-2">
+              <button class="btn btn-secondary" onClick=${loadConfig}>Reload</button>
+              <button class="btn btn-primary" onClick=${save} disabled=${saving || !!parseErr}>
+                ${saving ? 'Saving...' : 'Save Config'}
+              </button>
             </div>
           </div>
-        `;
-      })}
-    </div>
-  `;
-}
 
-function CronPage({ cronJobs, agents, refresh }) {
-  const [name, setName] = useState('');
-  const [schedule, setSchedule] = useState('');
-  const [agentId, setAgentId] = useState('');
-  const [prompt, setPrompt] = useState('');
+          ${parseErr && html`
+            <div class="mb-4 p-3 rounded-lg text-sm" style="background:rgba(248,81,73,0.1);border:1px solid rgba(248,81,73,0.3);color:#f85149">
+              JSON error: ${parseErr}
+            </div>
+          `}
 
-  const addJob = async () => {
-    if (!name || !schedule || !agentId || !prompt) return;
-    await api('/cron', { method: 'POST', body: JSON.stringify({ name, schedule, agentId, prompt }) });
-    setName(''); setSchedule(''); setPrompt('');
-    refresh();
-  };
+          <textarea
+            class="mono-editor w-full"
+            style="min-height:520px;max-height:75vh;tab-size:2"
+            value=${text}
+            onInput=${handleInput}
+            spellcheck="false"
+          />
 
-  return html`
-    <h1 style="font-size:24px; font-weight:700; margin-bottom:20px">Cron Jobs</h1>
-    <div class="card" style="overflow-x:auto; margin-bottom:24px">
-      <table style="width:100%; border-collapse:collapse; font-size:14px">
-        <thead>
-          <tr style="border-bottom:1px solid #30363d">
-            <th style="text-align:left; padding:10px; color:#8b949e; font-weight:500">Name</th>
-            <th style="text-align:left; padding:10px; color:#8b949e; font-weight:500">Schedule</th>
-            <th style="text-align:left; padding:10px; color:#8b949e; font-weight:500">Agent</th>
-            <th style="text-align:left; padding:10px; color:#8b949e; font-weight:500">Enabled</th>
-            <th style="text-align:left; padding:10px; color:#8b949e; font-weight:500">Last Run</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${cronJobs.length === 0 && html`<tr><td colspan="5" style="padding:20px; text-align:center; color:#8b949e">No cron jobs</td></tr>`}
-          ${cronJobs.map(j => html`
-            <tr style="border-bottom:1px solid #30363d22">
-              <td style="padding:10px; font-weight:500">${j.name}</td>
-              <td style="padding:10px; font-family:monospace; font-size:12px">${j.schedule}</td>
-              <td style="padding:10px">${j.agentId}</td>
-              <td style="padding:10px"><span class="badge badge-${j.enabled ? 'green' : 'yellow'}">${j.enabled ? 'on' : 'off'}</span></td>
-              <td style="padding:10px; color:#8b949e; font-size:13px">${j.lastRunAt || 'never'}</td>
-            </tr>
-          `)}
-        </tbody>
-      </table>
-    </div>
-    <div class="card">
-      <h3 style="font-size:14px; font-weight:600; margin-bottom:12px">Add Cron Job</h3>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px">
-        <div><label style="font-size:13px; color:#8b949e; display:block; margin-bottom:4px">Name</label><input value=${name} onInput=${(e) => setName(e.target.value)} placeholder="daily-check" /></div>
-        <div><label style="font-size:13px; color:#8b949e; display:block; margin-bottom:4px">Schedule</label><input value=${schedule} onInput=${(e) => setSchedule(e.target.value)} placeholder="0 9 * * *" /></div>
-        <div>
-          <label style="font-size:13px; color:#8b949e; display:block; margin-bottom:4px">Agent</label>
-          <select value=${agentId} onChange=${(e) => setAgentId(e.target.value)}>
-            <option value="">Select agent...</option>
-            ${Object.keys(agents).map(id => html`<option value=${id}>${id}</option>`)}
-          </select>
+          <p class="text-xs mt-3" style="color:#484f58">
+            Validated against the Zod schema on save. Changes take effect immediately.
+            File: ~/.teamagents/config.json
+          </p>
         </div>
-      </div>
-      <div style="margin-bottom:12px"><label style="font-size:13px; color:#8b949e; display:block; margin-bottom:4px">Prompt</label><textarea rows="3" value=${prompt} onInput=${(e) => setPrompt(e.target.value)} placeholder="Check for pending tasks..." /></div>
-      <button class="btn btn-primary" onClick=${addJob}>Add Job</button>
-    </div>
-  `;
-}
+      `;
+    }
 
-function ConfigPage() {
-  const [config, setConfig] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState('');
+    // ═══════════════════════════════════════════════════════════════════
+    // App Root
+    // ═══════════════════════════════════════════════════════════════════
 
-  useEffect(() => { api('/config').then(d => { if (d) setConfig(JSON.stringify(d, null, 2)); }); }, []);
+    function App() {
+      // ── State ────────────────────────────────────────────────────
+      const [page, setPage]         = useState('dashboard');
+      const [connected, setConn]    = useState(false);
+      const [health, setHealth]     = useState(null);
+      const [agents, setAgents]     = useState([]);
+      const [sessions, setSessions] = useState([]);
+      const [skills, setSkills]     = useState([]);
+      const [cronJobs, setCronJobs] = useState([]);
+      const [channels, setChannels] = useState([]);
+      const wsRef = useRef(null);
 
-  const save = async () => {
-    setSaving(true); setMsg('');
-    try {
-      const parsed = JSON.parse(config);
-      await api('/config', { method: 'PUT', body: JSON.stringify(parsed) });
-      setMsg('Saved');
-    } catch (e) { setMsg('Error: ' + e.message); }
-    setSaving(false);
-  };
+      // ── Fetch helpers ────────────────────────────────────────────
+      const fetchAgents   = useCallback(() => api('/agents').then(d => setAgents(d.agents || [])).catch(() => {}), []);
+      const fetchSessions = useCallback(() => api('/sessions').then(d => setSessions(d.sessions || [])).catch(() => {}), []);
+      const fetchSkills   = useCallback(() => api('/skills').then(d => setSkills(d.skills || [])).catch(() => {}), []);
+      const fetchCron     = useCallback(() => api('/cron').then(d => setCronJobs(d.jobs || [])).catch(() => {}), []);
+      const fetchChannels = useCallback(() => api('/channels').then(d => setChannels(d.channels || [])).catch(() => {}), []);
+      const fetchHealth   = useCallback(() => healthApi().then(h => { if (h) setHealth(h); }), []);
 
-  return html`
-    <h1 style="font-size:24px; font-weight:700; margin-bottom:20px">Configuration</h1>
-    <div class="card">
-      <textarea rows="25" value=${config} onInput=${(e) => setConfig(e.target.value)} style="font-size:13px; line-height:1.5" />
-      <div style="display:flex; align-items:center; gap:12px; margin-top:12px">
-        <button class="btn btn-primary" onClick=${save} disabled=${saving}>${saving ? 'Saving...' : 'Save Config'}</button>
-        ${msg && html`<span style="font-size:13px; color:${msg.startsWith('Error') ? '#f85149' : '#3fb950'}">${msg}</span>`}
-      </div>
-    </div>
-  `;
-}
+      const fetchAll = useCallback(() => {
+        return Promise.allSettled([
+          fetchHealth(), fetchAgents(), fetchSessions(),
+          fetchSkills(), fetchCron(), fetchChannels(),
+        ]);
+      }, [fetchHealth, fetchAgents, fetchSessions, fetchSkills, fetchCron, fetchChannels]);
 
-// ── Mount ───────────────────────────────────────────────────
-render(html`<${App} />`, document.getElementById('app'));
-</script>
+      // ── WebSocket ────────────────────────────────────────────────
+      useEffect(() => {
+        let ws;
+        let reconTimer;
+
+        const connect = () => {
+          const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+          ws = new WebSocket(proto + '//' + location.host + '/ws/admin');
+          wsRef.current = ws;
+
+          ws.onopen = () => setConn(true);
+
+          ws.onmessage = (e) => {
+            try {
+              const msg = JSON.parse(e.data);
+              if (msg.type === 'snapshot') {
+                fetchAll();
+              } else if (msg.type) {
+                const domain = msg.type.split(':')[0];
+                if (domain === 'agent' || domain === 'memory')  fetchAgents();
+                else if (domain === 'session')                   fetchSessions();
+                else if (domain === 'skill')                     fetchSkills();
+                else if (domain === 'cron')                      fetchCron();
+                else if (domain === 'channel' || domain === 'webchat') fetchChannels();
+                else if (domain === 'config')                    fetchAll();
+              }
+            } catch (_) {}
+          };
+
+          ws.onclose = () => {
+            setConn(false);
+            wsRef.current = null;
+            reconTimer = setTimeout(connect, 3000);
+          };
+
+          ws.onerror = () => ws.close();
+        };
+
+        connect();
+        return () => { clearTimeout(reconTimer); if (ws) ws.close(); };
+      }, [fetchAll, fetchAgents, fetchSessions, fetchSkills, fetchCron, fetchChannels]);
+
+      // ── Initial load ─────────────────────────────────────────────
+      useEffect(() => { fetchAll(); }, []);
+
+      // ── Periodic health refresh ──────────────────────────────────
+      useEffect(() => {
+        const t = setInterval(fetchHealth, 15000);
+        return () => clearInterval(t);
+      }, [fetchHealth]);
+
+      // ── Page renderer ────────────────────────────────────────────
+      const renderPage = () => {
+        switch (page) {
+          case 'dashboard':
+            return html`<${DashboardPage} health=${health} agents=${agents} sessions=${sessions} cronJobs=${cronJobs} />`;
+          case 'agents':
+            return html`<${AgentsPage} agents=${agents} onRefresh=${fetchAgents} />`;
+          case 'sessions':
+            return html`<${SessionsPage} sessions=${sessions} onRefresh=${fetchSessions} />`;
+          case 'skills':
+            return html`<${SkillsPage} skills=${skills} onRefresh=${fetchSkills} />`;
+          case 'channels':
+            return html`<${ChannelsPage} channels=${channels} onRefresh=${fetchChannels} />`;
+          case 'cron':
+            return html`<${CronPage} cronJobs=${cronJobs} agents=${agents} onRefresh=${() => { fetchCron(); fetchAgents(); }} />`;
+          case 'config':
+            return html`<${ConfigPage} />`;
+          default:
+            return html`<${DashboardPage} health=${health} agents=${agents} sessions=${sessions} cronJobs=${cronJobs} />`;
+        }
+      };
+
+      // ── Render ───────────────────────────────────────────────────
+      return html`
+        <div class="flex h-screen" style="background:#0f1117">
+          <${Sidebar} page=${page} setPage=${setPage} agents=${agents} />
+          <div class="flex flex-col flex-1 min-w-0">
+            <${TopBar} connected=${connected} health=${health} agents=${agents} />
+            <main class="flex-1 overflow-y-auto" style="background:#0f1117">
+              ${renderPage()}
+            </main>
+          </div>
+          <${ToastContainer} />
+        </div>
+      `;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Mount application
+    // ═══════════════════════════════════════════════════════════════════
+    render(html`<${App} />`, document.getElementById('app'));
+  </script>
 </body>
 </html>
