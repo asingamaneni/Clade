@@ -216,6 +216,29 @@ npm test         # Run all tests
 npm run dev      # Development mode with watch
 ```
 
+### Make Targets
+
+A `Makefile` is provided for common tasks:
+
+| Target | Description |
+|--------|-------------|
+| `make install` | Install dependencies |
+| `make build` | Build TypeScript (tsup) |
+| `make dev` | Start dev mode with watch |
+| `make test` | Run all tests |
+| `make test-unit` | Run unit tests only |
+| `make test-integration` | Run integration tests only |
+| `make lint` | Type-check with `tsc --noEmit` |
+| `make start` | Build and start the gateway |
+| `make docs` | Start local docs dev server (VitePress) |
+| `make docs-build` | Build docs for production |
+| `make docs-preview` | Build and preview docs locally |
+| `make check` | Full CI gate — lint + build + tests |
+| `make deploy-docs` | Build docs for GitHub Pages |
+| `make clean` | Remove build artifacts |
+
+Run `make` or `make help` to see all available targets.
+
 ## Requirements
 
 - **Node.js 20+**
