@@ -5,10 +5,18 @@
 Clade is an autonomous multi-agent platform built natively on top of the `claude` CLI.
 It uses Claude Code Max subscriptions (not the API SDK) to power agents that can be triggered
 reactively (Slack/Telegram/Discord messages), proactively (heartbeat/cron), or autonomously
-(RALPH loop for continuous coding work).
+(RALPH loop for continuous autonomous work — any domain, not just coding).
 
 The name "Clade" (from Claude) means "a group of organisms that share a common ancestor" —
 agents evolving from a common AI foundation, specializing over time.
+
+## Related Documentation
+
+- **[architecture.md](./architecture.md)** — Full system architecture, data flows, SQL schema
+- **[README.md](./README.md)** — User-facing quickstart and installation guide
+- **[tasks.md](./tasks.md)** — Implementation task tracker
+
+> **Important**: When making architectural changes, update both this file AND architecture.md.
 
 ## Architecture Summary
 
@@ -21,7 +29,8 @@ agents evolving from a common AI foundation, specializing over time.
 - **Self-Improvement**: Reflection cycle evolves SOUL.md based on user interactions
 - **Collaboration**: Delegation, shared memory, pub/sub message bus between agents
 - **Portability**: Export/import agents as `.agent.tar.gz` bundles
-- **Tools**: Claude Code's native tools (Read/Edit/Bash/Glob/Grep) + 4 custom MCP servers
+- **Platform**: Native OS interaction (notifications, clipboard, screenshots) via platform MCP
+- **Tools**: Claude Code's native tools (Read/Edit/Bash/Glob/Grep) + 5 custom MCP servers
 
 ## Tech Stack
 
@@ -45,7 +54,7 @@ src/
 ├── gateway/       # Fastify HTTP + WS server, REST API routes, admin.html
 ├── router/        # Message routing (channel+user → agent session)
 ├── channels/      # Channel adapters (telegram, slack, discord, webchat)
-├── mcp/           # 4 custom MCP servers (memory, sessions, messaging, skills)
+├── mcp/           # 5 custom MCP servers (memory, sessions, messaging, skills, platform)
 ├── cron/          # Heartbeat + cron scheduler
 ├── config/        # Zod config schema, loader, defaults, migrations
 ├── store/         # SQLite persistence layer

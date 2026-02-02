@@ -19,6 +19,7 @@ export { SessionManager } from './engine/manager.js';
 
 export {
   RalphEngine,
+  buildWorkPrompt,
   type RalphConfig,
   type PlanTask,
   type RalphProgressEvent,

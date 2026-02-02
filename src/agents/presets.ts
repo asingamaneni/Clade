@@ -39,6 +39,7 @@ const MCP_MEMORY = 'mcp__memory__*';
 const MCP_SESSIONS = 'mcp__sessions__*';
 const MCP_MESSAGING = 'mcp__messaging__*';
 const MCP_SKILLS = 'mcp__skills__*';
+const MCP_PLATFORM = 'mcp__platform__*';
 
 // ---------------------------------------------------------------------------
 // Grouped tool sets
@@ -54,7 +55,7 @@ const EXTENDED_TOOLS = [WEB_FETCH, WEB_SEARCH, TASK, TODO_WRITE] as const;
 const ALL_NATIVE_TOOLS = [...CODING_TOOLS, ...EXTENDED_TOOLS] as const;
 
 /** All custom MCP server tool wildcards. */
-const ALL_MCP_TOOLS = [MCP_MEMORY, MCP_SESSIONS, MCP_MESSAGING, MCP_SKILLS] as const;
+const ALL_MCP_TOOLS = [MCP_MEMORY, MCP_SESSIONS, MCP_MESSAGING, MCP_SKILLS, MCP_PLATFORM] as const;
 
 // ---------------------------------------------------------------------------
 // Preset definitions

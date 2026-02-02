@@ -89,6 +89,24 @@ export const AgentConfigSchema = z.object({
 
   /** Maximum autonomous turns per invocation. */
   maxTurns: z.number().int().positive().default(25),
+
+  /** User notification preferences for this agent. */
+  notifications: z.object({
+    /** Where to send updates: "slack:#channel", "telegram:chatId", etc. */
+    preferredChannel: z.string().optional(),
+    /** Minimum severity to notify. */
+    minSeverity: z.enum(['info', 'warn', 'error', 'critical']).default('info'),
+    /** Quiet hours -- suppress non-critical notifications. */
+    quietHours: z.object({
+      start: z.string().default('22:00'),
+      end: z.string().default('08:00'),
+      timezone: z.string().default('UTC'),
+    }).optional(),
+    /** Whether to batch low-severity notifications into digests. */
+    batchDigest: z.boolean().default(false),
+    /** Digest interval in minutes. */
+    digestIntervalMinutes: z.number().int().positive().default(30),
+  }).default({}),
 });
 
 export type AgentConfig = z.infer<typeof AgentConfigSchema>;

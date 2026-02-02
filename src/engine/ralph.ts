@@ -21,6 +21,12 @@ export interface RalphConfig {
   mcpConfigPath?: string;
   allowedTools?: string[];
   maxTurnsPerTask?: number;
+  /** Agent domain — determines work guidelines and completion behavior. */
+  domain?: 'coding' | 'research' | 'ops' | 'general';
+  /** Whether to auto-commit after completing each task (default: true for coding, false otherwise). */
+  autoCommit?: boolean;
+  /** Optional callback to notify user of progress on their preferred channel. */
+  onStatusUpdate?: (message: string) => void;
 }
 
 export interface PlanTask {
@@ -342,11 +348,17 @@ export class RalphEngine {
           // 7. Append learnings to progress.md
           appendProgress(progressPath, nextTask, iteration, iterResult);
 
-          // 8. Git commit if task passes
-          gitCommit(
-            `Complete: ${nextTask.text}`,
-            config.workingDirectory,
-          );
+          // 8. Git commit if task passes AND autoCommit enabled
+          const shouldCommit = config.autoCommit ?? (config.domain === 'coding');
+          if (shouldCommit) {
+            gitCommit(
+              `Complete: ${nextTask.text}`,
+              config.workingDirectory,
+            );
+          }
+
+          // 9. Notify status update
+          config.onStatusUpdate?.(`Task ${nextTask.index + 1}/${tasks.length} done: ${nextTask.text}`);
         } else {
           // Task failed
           const retries = this.retryCounts.get(nextTask.index) ?? 0;
@@ -448,6 +460,8 @@ export class RalphEngine {
       durationMs: result.durationMs,
     });
 
+    config.onStatusUpdate?.(`Work complete: ${completed}/${finalTasks.length} tasks done, ${blocked} blocked`);
+
     return result;
   }
 }
@@ -475,7 +489,7 @@ function resolveProgressPath(config: RalphConfig): string {
   return join(dirname(config.planPath), 'progress.md');
 }
 
-function buildWorkPrompt(
+export function buildWorkPrompt(
   task: PlanTask,
   progress: string,
   config: RalphConfig,
@@ -496,16 +510,47 @@ function buildWorkPrompt(
     );
   }
 
-  parts.push(
-    `## Guidelines\n\n` +
-      `- Focus exclusively on the current task.\n` +
-      `- Write clean, production-quality code.\n` +
-      `- Make sure all existing tests still pass.\n` +
-      `- Do not modify code unrelated to this task.\n` +
-      `- If you encounter a blocker that prevents completion, explain it clearly.`,
-  );
+  parts.push(`## Guidelines\n\n${getDomainGuidelines(config.domain)}`);
 
   return parts.join('\n\n');
+}
+
+function getDomainGuidelines(domain?: RalphConfig['domain']): string {
+  switch (domain) {
+    case 'coding':
+      return (
+        `- Focus exclusively on the current task.\n` +
+        `- Write clean, production-quality code.\n` +
+        `- Make sure all existing tests still pass.\n` +
+        `- Do not modify code unrelated to this task.\n` +
+        `- If you encounter a blocker that prevents completion, explain it clearly.`
+      );
+    case 'research':
+      return (
+        `- Focus on finding accurate, well-sourced information for this task.\n` +
+        `- Cross-reference claims across multiple sources when possible.\n` +
+        `- Distinguish between facts, expert opinions, and speculation.\n` +
+        `- Save key findings to memory for future reference.\n` +
+        `- If you cannot find reliable information, say so clearly.`
+      );
+    case 'ops':
+      return (
+        `- Diagnose the issue systematically — check logs, metrics, and recent changes.\n` +
+        `- Attempt automated remediation within your permission bounds.\n` +
+        `- Document what you found and what you did.\n` +
+        `- If the issue requires human intervention, escalate with a clear recommendation.\n` +
+        `- Prioritize: data loss > service down > degraded performance > cosmetic.`
+      );
+    case 'general':
+    default:
+      return (
+        `- Focus exclusively on completing this task to a high standard.\n` +
+        `- Verify your work is correct before marking the task as done.\n` +
+        `- If you need information you don't have, search for it or check memory.\n` +
+        `- If you encounter a blocker, explain it clearly with a recommendation.\n` +
+        `- Come back with results, not questions.`
+      );
+  }
 }
 
 function appendProgress(

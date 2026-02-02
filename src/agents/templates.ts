@@ -266,6 +266,11 @@ export function configFromTemplate(
       interval: 10,
     },
     maxTurns: 25,
+    notifications: {
+      minSeverity: 'info',
+      batchDigest: false,
+      digestIntervalMinutes: 30,
+    },
   };
 }
 

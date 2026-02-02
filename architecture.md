@@ -79,16 +79,36 @@ channel routing, proactive scheduling, and autonomous work loops.
 │  └──────────────────────────────────────────────────────────────┘ │
 │                                                                    │
 │  ┌──────────────────────────────────────────────────────────────┐ │
-│  │  Admin Dashboard (React + Tailwind, served at /admin)        │ │
+│  │  Admin Dashboard (Preact + HTM + Tailwind, served at /admin) │ │
 │  └──────────────────────────────────────────────────────────────┘ │
 └────────────────────────────────────────────────────────────────────┘
 ```
+
+## Related Documentation
+
+- **[CLAUDE.md](./CLAUDE.md)** — Project guide for Claude agents working on this codebase
+- **[README.md](./README.md)** — User-facing quickstart and installation guide
+- **[tasks.md](./tasks.md)** — Implementation task tracker
+
+> **Note**: This file should be updated whenever architectural changes are made.
+> CLAUDE.md should be updated in sync to keep the project guide accurate.
 
 ## Core Components
 
 ### 1. Engine (src/engine/)
 
 The engine is the heart of Clade. It wraps the `claude` CLI.
+
+#### compat.ts
+
+Detects the installed Claude CLI version and available flags. Adapts arguments
+automatically so Clade works across CLI versions:
+
+- Checks `claude --version` and `claude --help` for available flags
+- Maps capabilities: `hasPlugins`, `hasAgentsFlag`, `hasMcpToolSearch`, etc.
+- `buildCliArgs()` only includes flags the installed version supports
+- `exportAsPlugin()` generates Claude Code plugin directory structure
+- Caches detection results per process (only runs once)
 
 #### claude-cli.ts
 
@@ -131,50 +151,104 @@ Session lifecycle:
 
 #### ralph.ts
 
-RALPH loop for autonomous work:
+RALPH loop for autonomous work — works for ANY agent type, not just coding.
+Domain-aware guidelines adapt the work style (coding, research, ops, general).
+
 ```
 ┌─── Loop (fresh context each iteration) ──────────────────────────┐
 │ 1. Read PLAN.md → find next task with status "open"              │
 │ 2. Set task status to "in_progress" in PLAN.md                   │
 │ 3. Read progress.md → accumulated learnings from prior iterations│
-│ 4. Build prompt with task + learnings + guidelines               │
+│ 4. Build prompt with task + learnings + domain-specific guidelines│
 │ 5. Spawn: claude -p "work prompt" --max-turns 25                 │
 │ 6. Parse result                                                  │
-│ 7. Run verification: configurable command (npm test, etc.)       │
-│ 8. Passing? → mark task "done", git commit, append learnings     │
-│ 9. Failing? → increment retry count, append failure info         │
-│ 10. Max retries hit? → mark "blocked", move to next task         │
-│ 11. All tasks done or blocked? → EXIT                            │
-│ 12. More tasks? → LOOP (fresh claude instance, full context)     │
+│ 7. Run verification: configurable command (optional)             │
+│ 8. Passing? → mark "done", git commit (if coding), log learnings │
+│ 9. Send status update to user's preferred channel                │
+│ 10. Failing? → increment retry count, append failure info        │
+│ 11. Max retries hit? → mark "blocked", move to next task         │
+│ 12. All tasks done or blocked? → EXIT with summary               │
+│ 13. More tasks? → LOOP (fresh claude instance, full context)     │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
+Domain guidelines:
+- **coding**: Write production code, run tests, don't modify unrelated code
+- **research**: Find accurate info, cross-reference sources, save to memory
+- **ops**: Diagnose systematically, attempt remediation, escalate if needed
+- **general**: Complete the task to a high standard, verify your work
+
 ### 2. Agents (src/agents/)
 
-Each agent is a directory under `~/.clade/agents/<name>/`:
-- `SOUL.md` — Personality, identity, behavioral guidelines
+No pre-defined agents ship with Clade. Users create their own from templates
+or from scratch. Each agent is a directory under `~/.clade/agents/<name>/`:
+
+- `SOUL.md` — Personality, identity, behavioral guidelines (evolves via reflection)
+- `IDENTITY.md` — Metadata: name, description, creation date
 - `HEARTBEAT.md` — What to check on each heartbeat cycle
 - `MEMORY.md` — Curated long-term memory
 - `memory/` — Daily logs (YYYY-MM-DD.md)
+- `soul-history/` — Snapshots of SOUL.md before each reflection
 - `PLAN.md` — (optional) RALPH loop task list
 - `progress.md` — (optional) RALPH accumulated learnings
+
+#### Templates (src/agents/templates.ts)
+
+Four starting templates — users pick one and customize:
+- **coding** — Development-focused, owns code quality, runs tests
+- **research** — Information gathering, source verification, tracking topics
+- **ops** — System monitoring, incident response, automated remediation
+- **pm** — Task tracking, coordination, delegation, status reports
+
+Templates provide `soulSeed` (starting SOUL.md) and `heartbeatSeed` (starting
+HEARTBEAT.md). These evolve through the reflection cycle as the agent learns
+the user's preferences.
+
+#### Reflection (src/agents/reflection.ts)
+
+Agents self-improve through periodic reflection:
+1. After every N sessions (configurable, default 10), or during heartbeat
+2. Agent reviews recent interactions in memory
+3. Generates SOUL.md updates (communication style, learned preferences)
+4. **Core Principles section is locked** — reflection cannot modify it
+5. Previous SOUL.md saved to `soul-history/YYYY-MM-DD.md`
+6. Diff-based validation ensures changes are meaningful, not destructive
+
+#### Collaboration (src/agents/collaboration.ts)
+
+Agents interact through:
+- **Delegation**: Agent A formally delegates a task to Agent B with context and callback
+- **Shared memory**: Agents can read (not write) each other's MEMORY.md
+- **Message bus**: Pub/sub topics — publish "code-review-needed", subscribed agents pick it up
+- **@mentions**: Agents can reference each other in memory entries
+
+#### Portability (src/agents/portability.ts)
+
+Agents can be moved between machines:
+- `clade agent export <name>` → `.agent.tar.gz` bundle (identity, soul, memory, config)
+- `clade agent import <file>` → unpacks, validates, reindexes memory
+- Git-friendly: entire agent directory is plain markdown, version-controllable
+
+#### Notifications (src/agents/notifications.ts)
+
+Agents proactively update users on their preferred channel:
+- Configurable per-agent: "slack:#general", "telegram:12345", etc.
+- Severity levels: info, warn, error, critical
+- Quiet hours support — suppress non-critical during off-hours
+- Digest batching for low-severity notifications
 
 Agent config stored in `~/.clade/config.json`:
 ```json
 {
   "agents": {
-    "main": {
-      "name": "Main Assistant",
-      "description": "General-purpose personal assistant",
+    "researcher": {
+      "name": "Research Analyst",
+      "description": "Gathers and synthesizes information",
       "model": "sonnet",
       "toolPreset": "full",
-      "customTools": [],
-      "skills": ["memory", "sessions"],
-      "heartbeat": {
-        "enabled": true,
-        "interval": "30m",
-        "suppressOk": true
-      }
+      "heartbeat": { "enabled": true, "interval": "4h" },
+      "reflection": { "enabled": true, "interval": 10 },
+      "notifications": { "preferredChannel": "slack:#updates" }
     }
   }
 }
@@ -189,7 +263,7 @@ Tool presets map to `--allowedTools` arrays:
 
 ### 3. MCP Servers (src/mcp/)
 
-Four custom MCP servers, each a stdio process:
+Five custom MCP servers, each a stdio process:
 
 #### Memory MCP (src/mcp/memory/)
 - Stores in `~/.clade/agents/<agentId>/MEMORY.md` and `memory/*.md`
@@ -212,6 +286,12 @@ Four custom MCP servers, each a stdio process:
 - Stages new skills in `~/.clade/skills/pending/`
 - Requires human approval before activation
 - Can create custom skills (agent writes MCP server config)
+
+#### Platform MCP (src/mcp/platform/)
+- Native OS interactions: notifications, clipboard, open URLs, screenshots
+- Auto-detects macOS vs Linux and uses appropriate commands
+- Graceful fallback when commands are unavailable
+- System info: OS, hostname, shell, terminal, uptime
 
 ### 4. Gateway (src/gateway/)
 
@@ -453,4 +533,20 @@ CREATE VIRTUAL TABLE memory_fts USING fts5(
   concurrent writes to the same session.
 - MCP servers run as long-lived stdio processes, not spawned per-request.
 - SQLite is synchronous (better-sqlite3) — no async overhead for simple queries.
-- Admin UI is pre-built and served as static files — no SSR overhead.
+- Admin UI is a self-contained HTML file — no build step, no SSR overhead.
+
+## Future: Admin UI Evolution
+
+The current admin UI is a self-contained HTML file using Preact + HTM + Tailwind CDN.
+This ships inside the npm package with zero build step — ideal for easy installation.
+
+When the UI needs more sophistication (drag-and-drop, rich editors, charts), the
+planned upgrade path is:
+1. Add a `ui/` directory with React + shadcn/ui + Tailwind
+2. Vite build outputs to `dist/ui/`
+3. Gateway serves built files from `dist/ui/`
+4. `npm run build` includes the UI build step
+
+shadcn/ui is the preferred component library for this evolution — it provides
+accessible, well-designed components that work with Tailwind. But it requires
+a React build pipeline, so the tradeoff is simplicity vs. polish.
