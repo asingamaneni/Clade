@@ -493,6 +493,239 @@
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    // Template metadata for onboarding UI
+    // ═══════════════════════════════════════════════════════════════════
+
+    const TEMPLATE_META = {
+      coding:   { icon: '\u{1F4BB}', color: '#58a6ff', border: 'rgba(88,166,255,0.4)',  bg: 'rgba(88,166,255,0.06)' },
+      research: { icon: '\u{1F50D}', color: '#bc8cff', border: 'rgba(188,140,255,0.4)', bg: 'rgba(188,140,255,0.06)' },
+      ops:      { icon: '\u{1F4E1}', color: '#3fb950', border: 'rgba(63,185,80,0.4)',   bg: 'rgba(63,185,80,0.06)' },
+      pm:       { icon: '\u{1F4CB}', color: '#d29922', border: 'rgba(210,153,34,0.4)',  bg: 'rgba(210,153,34,0.06)' },
+    };
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  ONBOARDING: Welcome Page (shown when 0 agents)
+    // ═══════════════════════════════════════════════════════════════════
+
+    function WelcomePage({ onCreated }) {
+      const [templates, setTemplates] = useState([]);
+      const [selected, setSelected] = useState(null);
+      const [loading, setLoading] = useState(true);
+
+      useEffect(() => {
+        api('/templates')
+          .then(d => setTemplates(d.templates || []))
+          .catch(() => {
+            // Fallback templates if endpoint not available
+            setTemplates([
+              { id: 'coding',   name: 'Coding Partner',    description: 'Writes, reviews, and maintains code',                      toolPreset: 'coding',    model: 'sonnet', heartbeat: { interval: '30m' } },
+              { id: 'research', name: 'Research Analyst',   description: 'Gathers, synthesizes, and reports on information',          toolPreset: 'full',      model: 'sonnet', heartbeat: { interval: '4h'  } },
+              { id: 'ops',      name: 'Ops Monitor',        description: 'Monitors systems, checks health, handles incidents',        toolPreset: 'full',      model: 'sonnet', heartbeat: { interval: '15m' } },
+              { id: 'pm',       name: 'Project Manager',    description: 'Tracks tasks, coordinates work, keeps projects moving',     toolPreset: 'messaging', model: 'sonnet', heartbeat: { interval: '1h'  } },
+            ]);
+          })
+          .finally(() => setLoading(false));
+      }, []);
+
+      if (selected) {
+        return html`<${CreateAgentForm} template=${selected} onCancel=${() => setSelected(null)} onCreated=${onCreated} />`;
+      }
+
+      return html`
+        <div class="page-enter flex flex-col items-center justify-center" style="min-height:calc(100vh - 48px);padding:2rem">
+          <div style="max-width:720px;width:100%;text-align:center">
+            <!-- Hero -->
+            <div class="mb-2" style="font-size:48px">\u{1F52E}</div>
+            <h1 class="text-3xl font-bold mb-2" style="color:#e6edf3">Welcome to Clade</h1>
+            <p class="text-base mb-1" style="color:#8b949e;max-width:480px;margin:0 auto">
+              Your personal team of AI agents, powered by Claude Code.
+            </p>
+            <p class="text-sm mb-8" style="color:#484f58;max-width:480px;margin:0 auto">
+              Create your first agent to get started. Pick a template — you can customize everything later.
+            </p>
+
+            <!-- Template cards -->
+            ${loading
+              ? html`<${LoadingState} text="Loading templates..." />`
+              : html`
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-left">
+                  ${templates.map(t => {
+                    const meta = TEMPLATE_META[t.id] || { icon: '\u{1F916}', color: '#8b949e', border: '#30363d', bg: 'transparent' };
+                    return html`
+                      <button
+                        key=${t.id}
+                        class="p-5 rounded-xl text-left transition-all"
+                        style="background:${meta.bg};border:2px solid ${meta.border};cursor:pointer;outline:none"
+                        onMouseEnter=${e => e.currentTarget.style.transform = 'translateY(-2px)'}
+                        onMouseLeave=${e => e.currentTarget.style.transform = 'none'}
+                        onClick=${() => setSelected(t)}
+                      >
+                        <div class="flex items-center gap-3 mb-3">
+                          <div class="flex items-center justify-center rounded-xl" style="width:44px;height:44px;background:${meta.bg};border:1px solid ${meta.border};font-size:22px">
+                            ${meta.icon}
+                          </div>
+                          <div>
+                            <div class="text-sm font-bold" style="color:${meta.color}">${t.name}</div>
+                            <div class="text-xs" style="color:#8b949e">${t.toolPreset} preset</div>
+                          </div>
+                        </div>
+                        <p class="text-sm mb-3" style="color:#8b949e">${t.description}</p>
+                        <div class="flex items-center gap-3 text-xs" style="color:#484f58">
+                          <span>Model: ${t.model}</span>
+                          <span>\u{00B7}</span>
+                          <span>Heartbeat: ${t.heartbeat?.interval || '30m'}</span>
+                        </div>
+                      </button>
+                    `;
+                  })}
+                </div>
+              `
+            }
+
+            <!-- CLI hint -->
+            <div class="mt-8 p-4 rounded-lg text-sm" style="background:#161b22;border:1px solid #30363d;color:#8b949e">
+              Or use the CLI: <code style="color:#58a6ff">clade agent add jarvis --template coding</code>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  ONBOARDING: Create Agent Form
+    // ═══════════════════════════════════════════════════════════════════
+
+    function CreateAgentForm({ template, onCancel, onCreated }) {
+      const meta = TEMPLATE_META[template.id] || { icon: '\u{1F916}', color: '#8b949e', border: '#30363d', bg: 'transparent' };
+      const [name, setName] = useState('');
+      const [description, setDescription] = useState(template.name);
+      const [model, setModel] = useState(template.model || 'sonnet');
+      const [creating, setCreating] = useState(false);
+      const [error, setError] = useState(null);
+      const inputRef = useRef(null);
+
+      useEffect(() => { inputRef.current && inputRef.current.focus(); }, []);
+
+      const nameSlug = name.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+
+      const create = async () => {
+        if (!nameSlug) { setError('Name is required'); return; }
+        setCreating(true);
+        setError(null);
+        try {
+          await api('/agents', {
+            method: 'POST',
+            body: { name: nameSlug, template: template.id, description, model },
+          });
+          showToast('Agent "' + nameSlug + '" created!', 'success');
+          onCreated && onCreated();
+        } catch (e) {
+          setError(e.message);
+          showToast('Failed: ' + e.message, 'error');
+        }
+        setCreating(false);
+      };
+
+      return html`
+        <div class="page-enter flex flex-col items-center justify-center" style="min-height:calc(100vh - 48px);padding:2rem">
+          <div style="max-width:480px;width:100%">
+            <!-- Back link -->
+            <button
+              class="flex items-center gap-1.5 mb-6 text-sm"
+              style="color:#8b949e;background:none;border:none;cursor:pointer;padding:0"
+              onClick=${onCancel}
+            >
+              \u{2190} Back to templates
+            </button>
+
+            <!-- Template badge -->
+            <div class="flex items-center gap-3 mb-6">
+              <div class="flex items-center justify-center rounded-xl" style="width:48px;height:48px;background:${meta.bg};border:1px solid ${meta.border};font-size:24px">
+                ${meta.icon}
+              </div>
+              <div>
+                <div class="text-lg font-bold" style="color:${meta.color}">${template.name}</div>
+                <div class="text-sm" style="color:#8b949e">${template.description}</div>
+              </div>
+            </div>
+
+            <!-- Form -->
+            <div class="space-y-5">
+              <div>
+                <label class="block text-xs font-semibold mb-2 uppercase tracking-wider" style="color:#8b949e">Agent Name</label>
+                <input
+                  ref=${inputRef}
+                  type="text"
+                  value=${name}
+                  onInput=${e => { setName(e.target.value); setError(null); }}
+                  onKeyDown=${e => e.key === 'Enter' && create()}
+                  placeholder="e.g. jarvis, ravi, manu"
+                  style="font-size:16px;padding:12px 16px"
+                />
+                ${nameSlug && nameSlug !== name && html`
+                  <div class="text-xs mt-1.5" style="color:#484f58">
+                    Will be created as: <span style="color:#58a6ff;font-family:ui-monospace,monospace">${nameSlug}</span>
+                  </div>
+                `}
+              </div>
+
+              <div>
+                <label class="block text-xs font-semibold mb-2 uppercase tracking-wider" style="color:#8b949e">Display Name</label>
+                <input
+                  type="text"
+                  value=${description}
+                  onInput=${e => setDescription(e.target.value)}
+                  placeholder="Human-readable name"
+                />
+              </div>
+
+              <div>
+                <label class="block text-xs font-semibold mb-2 uppercase tracking-wider" style="color:#8b949e">Model</label>
+                <div class="flex gap-2">
+                  ${['sonnet', 'opus', 'haiku'].map(m => html`
+                    <button
+                      key=${m}
+                      class="flex-1 py-2.5 rounded-lg text-sm font-medium transition-all"
+                      style="background:${model === m ? 'rgba(88,166,255,0.15)' : '#161b22'};color:${model === m ? '#58a6ff' : '#8b949e'};border:1px solid ${model === m ? 'rgba(88,166,255,0.4)' : '#30363d'};cursor:pointer"
+                      onClick=${() => setModel(m)}
+                    >
+                      ${m.charAt(0).toUpperCase() + m.slice(1)}
+                    </button>
+                  `)}
+                </div>
+              </div>
+
+              ${error && html`
+                <div class="p-3 rounded-lg text-sm" style="background:rgba(248,81,73,0.1);border:1px solid rgba(248,81,73,0.3);color:#f85149">
+                  ${error}
+                </div>
+              `}
+
+              <button
+                class="btn btn-primary w-full justify-center"
+                style="padding:14px;font-size:15px;border-radius:10px"
+                onClick=${create}
+                disabled=${creating || !nameSlug}
+              >
+                ${creating ? html`<${Spinner} size=${14} /> Creating...` : 'Create Agent'}
+              </button>
+            </div>
+
+            <!-- What gets created -->
+            <div class="mt-6 p-4 rounded-lg" style="background:#161b22;border:1px solid #30363d">
+              <div class="text-xs font-semibold mb-2 uppercase tracking-wider" style="color:#484f58">What gets created</div>
+              <div class="space-y-1 text-xs font-mono" style="color:#8b949e">
+                <div>~/.clade/agents/${nameSlug || '<name>'}/SOUL.md</div>
+                <div>~/.clade/agents/${nameSlug || '<name>'}/MEMORY.md</div>
+                <div>~/.clade/agents/${nameSlug || '<name>'}/HEARTBEAT.md</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     //  PAGE 1: Dashboard
     // ═══════════════════════════════════════════════════════════════════
 
@@ -578,8 +811,9 @@
     //  PAGE 2: Agents
     // ═══════════════════════════════════════════════════════════════════
 
-    function AgentsPage({ agents, onRefresh }) {
+    function AgentsPage({ agents, onRefresh, onNavigate }) {
       const [selectedId, setSelectedId] = useState(null);
+      const [showCreate, setShowCreate] = useState(false);
 
       // Auto-select first agent
       useEffect(() => {
@@ -590,11 +824,22 @@
 
       const selectedAgent = agents.find(a => a.id === selectedId);
 
+      if (showCreate) {
+        return html`<${WelcomePage} onCreated=${() => { setShowCreate(false); onRefresh && onRefresh(); }} />`;
+      }
+
       return html`
         <div class="page-enter flex h-full">
           <!-- Agent sub-sidebar -->
           <div class="flex flex-col py-3" style="width:200px;min-width:200px;border-right:1px solid #30363d;background:#161b22">
-            <div class="px-3 pb-2 text-xs font-semibold uppercase tracking-wider" style="color:#484f58">Agents</div>
+            <div class="flex items-center justify-between px-3 pb-2">
+              <span class="text-xs font-semibold uppercase tracking-wider" style="color:#484f58">Agents</span>
+              <button
+                class="text-xs font-medium px-2 py-1 rounded"
+                style="background:rgba(35,134,54,0.15);color:#3fb950;border:1px solid rgba(63,185,80,0.3);cursor:pointer"
+                onClick=${() => setShowCreate(true)}
+              >+ New</button>
+            </div>
             <div class="flex-1 overflow-y-auto">
               ${agents.length === 0
                 ? html`<div class="px-3 py-4 text-sm" style="color:#8b949e">No agents</div>`
@@ -1724,11 +1969,16 @@
 
       // ── Page renderer ────────────────────────────────────────────
       const renderPage = () => {
+        // Show welcome / onboarding when no agents exist
+        if (agents.length === 0 && (page === 'dashboard' || page === 'agents')) {
+          return html`<${WelcomePage} onCreated=${fetchAll} />`;
+        }
+
         switch (page) {
           case 'dashboard':
             return html`<${DashboardPage} health=${health} agents=${agents} sessions=${sessions} cronJobs=${cronJobs} />`;
           case 'agents':
-            return html`<${AgentsPage} agents=${agents} onRefresh=${fetchAgents} />`;
+            return html`<${AgentsPage} agents=${agents} onRefresh=${fetchAgents} onNavigate=${setPage} />`;
           case 'sessions':
             return html`<${SessionsPage} sessions=${sessions} onRefresh=${fetchSessions} />`;
           case 'skills':

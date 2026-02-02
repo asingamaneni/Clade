@@ -9,7 +9,7 @@
     "clade": "dist/bin/clade.js"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && node -e \"const{mkdirSync,copyFileSync}=require('fs');mkdirSync('dist/gateway',{recursive:true});copyFileSync('src/gateway/admin.html','dist/gateway/admin.html')\"",
     "dev": "tsup --watch",
     "start": "node dist/bin/clade.js start",
     "test": "vitest run",
@@ -51,6 +51,7 @@
   },
   "files": [
     "dist",
+    "src/gateway/admin.html",
     "README.md",
     "LICENSE"
   ],

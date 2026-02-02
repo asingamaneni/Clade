@@ -3,6 +3,8 @@ import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { Command } from 'commander';
+import { listTemplates, getTemplate, configFromTemplate } from '../../agents/templates.js';
+import { DEFAULT_SOUL, DEFAULT_HEARTBEAT } from '../../config/defaults.js';
 
 interface StartOptions {
   port?: string;
@@ -158,11 +160,13 @@ function findAdminHtml(): string | null {
     dir = __dirname ?? process.cwd();
   }
 
-  // Search paths relative to this file (src/cli/commands/ or dist/cli/commands/)
+  // After tsup bundling, code runs from dist/bin/clade.js so dir = dist/bin/
+  // Before bundling (source), dir = src/cli/commands/
   const candidates = [
-    join(dir, '..', '..', 'gateway', 'admin.html'),           // from dist: dist/gateway/admin.html
-    join(dir, '..', '..', '..', 'src', 'gateway', 'admin.html'), // from dist: src/gateway/admin.html
-    join(dir, '..', '..', '..', 'gateway', 'admin.html'),     // alternate layout
+    join(dir, '..', 'gateway', 'admin.html'),                    // dist/bin/ → dist/gateway/admin.html
+    join(dir, '..', '..', 'gateway', 'admin.html'),              // src/cli/commands/ → src/gateway/admin.html
+    join(dir, '..', '..', 'src', 'gateway', 'admin.html'),      // dist/bin/ → src/gateway/admin.html
+    join(dir, '..', '..', '..', 'src', 'gateway', 'admin.html'), // dist/cli/commands/ → src/gateway/admin.html
   ];
 
   for (const candidate of candidates) {
@@ -220,6 +224,93 @@ async function startPlaceholderServer(
   fastify.get('/api/skills', async () => ({ skills: [] }));
   fastify.get('/api/channels', async () => ({ channels: [] }));
   fastify.get('/api/cron', async () => ({ jobs: [] }));
+
+  // ── Templates API ──────────────────────────────────────────
+  fastify.get('/api/templates', async () => {
+    const templates = listTemplates().map(t => ({
+      id: t.id,
+      name: t.name,
+      description: t.description,
+      toolPreset: t.toolPreset,
+      model: t.model,
+      heartbeat: t.heartbeat,
+    }));
+    return { templates };
+  });
+
+  // ── Agent creation API ─────────────────────────────────────
+  fastify.post('/api/agents', async (req, reply) => {
+    const body = req.body as Record<string, string> | null;
+    if (!body || !body.name) {
+      reply.status(400);
+      return { error: 'Agent name is required' };
+    }
+
+    const agentName = body.name.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+
+    if (agents[agentName]) {
+      reply.status(409);
+      return { error: `Agent "${agentName}" already exists` };
+    }
+
+    // Build agent config from template (or defaults)
+    const templateId = body.template || 'coding';
+    const template = getTemplate(templateId);
+    let agentConfig: Record<string, unknown>;
+
+    if (template) {
+      const built = configFromTemplate(template, {
+        name: body.description || template.name,
+        model: body.model,
+      });
+      agentConfig = { ...built, name: body.description || template.name };
+    } else {
+      agentConfig = {
+        name: body.description || agentName,
+        description: '',
+        model: body.model || 'sonnet',
+        toolPreset: 'full',
+        customTools: [],
+        skills: [],
+        heartbeat: { enabled: true, interval: '30m', mode: 'check', suppressOk: true },
+        reflection: { enabled: true, interval: 10 },
+        maxTurns: 25,
+        notifications: { minSeverity: 'info', batchDigest: false, digestIntervalMinutes: 30 },
+      };
+    }
+
+    // Create agent directory structure
+    const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+    const agentDir = join(cladeHome, 'agents', agentName);
+    mkdirSync(join(agentDir, 'memory'), { recursive: true });
+    mkdirSync(join(agentDir, 'soul-history'), { recursive: true });
+
+    // Write SOUL.md, MEMORY.md, HEARTBEAT.md
+    const soulContent = template?.soulSeed ?? DEFAULT_SOUL;
+    const heartbeatContent = template?.heartbeatSeed ?? DEFAULT_HEARTBEAT;
+    writeFileSync(join(agentDir, 'SOUL.md'), soulContent, 'utf-8');
+    writeFileSync(join(agentDir, 'MEMORY.md'), '# Memory\n\n_Curated knowledge and observations._\n', 'utf-8');
+    writeFileSync(join(agentDir, 'HEARTBEAT.md'), heartbeatContent, 'utf-8');
+
+    // Update config.json
+    agents[agentName] = agentConfig;
+    (config as Record<string, unknown>).agents = agents;
+    const configPath = join(cladeHome, 'config.json');
+    writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+
+    console.log(`  [ok] Created agent "${agentName}" (template: ${templateId})`);
+
+    return {
+      agent: {
+        id: agentName,
+        name: agentConfig.name,
+        description: agentConfig.description ?? '',
+        model: agentConfig.model ?? 'sonnet',
+        toolPreset: agentConfig.toolPreset ?? 'full',
+      },
+    };
+  });
 
   // ── Admin dashboard ───────────────────────────────────────────
   const adminHtmlPath = findAdminHtml();
