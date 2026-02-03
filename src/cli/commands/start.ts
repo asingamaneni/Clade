@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { Command } from 'commander';
 import { listTemplates, getTemplate, configFromTemplate } from '../../agents/templates.js';
+import { resolveAllowedTools } from '../../agents/presets.js';
 import { DEFAULT_SOUL, DEFAULT_HEARTBEAT } from '../../config/defaults.js';
 
 interface StartOptions {
@@ -511,7 +512,7 @@ function askClaude(
 ): Promise<{ text: string; sessionId?: string }> {
   const home = cladeHome || process.env['CLADE_HOME'] || join(homedir(), '.clade');
   return new Promise((resolve) => {
-    const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose'];
+    const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose', '--add-dir', '/', '--permission-mode', 'bypassPermissions'];
 
     // Resume existing session if we have one for this conversation
     if (conversationId) {
@@ -570,6 +571,13 @@ function askClaude(
 
     if (mcpConfigPath) {
       args.push('--mcp-config', mcpConfigPath);
+    }
+
+    // Pass --allowedTools so the CLI permits MCP tool use in -p mode
+    const preset = (toolPreset || 'full') as import('../../config/schema.js').ToolPreset;
+    const allowedTools = resolveAllowedTools(preset);
+    if (allowedTools.length > 0) {
+      args.push('--allowedTools', allowedTools.join(','));
     }
 
     let stdout = '';
