@@ -1288,6 +1288,7 @@ async function startPlaceholderServer(
 
     // Identity defaults per template type
     const IDENTITY_DEFAULTS: Record<string, { creature: string; vibe: string; emoji: string }> = {
+      orchestrator: { creature: 'Personal assistant', vibe: 'capable, attentive, proactive', emoji: '\u{1F52E}' },
       coding:   { creature: 'Code architect', vibe: 'precise, focused, pragmatic', emoji: '\u{1F4BB}' },
       research: { creature: 'Knowledge seeker', vibe: 'curious, thorough, analytical', emoji: '\u{1F50D}' },
       ops:      { creature: 'System sentinel', vibe: 'vigilant, calm, reliable', emoji: '\u{1F4E1}' },
@@ -1348,6 +1349,14 @@ async function startPlaceholderServer(
     // Update config.json
     agents[agentName] = agentConfig;
     (config as Record<string, unknown>).agents = agents;
+
+    // Set as default agent if requested (used by onboarding flow)
+    if (body.setAsDefault) {
+      const routing = ((config as Record<string, unknown>).routing ?? {}) as Record<string, unknown>;
+      routing.defaultAgent = agentName;
+      (config as Record<string, unknown>).routing = routing;
+    }
+
     const configPath = join(cladeHome, 'config.json');
     writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
 

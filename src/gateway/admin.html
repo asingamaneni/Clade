@@ -806,6 +806,7 @@
     // ═══════════════════════════════════════════════════════════════════
 
     const TEMPLATE_META = {
+      orchestrator: { icon: '\u{1F52E}', color: '#f0883e', border: 'rgba(240,136,62,0.4)', bg: 'rgba(240,136,62,0.06)' },
       coding:   { icon: '\u{1F4BB}', color: '#58a6ff', border: 'rgba(88,166,255,0.4)',  bg: 'rgba(88,166,255,0.06)' },
       research: { icon: '\u{1F50D}', color: '#bc8cff', border: 'rgba(188,140,255,0.4)', bg: 'rgba(188,140,255,0.06)' },
       ops:      { icon: '\u{1F4E1}', color: '#3fb950', border: 'rgba(63,185,80,0.4)',   bg: 'rgba(63,185,80,0.06)' },
@@ -814,7 +815,90 @@
     };
 
     // ═══════════════════════════════════════════════════════════════════
-    //  ONBOARDING: Welcome Page (shown when 0 agents)
+    //  ONBOARDING: Onboarding Page (shown on first launch, 0 agents)
+    // ═══════════════════════════════════════════════════════════════════
+
+    function OnboardingPage({ onCreated, onPickTemplate }) {
+      const [name, setName] = useState('assistant');
+      const [creating, setCreating] = useState(false);
+      const [error, setError] = useState('');
+
+      const handleCreate = async () => {
+        const agentName = name.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-') || 'assistant';
+        setCreating(true);
+        setError('');
+        try {
+          await api('/agents', {
+            method: 'POST',
+            body: {
+              name: agentName,
+              template: 'orchestrator',
+              setAsDefault: true,
+            },
+          });
+          onCreated();
+        } catch (err) {
+          setError(err.message || 'Failed to create agent');
+          setCreating(false);
+        }
+      };
+
+      return html`
+        <div class="page-enter flex flex-col items-center justify-center" style="min-height:calc(100vh - 48px);padding:2rem">
+          <div style="max-width:480px;width:100%;text-align:center">
+            <div class="mb-3" style="font-size:56px">\u{1F52E}</div>
+            <h1 class="text-3xl font-bold mb-2" style="color:#e6edf3">Welcome to Clade</h1>
+            <p class="text-base mb-8" style="color:#8b949e;max-width:400px;margin:0 auto">
+              Your personal AI assistant, powered by Claude Code. Name it and start chatting.
+            </p>
+
+            <div class="mb-4" style="max-width:320px;margin:0 auto">
+              <label class="block text-sm font-medium mb-2 text-left" style="color:#8b949e">Name your assistant</label>
+              <input
+                type="text"
+                value=${name}
+                onInput=${e => setName(e.target.value)}
+                onKeyDown=${e => { if (e.key === 'Enter' && !creating) handleCreate(); }}
+                placeholder="assistant"
+                class="w-full px-4 py-3 rounded-lg text-base"
+                style="background:#161b22;border:2px solid rgba(240,136,62,0.4);color:#e6edf3;outline:none"
+                onFocus=${e => e.target.style.borderColor = '#f0883e'}
+                onBlur=${e => e.target.style.borderColor = 'rgba(240,136,62,0.4)'}
+                autoFocus
+              />
+            </div>
+
+            ${error && html`<div class="mb-4 text-sm" style="color:#f85149">${error}</div>`}
+
+            <button
+              onClick=${handleCreate}
+              disabled=${creating}
+              class="px-8 py-3 rounded-lg text-base font-semibold transition-all"
+              style="background:#f0883e;color:#fff;border:none;cursor:${creating ? 'wait' : 'pointer'};opacity:${creating ? 0.7 : 1};outline:none"
+              onMouseEnter=${e => { if (!creating) e.target.style.background = '#d47a35'; }}
+              onMouseLeave=${e => e.target.style.background = '#f0883e'}
+            >
+              ${creating ? 'Creating...' : 'Get Started'}
+            </button>
+
+            <div class="mt-6">
+              <button
+                onClick=${onPickTemplate}
+                class="text-sm transition-all"
+                style="color:#484f58;background:none;border:none;cursor:pointer;outline:none"
+                onMouseEnter=${e => e.target.style.color = '#8b949e'}
+                onMouseLeave=${e => e.target.style.color = '#484f58'}
+              >
+                Or pick a specialist template instead
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  ONBOARDING: Welcome Page (template picker, also used for adding specialists)
     // ═══════════════════════════════════════════════════════════════════
 
     function WelcomePage({ onCreated }) {
@@ -3304,10 +3388,15 @@ If nothing needs attention, respond with: HEARTBEAT_OK
       }, []);
 
       // ── Page renderer ────────────────────────────────────────────
+      const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+
       const renderPage = () => {
-        // Show welcome / onboarding when no agents exist
+        // Show onboarding when no agents exist
         if (agents.length === 0 && (page === 'dashboard' || page === 'agents')) {
-          return html`<${WelcomePage} onCreated=${fetchAll} />`;
+          if (showTemplatePicker) {
+            return html`<${WelcomePage} onCreated=${fetchAll} />`;
+          }
+          return html`<${OnboardingPage} onCreated=${() => { fetchAll().then(() => setPage('chat')); }} onPickTemplate=${() => setShowTemplatePicker(true)} />`;
         }
 
         switch (page) {

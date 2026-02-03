@@ -153,6 +153,17 @@ npm run build               # Build TypeScript + bundle UI
 npm run dev                 # Development mode with watch
 ```
 
+### Manual UI testing
+After any change to `admin.html` or server endpoints that affect the admin UI, **always**
+test with Playwright MCP (browser automation):
+1. Start the server: `node dist/bin/clade.js start` (background)
+2. Navigate to `http://localhost:7890/admin` via Playwright
+3. Verify the affected flows visually (take snapshots/screenshots)
+4. Stop the server when done
+
+This is not optional — UI changes must be verified in a real browser before considering
+the task complete.
+
 ## Environment Variables
 
 | Variable | Required | Description |
