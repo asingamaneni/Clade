@@ -121,6 +121,7 @@ export class SessionManager {
 
       // 3. Build ClaudeOptions
       const soulContent = this.registry.readSoul(agentId);
+      const systemPrompt = this.buildSystemPrompt(agentId, soulContent);
       const mcpConfigPath = this.buildMcpConfig(agentId, agent.config);
       const allowedTools = resolveAllowedTools(
         agent.config.toolPreset,
@@ -129,7 +130,7 @@ export class SessionManager {
 
       const options: ClaudeOptions = {
         prompt,
-        systemPrompt: soulContent,
+        systemPrompt,
         mcpConfigPath,
         allowedTools: allowedTools.length > 0 ? allowedTools : undefined,
         maxTurns: agent.config.maxTurns,
@@ -191,6 +192,7 @@ export class SessionManager {
       }
 
       const soulContent = this.registry.readSoul(session.agent_id);
+      const systemPrompt = this.buildSystemPrompt(session.agent_id, soulContent);
       const mcpConfigPath = this.buildMcpConfig(
         session.agent_id,
         agent.config,
@@ -203,7 +205,7 @@ export class SessionManager {
       const options: ClaudeOptions = {
         prompt,
         resumeSessionId: sessionId,
-        systemPrompt: soulContent,
+        systemPrompt,
         mcpConfigPath,
         allowedTools: allowedTools.length > 0 ? allowedTools : undefined,
         maxTurns: agent.config.maxTurns,
@@ -235,6 +237,55 @@ export class SessionManager {
   // -------------------------------------------------------------------------
   // Private helpers
   // -------------------------------------------------------------------------
+
+  /**
+   * Build a combined system prompt: SOUL.md content + MEMORY.md + today's
+   * daily log.  This ensures agents always start with their persistent
+   * context regardless of which code path invokes the CLI (full gateway,
+   * channel adapters, webhooks, etc.).
+   */
+  private buildSystemPrompt(agentId: string, soulContent: string): string {
+    const parts: string[] = [];
+
+    if (soulContent.trim()) {
+      parts.push(soulContent.trim());
+    }
+
+    // Inject MEMORY.md so the agent starts with persistent context
+    const homeDir = getConfigDir();
+    const memoryPath = join(homeDir, 'agents', agentId, 'MEMORY.md');
+    if (existsSync(memoryPath)) {
+      const memory = readFileSync(memoryPath, 'utf-8').trim();
+      const defaultMemory = '# Memory\n\n_Curated knowledge and observations._';
+      if (
+        memory &&
+        memory !== defaultMemory &&
+        memory !== '# Memory\n_Curated knowledge and observations._'
+      ) {
+        parts.push(
+          '## Your Persistent Memory\n\nThe following is your curated long-term memory. Use it as context:\n\n' +
+            memory,
+        );
+      }
+    }
+
+    // Inject today's daily log if it exists (recent session context)
+    const today = new Date().toISOString().split('T')[0];
+    const dailyLogPath = join(homeDir, 'agents', agentId, 'memory', `${today}.md`);
+    if (existsSync(dailyLogPath)) {
+      const dailyLog = readFileSync(dailyLogPath, 'utf-8').trim();
+      if (dailyLog) {
+        // Truncate to last ~2000 chars to avoid blowing context
+        const truncated =
+          dailyLog.length > 2000
+            ? '...\n' + dailyLog.slice(-2000)
+            : dailyLog;
+        parts.push("## Today's Activity Log\n\n" + truncated);
+      }
+    }
+
+    return parts.join('\n\n');
+  }
 
   /**
    * Queue operations per session key to prevent concurrent claude CLI

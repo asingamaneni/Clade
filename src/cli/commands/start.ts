@@ -220,6 +220,9 @@ function generateLabel(text: string): string {
 /** In-memory cache of chat data, keyed by agentId */
 const chatCache = new Map<string, AgentChatData>();
 
+/** Track connected channel adapter names (populated after server starts) */
+const activeChannelNames = new Set<string>();
+
 function chatDir(cladeHome: string): string {
   return join(cladeHome, 'data', 'chats');
 }
@@ -1243,7 +1246,9 @@ async function startPlaceholderServer(
     return { sessions };
   });
   fastify.get('/api/skills', async () => ({ skills: [] }));
-  fastify.get('/api/channels', async () => ({ channels: [] }));
+  fastify.get('/api/channels', async () => ({
+    channels: Array.from(activeChannelNames).map((name) => ({ name, connected: true })),
+  }));
   fastify.get('/api/cron', async () => ({ jobs: [] }));
 
   // ── Templates API ──────────────────────────────────────────
@@ -1378,23 +1383,202 @@ async function startPlaceholderServer(
 
   await fastify.listen({ port, host });
 
-  const agentCount = Object.keys(
-    (config.agents ?? {}) as Record<string, unknown>,
-  ).length;
-  const channelList = Object.entries(
-    (config.channels ?? {}) as Record<string, { enabled?: boolean }>,
-  )
-    .filter(([, v]) => v.enabled)
-    .map(([k]) => k);
+  const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+  const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+  const agentCount = Object.keys(agents).length;
+  const channels = (config.channels ?? {}) as Record<string, { enabled?: boolean }>;
+
+  // ── Connect channel adapters (Slack, Telegram, Discord) ─────────
+  const connectedChannels = await connectChannelAdapters(
+    channels,
+    agents,
+    config,
+    cladeHome,
+  );
+
+  const channelList = [
+    ...Object.entries(channels).filter(([, v]) => v.enabled).map(([k]) => k),
+    ...connectedChannels,
+  ];
+  // Deduplicate
+  const uniqueChannels = [...new Set(channelList)];
 
   console.log(`  Server listening on http://${host}:${port}`);
   console.log(`  Agents: ${agentCount}`);
-  console.log(`  Channels: ${channelList.join(', ') || 'none'}`);
+  console.log(`  Channels: ${uniqueChannels.join(', ') || 'none'}`);
   console.log(`\n  Health check: http://${host}:${port}/health`);
   console.log(`  Admin UI:     http://${host}:${port}/admin`);
   console.log(`\n  Press Ctrl+C to stop.\n`);
 
   await new Promise(() => {});
+}
+
+// ---------------------------------------------------------------------------
+// @mention routing for channel messages
+// ---------------------------------------------------------------------------
+
+const MENTION_PATTERN = /(?:^|\s)@([\w-]+)/;
+
+/**
+ * Parse @mention from message text and resolve to a known agent ID.
+ * Returns the matched agent ID and message with mention stripped.
+ */
+function parseChannelMention(
+  text: string,
+  agentIds: string[],
+): { agentId: string | null; strippedText: string } {
+  const match = text.match(MENTION_PATTERN);
+  if (!match) return { agentId: null, strippedText: text };
+
+  const mentioned = match[1]!.toLowerCase();
+  const found = agentIds.find((id) => id.toLowerCase() === mentioned);
+  if (!found) return { agentId: null, strippedText: text };
+
+  const stripped = text.replace(MENTION_PATTERN, '').trim();
+  return { agentId: found, strippedText: stripped };
+}
+
+// ---------------------------------------------------------------------------
+// Channel adapter wiring
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect channel tokens from environment variables, instantiate adapters,
+ * wire message handlers to askClaude(), and connect.
+ * Returns array of connected channel names.
+ */
+async function connectChannelAdapters(
+  channels: Record<string, { enabled?: boolean }>,
+  agents: Record<string, Record<string, unknown>>,
+  config: Record<string, unknown>,
+  cladeHome: string,
+): Promise<string[]> {
+  const connected: string[] = [];
+  const routing = (config.routing ?? {}) as { defaultAgent?: string; rules?: unknown[] };
+  const defaultAgentId = routing.defaultAgent || Object.keys(agents)[0] || '';
+  const agentIds = Object.keys(agents);
+
+  // Helper: handle an inbound message from any channel adapter
+  const handleChannelMessage = async (
+    adapter: { sendMessage: (to: string, text: string, opts?: { threadId?: string }) => Promise<void>; sendTyping: (to: string) => Promise<void> },
+    msg: { channel: string; userId: string; chatId?: string; text: string; threadId?: string },
+  ): Promise<void> => {
+    // Route: @mention > default agent
+    const { agentId: mentionedAgent, strippedText } = parseChannelMention(msg.text, agentIds);
+    const agentId = mentionedAgent || defaultAgentId;
+
+    if (!agentId || !agents[agentId]) {
+      console.error(`  [${msg.channel}] No agent found to handle message`);
+      return;
+    }
+
+    const agentCfg = agents[agentId] ?? {};
+    const toolPreset = (agentCfg.toolPreset as string) || 'coding';
+    const soulPath = join(cladeHome, 'agents', agentId, 'SOUL.md');
+    const agentContext = buildAgentContext(agentId, agents);
+
+    // Build a persistent session key for this channel user/chat
+    const sessionKey = `ch:${msg.channel}:${agentId}:${msg.chatId || msg.userId}`;
+
+    // Show typing indicator
+    const replyTo = msg.chatId || msg.userId;
+    try { await adapter.sendTyping(replyTo); } catch { /* not all channels support this */ }
+
+    console.log(`  [${msg.channel}] ${msg.userId} → ${agentId}: ${msg.text.slice(0, 80)}${msg.text.length > 80 ? '...' : ''}`);
+
+    try {
+      const result = await askClaude(
+        strippedText,
+        soulPath,
+        agentContext,
+        sessionKey,
+        agentId,
+        cladeHome,
+        toolPreset,
+      );
+
+      await adapter.sendMessage(replyTo, result.text, { threadId: msg.threadId });
+      console.log(`  [${msg.channel}] ${agentId} → ${msg.userId}: ${result.text.slice(0, 80)}${result.text.length > 80 ? '...' : ''}`);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(`  [${msg.channel}] Error: ${errMsg}`);
+      try {
+        await adapter.sendMessage(replyTo, 'Sorry, I encountered an error processing your message.', { threadId: msg.threadId });
+      } catch { /* best effort */ }
+    }
+  };
+
+  // ── Slack ────────────────────────────────────────────────────────
+  const slackBotToken = process.env['SLACK_BOT_TOKEN'];
+  const slackAppToken = process.env['SLACK_APP_TOKEN'];
+  const slackEnabled = channels.slack?.enabled !== false;
+
+  if (slackBotToken && slackAppToken && slackEnabled) {
+    try {
+      const { SlackAdapter } = await import('../../channels/slack.js');
+      const slack = new SlackAdapter(slackBotToken, slackAppToken);
+
+      slack.onMessage(async (msg) => {
+        await handleChannelMessage(slack, msg);
+      });
+
+      await slack.connect();
+      connected.push('slack');
+      activeChannelNames.add('slack');
+      console.log('  [ok] Slack adapter connected (Socket Mode)');
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(`  [!!] Slack adapter failed to connect: ${errMsg}`);
+    }
+  }
+
+  // ── Telegram ─────────────────────────────────────────────────────
+  const telegramToken = process.env['TELEGRAM_BOT_TOKEN'];
+  const telegramEnabled = channels.telegram?.enabled !== false;
+
+  if (telegramToken && telegramEnabled) {
+    try {
+      const { TelegramAdapter } = await import('../../channels/telegram.js');
+      const telegram = new TelegramAdapter(telegramToken);
+
+      telegram.onMessage(async (msg) => {
+        await handleChannelMessage(telegram, msg);
+      });
+
+      await telegram.connect();
+      connected.push('telegram');
+      activeChannelNames.add('telegram');
+      console.log('  [ok] Telegram adapter connected');
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(`  [!!] Telegram adapter failed to connect: ${errMsg}`);
+    }
+  }
+
+  // ── Discord ──────────────────────────────────────────────────────
+  const discordToken = process.env['DISCORD_BOT_TOKEN'];
+  const discordEnabled = channels.discord?.enabled !== false;
+
+  if (discordToken && discordEnabled) {
+    try {
+      const { DiscordAdapter } = await import('../../channels/discord.js');
+      const discord = new DiscordAdapter(discordToken);
+
+      discord.onMessage(async (msg) => {
+        await handleChannelMessage(discord, msg);
+      });
+
+      await discord.connect();
+      connected.push('discord');
+      activeChannelNames.add('discord');
+      console.log('  [ok] Discord adapter connected');
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(`  [!!] Discord adapter failed to connect: ${errMsg}`);
+    }
+  }
+
+  return connected;
 }
 
 const FALLBACK_ADMIN_HTML = `<!DOCTYPE html>
