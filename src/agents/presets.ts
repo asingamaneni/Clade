@@ -81,12 +81,14 @@ const PRESET_MAP: Record<ToolPreset, readonly string[]> = {
     ...CODING_TOOLS,
     MCP_MEMORY,
     MCP_SESSIONS,
+    MCP_SKILLS,
   ],
 
   messaging: [
     MCP_MEMORY,
     MCP_SESSIONS,
     MCP_MESSAGING,
+    MCP_SKILLS,
   ],
 
   full: [
@@ -123,9 +125,9 @@ export function describePreset(preset: ToolPreset): string {
     case 'potato':
       return 'No tools (chat only)';
     case 'coding':
-      return 'File system + code tools, memory & sessions MCP';
+      return 'File system + code tools, memory, sessions & skills MCP';
     case 'messaging':
-      return 'Memory, sessions & messaging MCP only';
+      return 'Memory, sessions, messaging & skills MCP only';
     case 'full':
       return 'All tools (native + MCP)';
     case 'custom':

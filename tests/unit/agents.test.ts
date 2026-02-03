@@ -172,9 +172,10 @@ describe('Tool Presets', () => {
     expect(tools).toContain('Grep');
     expect(tools).toContain('mcp__memory__*');
     expect(tools).toContain('mcp__sessions__*');
-    // Should not include messaging or skills MCP
+    // Skills MCP is now included for capability discovery
+    expect(tools).toContain('mcp__skills__*');
+    // Should not include messaging MCP
     expect(tools).not.toContain('mcp__messaging__*');
-    expect(tools).not.toContain('mcp__skills__*');
   });
 
   it('should resolve messaging preset to MCP-only tools', () => {
@@ -182,6 +183,7 @@ describe('Tool Presets', () => {
     expect(tools).toContain('mcp__memory__*');
     expect(tools).toContain('mcp__sessions__*');
     expect(tools).toContain('mcp__messaging__*');
+    expect(tools).toContain('mcp__skills__*');
     // Should not include native code tools
     expect(tools).not.toContain('Read');
     expect(tools).not.toContain('Bash');

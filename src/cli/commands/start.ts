@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -359,25 +359,166 @@ function buildAgentContext(
   return lines.join('\n');
 }
 
-/** Map conversationId → claude session ID for resume support */
-const sessionMap = new Map<string, string>();
+// ---------------------------------------------------------------------------
+// Persistent session mapping (disk-backed)
+// ---------------------------------------------------------------------------
 
-/** Spawn claude CLI to get an agent response, with optional session resume */
+/** Path to the session-map JSON file */
+function sessionMapPath(cladeHome: string): string {
+  return join(cladeHome, 'data', 'session-map.json');
+}
+
+/** Load all conversation→session mappings from disk */
+function loadSessionMap(cladeHome: string): Record<string, string> {
+  try {
+    const raw = readFileSync(sessionMapPath(cladeHome), 'utf-8');
+    return JSON.parse(raw) as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+/** Save a single conversation→session mapping to disk */
+function saveSessionMapping(cladeHome: string, convId: string, sessionId: string): void {
+  const map = loadSessionMap(cladeHome);
+  map[convId] = sessionId;
+  const mapDir = join(cladeHome, 'data');
+  mkdirSync(mapDir, { recursive: true });
+  writeFileSync(sessionMapPath(cladeHome), JSON.stringify(map, null, 2), 'utf-8');
+}
+
+/** Retrieve session ID for a conversation */
+function getSessionId(cladeHome: string, convId: string): string | undefined {
+  return loadSessionMap(cladeHome)[convId];
+}
+
+// ---------------------------------------------------------------------------
+// MCP config builder for placeholder server
+// ---------------------------------------------------------------------------
+
+/**
+ * Locate the dist directory containing MCP server scripts.
+ * Works from both bundled (dist/bin/clade.js) and source (src/cli/commands/) paths.
+ */
+function findMcpServerScript(serverName: string): string | null {
+  let dir: string;
+  try {
+    dir = dirname(fileURLToPath(import.meta.url));
+  } catch {
+    dir = __dirname ?? process.cwd();
+  }
+
+  const scriptName = `${serverName}-server.js`;
+  const candidates = [
+    join(dir, '..', 'mcp', scriptName),         // dist/bin/ → dist/mcp/
+    join(dir, '..', '..', 'mcp', scriptName),    // dist/cli/commands/ → dist/mcp/
+    join(dir, '..', '..', 'dist', 'mcp', scriptName), // src/cli/commands/ → dist/mcp/
+  ];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Build a temporary MCP config file for an agent, so it has access to
+ * memory, sessions, and skills tools during chat.
+ */
+function buildMcpConfigForAgent(
+  agentId: string,
+  cladeHome: string,
+  toolPreset: string,
+): string | undefined {
+  // Determine which MCP servers this preset needs
+  const MCP_SERVERS_BY_PRESET: Record<string, string[]> = {
+    potato: [],
+    coding: ['memory', 'sessions', 'skills'],
+    messaging: ['memory', 'sessions', 'messaging', 'skills'],
+    full: ['memory', 'sessions', 'messaging', 'skills'],
+    custom: ['memory', 'sessions'],
+  };
+
+  const servers = MCP_SERVERS_BY_PRESET[toolPreset] ?? ['memory', 'sessions'];
+  if (servers.length === 0) return undefined;
+
+  const mcpServers: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {};
+
+  for (const serverName of servers) {
+    const scriptPath = findMcpServerScript(serverName);
+    if (!scriptPath) continue;
+
+    mcpServers[serverName] = {
+      command: 'node',
+      args: [scriptPath],
+      env: {
+        CLADE_AGENT_ID: agentId,
+        CLADE_HOME: cladeHome,
+      },
+    };
+  }
+
+  if (Object.keys(mcpServers).length === 0) return undefined;
+
+  // Also add any active third-party skills
+  const activeSkillsDir = join(cladeHome, 'skills', 'active');
+  if (existsSync(activeSkillsDir)) {
+    try {
+      const entries = readdirSync(activeSkillsDir);
+      for (const entry of entries) {
+        const configPath = join(activeSkillsDir, entry, 'mcp.json');
+        if (existsSync(configPath)) {
+          try {
+            const raw = readFileSync(configPath, 'utf-8');
+            const skillCfg = JSON.parse(raw) as { command: string; args: string[]; env?: Record<string, string> };
+            mcpServers[`skill_${entry}`] = skillCfg;
+          } catch { /* skip malformed skill configs */ }
+        }
+      }
+    } catch { /* skip if unreadable */ }
+  }
+
+  // Write to temp file
+  const tmpDir = join(tmpdir(), 'clade-mcp');
+  mkdirSync(tmpDir, { recursive: true });
+  const tmpPath = join(tmpDir, `${agentId}-${randomUUID().slice(0, 8)}.json`);
+  writeFileSync(tmpPath, JSON.stringify({ mcpServers }, null, 2), 'utf-8');
+  return tmpPath;
+}
+
+/** Clean up a temporary MCP config file (best-effort) */
+function cleanupMcpConfig(path: string | undefined): void {
+  if (!path) return;
+  try { unlinkSync(path); } catch { /* best-effort */ }
+}
+
+// ---------------------------------------------------------------------------
+// askClaude — spawn claude CLI with full MCP + memory context
+// ---------------------------------------------------------------------------
+
+/** Spawn claude CLI to get an agent response, with MCP tools and memory */
 function askClaude(
   prompt: string,
   soulPath: string | null,
   agentContext?: string,
   conversationId?: string,
+  agentId?: string,
+  cladeHome?: string,
+  toolPreset?: string,
 ): Promise<{ text: string; sessionId?: string }> {
+  const home = cladeHome || process.env['CLADE_HOME'] || join(homedir(), '.clade');
   return new Promise((resolve) => {
     const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose'];
 
     // Resume existing session if we have one for this conversation
-    if (conversationId && sessionMap.has(conversationId)) {
-      args.push('--resume', sessionMap.get(conversationId)!);
+    if (conversationId) {
+      const existingSessionId = getSessionId(home, conversationId);
+      if (existingSessionId) {
+        args.push('--resume', existingSessionId);
+      }
     }
 
-    // Build combined system prompt: agent context first, then SOUL.md
+    // Build combined system prompt: agent context + SOUL.md + MEMORY.md
     const systemParts: string[] = [];
     if (agentContext?.trim()) {
       systemParts.push(agentContext.trim());
@@ -388,8 +529,44 @@ function askClaude(
         systemParts.push(soul.trim());
       }
     }
+
+    // Inject MEMORY.md so the agent starts with persistent context
+    if (agentId) {
+      const memoryPath = join(home, 'agents', agentId, 'MEMORY.md');
+      if (existsSync(memoryPath)) {
+        const memory = readFileSync(memoryPath, 'utf-8').trim();
+        const defaultMemory = '# Memory\n\n_Curated knowledge and observations._';
+        if (memory && memory !== defaultMemory && memory !== '# Memory\n_Curated knowledge and observations._') {
+          systemParts.push('## Your Persistent Memory\n\nThe following is your curated long-term memory. Use it as context:\n\n' + memory);
+        }
+      }
+
+      // Also inject recent daily log if it exists (last 24h context)
+      const today = new Date().toISOString().split('T')[0];
+      const dailyLogPath = join(home, 'agents', agentId, 'memory', `${today}.md`);
+      if (existsSync(dailyLogPath)) {
+        const dailyLog = readFileSync(dailyLogPath, 'utf-8').trim();
+        if (dailyLog) {
+          // Truncate to last ~2000 chars to avoid blowing context
+          const truncated = dailyLog.length > 2000
+            ? '...\n' + dailyLog.slice(-2000)
+            : dailyLog;
+          systemParts.push('## Today\'s Activity Log\n\n' + truncated);
+        }
+      }
+    }
+
     if (systemParts.length > 0) {
       args.push('--append-system-prompt', systemParts.join('\n\n'));
+    }
+
+    // Build and pass MCP config so agent has access to memory/skills/sessions tools
+    const mcpConfigPath = (agentId && toolPreset)
+      ? buildMcpConfigForAgent(agentId, home, toolPreset)
+      : buildMcpConfigForAgent(agentId || 'default', home, 'coding');
+
+    if (mcpConfigPath) {
+      args.push('--mcp-config', mcpConfigPath);
     }
 
     let stdout = '';
@@ -440,16 +617,18 @@ function askClaude(
           }
         }
 
-        // Store session ID for future resume
+        // Store session ID for future resume (persistent to disk)
         if (conversationId && resultSessionId) {
-          sessionMap.set(conversationId, resultSessionId);
+          saveSessionMapping(home, conversationId, resultSessionId);
         }
 
+        cleanupMcpConfig(mcpConfigPath);
         resolve({
           text: resultText.trim() || 'I received your message but could not parse the response.',
           sessionId: resultSessionId,
         });
       } else {
+        cleanupMcpConfig(mcpConfigPath);
         resolve({
           text: stderr.trim() || 'Sorry, I could not generate a response. Is the `claude` CLI installed and authenticated?',
         });
@@ -457,6 +636,7 @@ function askClaude(
     });
 
     child.on('error', () => {
+      cleanupMcpConfig(mcpConfigPath);
       resolve({
         text: 'The `claude` CLI is not installed or not in PATH. Install it to enable agent responses.',
       });
@@ -576,10 +756,12 @@ async function startPlaceholderServer(
               promptText = promptText + '\n\n' + attachmentNotes.join('\n\n');
             }
 
-            // Build agent identity context and spawn Claude CLI
+            // Build agent identity context and spawn Claude CLI with MCP tools + memory
             const agentContext = buildAgentContext(msg.agentId, agents);
             const soulPath = join(cladeHome, 'agents', msg.agentId, 'SOUL.md');
-            const result = await askClaude(promptText, soulPath, agentContext, conversationId);
+            const agentCfg = agents[msg.agentId] ?? {};
+            const toolPreset = (agentCfg.toolPreset as string) || 'coding';
+            const result = await askClaude(promptText, soulPath, agentContext, conversationId, msg.agentId, cladeHome, toolPreset);
             const responseText = result.text;
 
             // Save assistant message

@@ -37,8 +37,8 @@ const BUILTIN_MCP_SERVERS = [
  */
 const MCP_SERVERS_BY_PRESET: Record<string, readonly string[]> = {
   potato: [],
-  coding: ['memory', 'sessions'],
-  messaging: ['memory', 'sessions', 'messaging'],
+  coding: ['memory', 'sessions', 'skills'],
+  messaging: ['memory', 'sessions', 'messaging', 'skills'],
   full: BUILTIN_MCP_SERVERS,
   custom: [],
 };
