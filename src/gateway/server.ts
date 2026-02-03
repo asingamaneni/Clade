@@ -5,7 +5,8 @@ import fastifyStatic from '@fastify/static';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { ConfigSchema } from '../config/schema.js';
 import { WebChatAdapter } from '../channels/webchat.js';
 import { createLogger } from '../utils/logger.js';
@@ -54,6 +55,138 @@ export function broadcastAdmin(event: { type: string; [key: string]: unknown }):
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Chat types & storage helpers
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface ChatAttachment {
+  name: string;
+  type: string;
+  size: number;
+  url: string;
+}
+
+interface ChatMessage {
+  id: string;
+  agentId: string;
+  role: 'user' | 'assistant';
+  text: string;
+  timestamp: string;
+  sessionId?: string;
+  attachments?: ChatAttachment[];
+}
+
+interface Conversation {
+  id: string;
+  agentId: string;
+  label: string;
+  messages: ChatMessage[];
+  createdAt: string;
+  lastActiveAt: string;
+}
+
+interface AgentChatData {
+  conversations: Record<string, Conversation>;
+  order: string[]; // conversation IDs, most recent first
+}
+
+/** In-memory cache of chat data, keyed by agentId */
+const chatCache = new Map<string, AgentChatData>();
+
+function chatDir(cladeHome: string): string {
+  return join(cladeHome, 'data', 'chats');
+}
+
+function chatFilePath(cladeHome: string, agentId: string): string {
+  return join(chatDir(cladeHome), `${agentId}.json`);
+}
+
+function emptyAgentChatData(): AgentChatData {
+  return { conversations: {}, order: [] };
+}
+
+/** Generate a short label from the first user message */
+function generateLabel(text: string): string {
+  const cleaned = text.replace(/\s+/g, ' ').trim();
+  if (cleaned.length <= 30) return cleaned;
+  const truncated = cleaned.slice(0, 30);
+  const lastSpace = truncated.lastIndexOf(' ');
+  return (lastSpace > 15 ? truncated.slice(0, lastSpace) : truncated) + '...';
+}
+
+/** Load agent chat data with auto-migration from old flat array format */
+function loadAgentChatData(cladeHome: string, agentId: string): AgentChatData {
+  if (chatCache.has(agentId)) return chatCache.get(agentId)!;
+  const filePath = chatFilePath(cladeHome, agentId);
+  try {
+    const raw = readFileSync(filePath, 'utf-8');
+    const parsed = JSON.parse(raw);
+    // Detect old flat array format and auto-migrate
+    if (Array.isArray(parsed)) {
+      const messages = parsed as ChatMessage[];
+      if (messages.length === 0) {
+        const data = emptyAgentChatData();
+        chatCache.set(agentId, data);
+        return data;
+      }
+      const convId = 'conv_' + randomUUID().slice(0, 12);
+      const firstUserMsg = messages.find(m => m.role === 'user');
+      const conv: Conversation = {
+        id: convId,
+        agentId,
+        label: firstUserMsg ? generateLabel(firstUserMsg.text) : 'Imported chat',
+        messages,
+        createdAt: messages[0]?.timestamp || new Date().toISOString(),
+        lastActiveAt: messages[messages.length - 1]?.timestamp || new Date().toISOString(),
+      };
+      const data: AgentChatData = {
+        conversations: { [convId]: conv },
+        order: [convId],
+      };
+      chatCache.set(agentId, data);
+      saveAgentChatData(cladeHome, agentId, data);
+      return data;
+    }
+    // New format
+    const data = parsed as AgentChatData;
+    if (!data.conversations) data.conversations = {};
+    if (!data.order) data.order = [];
+    chatCache.set(agentId, data);
+    return data;
+  } catch {
+    const data = emptyAgentChatData();
+    chatCache.set(agentId, data);
+    return data;
+  }
+}
+
+/** Write full AgentChatData to disk */
+function saveAgentChatData(cladeHome: string, agentId: string, data: AgentChatData): void {
+  const dir = chatDir(cladeHome);
+  mkdirSync(dir, { recursive: true });
+  chatCache.set(agentId, data);
+  writeFileSync(chatFilePath(cladeHome, agentId), JSON.stringify(data, null, 2), 'utf-8');
+}
+
+/** Create a new conversation for an agent */
+function createConversation(cladeHome: string, agentId: string, label?: string): Conversation {
+  const data = loadAgentChatData(cladeHome, agentId);
+  const convId = 'conv_' + randomUUID().slice(0, 12);
+  const now = new Date().toISOString();
+  const conv: Conversation = {
+    id: convId,
+    agentId,
+    label: label || 'New chat',
+    messages: [],
+    createdAt: now,
+    lastActiveAt: now,
+  };
+  data.conversations[convId] = conv;
+  data.order = [convId, ...data.order];
+  saveAgentChatData(cladeHome, agentId, data);
+  return conv;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Gateway factory
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -76,12 +209,18 @@ export async function createGateway(deps: GatewayDeps) {
     });
   }
 
-  // Serve self-contained admin dashboard HTML
+  // Serve admin UI: prefer React build, fall back to legacy admin.html
+  const uiIndexPath = join(uiPath, 'index.html');
   const adminHtmlPath = join(__dirname, 'admin.html');
   const adminHtmlSrcPath = join(__dirname, '..', 'gateway', 'admin.html');
   const resolvedAdminPath = existsSync(adminHtmlPath) ? adminHtmlPath : existsSync(adminHtmlSrcPath) ? adminHtmlSrcPath : null;
 
   app.get('/admin', async (_req, reply) => {
+    // Prefer React UI build
+    if (existsSync(uiIndexPath)) {
+      return reply.redirect('/admin/');
+    }
+    // Fall back to legacy admin.html
     if (resolvedAdminPath) {
       const html = readFileSync(resolvedAdminPath, 'utf-8');
       reply.type('text/html').send(html);
@@ -106,8 +245,13 @@ export async function createGateway(deps: GatewayDeps) {
     ),
   }));
 
-  // Redirect root to admin dashboard
-  app.get('/', async (_req, reply) => reply.redirect('/admin/'));
+  // Legacy admin.html accessible at /admin/legacy
+  if (resolvedAdminPath) {
+    app.get('/admin/legacy', async (_req, reply) => {
+      const html = readFileSync(resolvedAdminPath, 'utf-8');
+      reply.type('text/html').send(html);
+    });
+  }
 
   // ── Register API route groups ──────────────────────────────────
   registerAgentRoutes(app, deps);
@@ -117,6 +261,7 @@ export async function createGateway(deps: GatewayDeps) {
   registerChannelRoutes(app, deps);
   registerCronRoutes(app, deps);
   registerConfigRoutes(app, deps);
+  registerChatRoutes(app, deps);
 
   // ── WebSocket: WebChat ─────────────────────────────────────────
   app.register(async (fastify) => {
@@ -990,4 +1135,139 @@ function registerConfigRoutes(app: FastifyInstance, deps: GatewayDeps): void {
       return reply.code(400).send({ error: message });
     }
   });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Chat Routes — /api/chat
+// ═══════════════════════════════════════════════════════════════════════════
+
+function registerChatRoutes(app: FastifyInstance, deps: GatewayDeps): void {
+  const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+
+  // ── Get chat history (conversations list or single conversation messages)
+  app.get<{ Querystring: { agentId?: string; conversationId?: string } }>(
+    '/api/chat/history',
+    async (req, reply) => {
+      const query = req.query as Record<string, string>;
+      const agentId = query.agentId;
+      if (!agentId) {
+        reply.code(400);
+        return { error: 'agentId query parameter is required' };
+      }
+      const chatData = loadAgentChatData(cladeHome, agentId);
+
+      // If conversationId provided, return that conversation's messages
+      if (query.conversationId) {
+        const conv = chatData.conversations[query.conversationId];
+        if (!conv) {
+          reply.code(404);
+          return { error: 'Conversation not found' };
+        }
+        return {
+          conversation: {
+            id: conv.id,
+            label: conv.label,
+            createdAt: conv.createdAt,
+            lastActiveAt: conv.lastActiveAt,
+          },
+          messages: conv.messages,
+        };
+      }
+
+      // Otherwise return conversation list summary
+      const conversations = chatData.order
+        .map((cid) => {
+          const conv = chatData.conversations[cid];
+          if (!conv) return null;
+          const lastMsg =
+            conv.messages.length > 0
+              ? conv.messages[conv.messages.length - 1]
+              : null;
+          return {
+            id: conv.id,
+            label: conv.label,
+            messageCount: conv.messages.length,
+            createdAt: conv.createdAt,
+            lastActiveAt: conv.lastActiveAt,
+            lastMessage: lastMsg
+              ? {
+                  text: lastMsg.text.slice(0, 100),
+                  role: lastMsg.role,
+                  timestamp: lastMsg.timestamp,
+                }
+              : null,
+          };
+        })
+        .filter(Boolean);
+      return { conversations };
+    },
+  );
+
+  // ── Create new conversation ─────────────────────────────────────
+  app.post<{ Body: { agentId: string; label?: string } }>(
+    '/api/chat/conversations',
+    async (req, reply) => {
+      const body = req.body as Record<string, unknown>;
+      const agentId = body?.agentId as string;
+      if (!agentId) {
+        reply.code(400);
+        return { error: 'agentId is required' };
+      }
+      if (!deps.agentRegistry.has(agentId)) {
+        reply.code(404);
+        return { error: `Agent "${agentId}" not found` };
+      }
+      const conv = createConversation(
+        cladeHome,
+        agentId,
+        body?.label as string | undefined,
+      );
+      return {
+        conversation: {
+          id: conv.id,
+          label: conv.label,
+          createdAt: conv.createdAt,
+          lastActiveAt: conv.lastActiveAt,
+          messageCount: 0,
+        },
+      };
+    },
+  );
+
+  // ── Delete one conversation ─────────────────────────────────────
+  app.delete<{ Params: { id: string }; Querystring: { agentId?: string } }>(
+    '/api/chat/conversations/:id',
+    async (req, reply) => {
+      const { id } = req.params;
+      const agentId = (req.query as Record<string, string>).agentId;
+      if (!agentId) {
+        reply.code(400);
+        return { error: 'agentId query parameter is required' };
+      }
+      const data = loadAgentChatData(cladeHome, agentId);
+      if (!data.conversations[id]) {
+        reply.code(404);
+        return { error: 'Conversation not found' };
+      }
+      delete data.conversations[id];
+      data.order = data.order.filter((cid) => cid !== id);
+      saveAgentChatData(cladeHome, agentId, data);
+      return { success: true };
+    },
+  );
+
+  // ── Clear all conversations for agent ───────────────────────────
+  app.delete<{ Querystring: { agentId?: string } }>(
+    '/api/chat/conversations',
+    async (req, reply) => {
+      const agentId = (req.query as Record<string, string>).agentId;
+      if (!agentId) {
+        reply.code(400);
+        return { error: 'agentId query parameter is required' };
+      }
+      const data = emptyAgentChatData();
+      saveAgentChatData(cladeHome, agentId, data);
+      return { success: true };
+    },
+  );
 }

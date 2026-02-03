@@ -86,23 +86,11 @@ async function runStart(opts: StartOptions): Promise<void> {
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-  // Dynamically import gateway module (built by another agent)
-  // This allows the start command to work even before gateway is implemented
-  try {
-    const gatewayModule = await import('../../gateway/server.js').catch(
-      () => null,
-    );
-
-    if (gatewayModule && typeof gatewayModule.createGateway === 'function') {
-      await (gatewayModule.createGateway as Function)({ port, host, config, verbose: opts.verbose });
-    } else {
-      // Gateway not yet implemented -- start a minimal placeholder
-      await startPlaceholderServer(port, host, config);
-    }
-  } catch {
-    // If gateway module is not available, start minimal server
-    await startPlaceholderServer(port, host, config);
-  }
+  // Start the placeholder server directly.
+  // The full gateway (server.ts) requires runtime deps (Store, SessionManager,
+  // AgentRegistry, Channels) that are wired up by the orchestration layer.
+  // The placeholder provides all admin UI functionality without those deps.
+  await startPlaceholderServer(port, host, config);
 }
 
 /**
@@ -371,10 +359,23 @@ function buildAgentContext(
   return lines.join('\n');
 }
 
-/** Spawn claude CLI to get an agent response */
-function askClaude(prompt: string, soulPath: string | null, agentContext?: string): Promise<string> {
+/** Map conversationId → claude session ID for resume support */
+const sessionMap = new Map<string, string>();
+
+/** Spawn claude CLI to get an agent response, with optional session resume */
+function askClaude(
+  prompt: string,
+  soulPath: string | null,
+  agentContext?: string,
+  conversationId?: string,
+): Promise<{ text: string; sessionId?: string }> {
   return new Promise((resolve) => {
-    const args = ['-p', prompt, '--output-format', 'text'];
+    const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose'];
+
+    // Resume existing session if we have one for this conversation
+    if (conversationId && sessionMap.has(conversationId)) {
+      args.push('--resume', sessionMap.get(conversationId)!);
+    }
 
     // Build combined system prompt: agent context first, then SOUL.md
     const systemParts: string[] = [];
@@ -404,14 +405,61 @@ function askClaude(prompt: string, soulPath: string | null, agentContext?: strin
 
     child.on('close', (code) => {
       if (code === 0 && stdout.trim()) {
-        resolve(stdout.trim());
+        // Parse stream-json output to extract text and session ID
+        let resultText = '';
+        let resultSessionId: string | undefined;
+        const lines = stdout.trim().split('\n');
+        for (const line of lines) {
+          try {
+            const event = JSON.parse(line);
+            if (event.type === 'result' && event.result) {
+              // event.result is a string in claude CLI stream-json format
+              resultText = typeof event.result === 'string'
+                ? event.result
+                : (event.result.text || event.result.content || '');
+              resultSessionId = event.session_id || (typeof event.result === 'object' ? event.result.session_id : undefined);
+            } else if (event.type === 'assistant' && event.message?.content) {
+              // Accumulate text from assistant messages
+              for (const block of event.message.content) {
+                if (block.type === 'text') {
+                  resultText += block.text;
+                }
+              }
+            } else if (event.type === 'content_block_delta' && event.delta?.text) {
+              resultText += event.delta.text;
+            }
+            // Check for session_id in any event
+            if (event.session_id && !resultSessionId) {
+              resultSessionId = event.session_id;
+            }
+          } catch {
+            // Not JSON, might be plain text
+            if (!line.startsWith('{')) {
+              resultText += line;
+            }
+          }
+        }
+
+        // Store session ID for future resume
+        if (conversationId && resultSessionId) {
+          sessionMap.set(conversationId, resultSessionId);
+        }
+
+        resolve({
+          text: resultText.trim() || 'I received your message but could not parse the response.',
+          sessionId: resultSessionId,
+        });
       } else {
-        resolve(stderr.trim() || 'Sorry, I could not generate a response. Is the `claude` CLI installed and authenticated?');
+        resolve({
+          text: stderr.trim() || 'Sorry, I could not generate a response. Is the `claude` CLI installed and authenticated?',
+        });
       }
     });
 
     child.on('error', () => {
-      resolve('The `claude` CLI is not installed or not in PATH. Install it to enable agent responses.');
+      resolve({
+        text: 'The `claude` CLI is not installed or not in PATH. Install it to enable agent responses.',
+      });
     });
   });
 }
@@ -531,7 +579,8 @@ async function startPlaceholderServer(
             // Build agent identity context and spawn Claude CLI
             const agentContext = buildAgentContext(msg.agentId, agents);
             const soulPath = join(cladeHome, 'agents', msg.agentId, 'SOUL.md');
-            const responseText = await askClaude(promptText, soulPath, agentContext);
+            const result = await askClaude(promptText, soulPath, agentContext, conversationId);
+            const responseText = result.text;
 
             // Save assistant message
             const assistantMsg: ChatMessage = {
@@ -794,7 +843,7 @@ async function startPlaceholderServer(
     return { success: true };
   });
 
-  // ── Get agent memory ────────────────────────────────────────
+  // ── List agent memory files ─────────────────────────────────
   fastify.get<{ Params: { id: string } }>('/api/agents/:id/memory', async (req, reply) => {
     const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
     const { id } = req.params;
@@ -803,13 +852,137 @@ async function startPlaceholderServer(
       return { error: `Agent "${id}" not found` };
     }
     const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
-    const memPath = join(cladeHome, 'agents', id, 'MEMORY.md');
-    try {
-      const content = readFileSync(memPath, 'utf-8');
-      return { agentId: id, content };
-    } catch {
-      return { agentId: id, content: '' };
+    const baseDir = join(cladeHome, 'agents', id);
+    const memoryDir = join(baseDir, 'memory');
+    const files: string[] = [];
+
+    // Include MEMORY.md
+    const memoryMdPath = join(baseDir, 'MEMORY.md');
+    if (existsSync(memoryMdPath)) {
+      files.push('MEMORY.md');
     }
+
+    // Include daily log files from memory/ subdirectory
+    if (existsSync(memoryDir)) {
+      try {
+        const { readdirSync } = await import('node:fs');
+        const entries = readdirSync(memoryDir).filter(
+          (f: string) => f.endsWith('.md') && !f.startsWith('.'),
+        );
+        for (const entry of entries) {
+          files.push(`memory/${entry}`);
+        }
+      } catch {}
+    }
+
+    return { agentId: id, files };
+  });
+
+  // ── Read specific memory file ──────────────────────────────
+  fastify.get<{ Params: { id: string; file: string } }>('/api/agents/:id/memory/:file', async (req, reply) => {
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const { id, file } = req.params;
+    if (!agents[id]) {
+      reply.status(404);
+      return { error: `Agent "${id}" not found` };
+    }
+
+    // Reject path traversal
+    if (file.includes('..') || file.startsWith('/')) {
+      reply.status(400);
+      return { error: 'Invalid file path' };
+    }
+
+    const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+    const baseDir = join(cladeHome, 'agents', id);
+    const memoryDir = join(baseDir, 'memory');
+    let resolvedPath: string;
+
+    if (file === 'MEMORY.md') {
+      resolvedPath = join(baseDir, 'MEMORY.md');
+    } else {
+      // Only allow .md files, no nesting
+      const filename = file.startsWith('memory/') ? file.slice(7) : file;
+      if (filename.includes('/') || filename.includes('\\') || !filename.endsWith('.md')) {
+        reply.status(400);
+        return { error: 'Invalid file path' };
+      }
+      resolvedPath = join(memoryDir, filename);
+    }
+
+    if (!existsSync(resolvedPath)) {
+      reply.status(404);
+      return { error: `Memory file "${file}" not found` };
+    }
+
+    try {
+      const content = readFileSync(resolvedPath, 'utf-8');
+      return { agentId: id, file, content };
+    } catch (err) {
+      reply.status(500);
+      return { error: 'Failed to read memory file' };
+    }
+  });
+
+  // ── Search agent memory ────────────────────────────────────
+  fastify.post<{ Params: { id: string } }>('/api/agents/:id/memory/search', async (req, reply) => {
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const { id } = req.params;
+    if (!agents[id]) {
+      reply.status(404);
+      return { error: `Agent "${id}" not found` };
+    }
+    const body = req.body as Record<string, unknown>;
+    const query = body.query;
+    if (!query || typeof query !== 'string') {
+      reply.status(400);
+      return { error: 'query is required and must be a string' };
+    }
+
+    const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+    const baseDir = join(cladeHome, 'agents', id);
+    const memoryDir = join(baseDir, 'memory');
+    const results: Array<{ file: string; snippet: string }> = [];
+    const queryLower = query.toLowerCase();
+
+    // Search MEMORY.md
+    const memoryMdPath = join(baseDir, 'MEMORY.md');
+    if (existsSync(memoryMdPath)) {
+      try {
+        const content = readFileSync(memoryMdPath, 'utf-8');
+        if (content.toLowerCase().includes(queryLower)) {
+          const lines = content.split('\n');
+          for (const line of lines) {
+            if (line.toLowerCase().includes(queryLower)) {
+              results.push({ file: 'MEMORY.md', snippet: line.trim() });
+            }
+          }
+        }
+      } catch {}
+    }
+
+    // Search memory/*.md files
+    if (existsSync(memoryDir)) {
+      try {
+        const { readdirSync: rd } = await import('node:fs');
+        const entries = rd(memoryDir).filter((f: string) => f.endsWith('.md'));
+        for (const entry of entries) {
+          try {
+            const content = readFileSync(join(memoryDir, entry), 'utf-8');
+            if (content.toLowerCase().includes(queryLower)) {
+              const lines = content.split('\n');
+              for (const line of lines) {
+                if (line.toLowerCase().includes(queryLower)) {
+                  results.push({ file: `memory/${entry}`, snippet: line.trim() });
+                }
+              }
+            }
+          } catch {}
+        }
+      } catch {}
+    }
+
+    return { agentId: id, query, results };
   });
 
   // ── Update agent config (PUT) ───────────────────────────────

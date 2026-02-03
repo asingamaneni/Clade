@@ -9,7 +9,8 @@
     "clade": "dist/bin/clade.js"
   },
   "scripts": {
-    "build": "tsup && node -e \"const{mkdirSync,copyFileSync}=require('fs');mkdirSync('dist/gateway',{recursive:true});copyFileSync('src/gateway/admin.html','dist/gateway/admin.html')\"",
+    "build": "npm run build:ui && tsup && node -e \"const{mkdirSync,copyFileSync}=require('fs');mkdirSync('dist/gateway',{recursive:true});copyFileSync('src/gateway/admin.html','dist/gateway/admin.html')\"",
+    "build:ui": "cd ui && npm install && npx vite build",
     "dev": "tsup --watch",
     "start": "node dist/bin/clade.js start",
     "test": "vitest run",

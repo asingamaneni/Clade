@@ -1,0 +1,1218 @@
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
+import { Badge } from "@/components/ui/badge"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog"
+import { Separator } from "@/components/ui/separator"
+import { api } from "@/lib/api"
+import { cn } from "@/lib/utils"
+import {
+  Plus,
+  Bot,
+  Trash2,
+  Save,
+  Loader2,
+  Search,
+  FileText,
+  X,
+  ArrowLeft,
+} from "lucide-react"
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface Agent {
+  id: string
+  name: string
+  description?: string
+  model?: string
+  toolPreset?: string
+  emoji?: string
+  creature?: string
+  vibe?: string
+  avatar?: string
+  customTools?: string[]
+  skills?: string[]
+  heartbeat?: {
+    enabled?: boolean
+    interval?: string
+    activeHours?: { start?: string; end?: string }
+  }
+}
+
+interface AgentsPageProps {
+  agents: Agent[]
+  onRefresh: () => void
+  onNavigateToAgent?: (id: string) => void
+  initialSelectedId?: string | null
+  onAgentDeleted?: () => void
+}
+
+// ---------------------------------------------------------------------------
+// Tool definitions & presets
+// ---------------------------------------------------------------------------
+
+interface ToolDef {
+  id: string
+  desc: string
+}
+
+interface ToolCategory {
+  name: string
+  label: string
+  icon: string
+  tools: ToolDef[]
+}
+
+const TOOL_CATEGORIES: ToolCategory[] = [
+  {
+    name: 'Fs',
+    label: 'File System',
+    icon: '\uD83D\uDCC1',
+    tools: [
+      { id: 'Read', desc: 'Read files from the local filesystem' },
+      { id: 'Edit', desc: 'Exact string replacements in files' },
+      { id: 'Write', desc: 'Create or overwrite files on disk' },
+      { id: 'Glob', desc: 'Fast glob-based file pattern matching' },
+      { id: 'Grep', desc: 'Regex content search powered by ripgrep' },
+      { id: 'NotebookEdit', desc: 'Edit Jupyter notebook cells' },
+    ],
+  },
+  {
+    name: 'Runtime',
+    label: 'Runtime',
+    icon: '\u2699\uFE0F',
+    tools: [
+      { id: 'Bash', desc: 'Execute shell commands with timeout' },
+      { id: 'Task', desc: 'Spawn sub-agent tasks in parallel' },
+      { id: 'TodoWrite', desc: 'Structured task list management' },
+    ],
+  },
+  {
+    name: 'Web',
+    label: 'Web Access',
+    icon: '\uD83C\uDF10',
+    tools: [
+      { id: 'WebFetch', desc: 'Fetch URLs and extract content via AI' },
+      { id: 'WebSearch', desc: 'Search the web for current information' },
+    ],
+  },
+  {
+    name: 'Memory',
+    label: 'Memory MCP',
+    icon: '\uD83E\uDDE0',
+    tools: [
+      { id: 'mcp__memory__*', desc: 'Memory read, write, search, and list tools' },
+    ],
+  },
+  {
+    name: 'Sessions',
+    label: 'Sessions MCP',
+    icon: '\uD83D\uDCAC',
+    tools: [
+      { id: 'mcp__sessions__*', desc: 'Session spawn, list, send, and status tools' },
+    ],
+  },
+  {
+    name: 'Messaging',
+    label: 'Messaging MCP',
+    icon: '\uD83D\uDCE8',
+    tools: [
+      { id: 'mcp__messaging__*', desc: 'Cross-channel message sending tools' },
+    ],
+  },
+  {
+    name: 'Skills',
+    label: 'Skills MCP',
+    icon: '\uD83E\uDDE9',
+    tools: [
+      { id: 'mcp__skills__*', desc: 'Dynamic skill search and installation' },
+    ],
+  },
+]
+
+const ALL_TOOL_IDS = TOOL_CATEGORIES.flatMap((c) => c.tools.map((t) => t.id))
+
+const PRESET_MAP: Record<string, string[]> = {
+  potato: [],
+  coding: [
+    'Read',
+    'Edit',
+    'Write',
+    'Bash',
+    'Glob',
+    'Grep',
+    'NotebookEdit',
+    'mcp__memory__*',
+    'mcp__sessions__*',
+  ],
+  messaging: ['mcp__memory__*', 'mcp__sessions__*', 'mcp__messaging__*'],
+  full: [...ALL_TOOL_IDS],
+}
+
+function detectPreset(tools: string[]): string {
+  for (const [name, list] of Object.entries(PRESET_MAP)) {
+    if (
+      list.length === tools.length &&
+      list.every((t) => tools.includes(t))
+    ) {
+      return name
+    }
+  }
+  return 'custom'
+}
+
+// ---------------------------------------------------------------------------
+// Sub: Soul Tab
+// ---------------------------------------------------------------------------
+
+function SoulTab({ agentId }: { agentId: string }) {
+  const [content, setContent] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    setLoading(true)
+    api<{ content: string }>('/agents/' + agentId + '/soul')
+      .then((d) => setContent(d.content || ''))
+      .catch((e) => console.error('Failed to load SOUL.md:', e.message))
+      .finally(() => setLoading(false))
+  }, [agentId])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await api('/agents/' + agentId + '/soul', {
+        method: 'PUT',
+        body: { content },
+      })
+      console.log('SOUL.md saved successfully')
+    } catch (e: any) {
+      console.error('Save failed:', e.message)
+    }
+    setSaving(false)
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        <span className="text-sm">Loading SOUL.md...</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      <Textarea
+        value={content}
+        onChange={(e) => setContent(e.target.value)}
+        placeholder="# SOUL.md - Who You Are..."
+        spellCheck={false}
+        className="font-mono text-[13px] leading-relaxed min-h-[420px] max-h-[70vh] resize-y"
+      />
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground/60">
+          {content.length} characters
+        </span>
+        <Button size="sm" onClick={save} disabled={saving}>
+          {saving ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+              Saving...
+            </>
+          ) : (
+            <>
+              <Save className="h-3.5 w-3.5 mr-1.5" />
+              Save SOUL.md
+            </>
+          )}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Sub: Identity Tab
+// ---------------------------------------------------------------------------
+
+interface IdentityForm {
+  name: string
+  creature: string
+  vibe: string
+  emoji: string
+  avatar: string
+}
+
+function IdentityTab({ agentId }: { agentId: string }) {
+  const [form, setForm] = useState<IdentityForm>({
+    name: '',
+    creature: '',
+    vibe: '',
+    emoji: '',
+    avatar: '',
+  })
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    setLoading(true)
+    api<{ agent: Record<string, any> }>('/agents/' + agentId)
+      .then((d) => {
+        const a = d.agent || {}
+        setForm({
+          name: a.name || '',
+          creature: a.creature || '',
+          vibe: a.vibe || '',
+          emoji: a.emoji || '',
+          avatar: a.avatar || '',
+        })
+      })
+      .catch((e) => console.error('Failed to load identity:', e.message))
+      .finally(() => setLoading(false))
+  }, [agentId])
+
+  const updateField = (key: keyof IdentityForm, value: string) => {
+    setForm((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await api('/agents/' + agentId, { method: 'PUT', body: form })
+      console.log('Identity saved')
+    } catch (e: any) {
+      console.error('Save failed:', e.message)
+    }
+    setSaving(false)
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        <span className="text-sm">Loading identity...</span>
+      </div>
+    )
+  }
+
+  const fields: { key: keyof IdentityForm; label: string; placeholder: string }[] = [
+    { key: 'name', label: 'Name', placeholder: 'e.g. Sparky' },
+    { key: 'creature', label: 'Creature', placeholder: 'e.g. AI familiar, ghost in the machine' },
+    { key: 'vibe', label: 'Vibe', placeholder: 'e.g. sharp, warm, chaotic' },
+    { key: 'emoji', label: 'Emoji', placeholder: 'Pick one that feels right' },
+    { key: 'avatar', label: 'Avatar', placeholder: 'URL or workspace-relative path' },
+  ]
+
+  return (
+    <div className="max-w-lg space-y-4">
+      {fields.map((f) => (
+        <div key={f.key} className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">{f.label}</Label>
+          <Input
+            value={form[f.key]}
+            onChange={(e) => updateField(f.key, e.target.value)}
+            placeholder={f.placeholder}
+          />
+        </div>
+      ))}
+      <div className="flex justify-end pt-2">
+        <Button size="sm" onClick={save} disabled={saving}>
+          {saving ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+              Saving...
+            </>
+          ) : (
+            <>
+              <Save className="h-3.5 w-3.5 mr-1.5" />
+              Save Identity
+            </>
+          )}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Sub: Tools Tab
+// ---------------------------------------------------------------------------
+
+const PRESET_STYLES: Record<string, { label: string; className: string }> = {
+  potato: {
+    label: '\uD83E\uDD54 Potato',
+    className:
+      'bg-[hsl(var(--warning))]/10 text-[hsl(var(--warning))] border-[hsl(var(--warning))]/30 hover:bg-[hsl(var(--warning))]/20',
+  },
+  coding: {
+    label: '\uD83D\uDCBB Coding',
+    className:
+      'bg-primary/10 text-primary border-primary/30 hover:bg-primary/20',
+  },
+  messaging: {
+    label: '\uD83D\uDCE8 Messaging',
+    className:
+      'bg-[hsl(var(--success))]/10 text-[hsl(var(--success))] border-[hsl(var(--success))]/30 hover:bg-[hsl(var(--success))]/20',
+  },
+  full: {
+    label: '\uD83D\uDE80 Full',
+    className:
+      'bg-[hsl(var(--chart-purple))]/10 text-[hsl(var(--chart-purple))] border-[hsl(var(--chart-purple))]/30 hover:bg-[hsl(var(--chart-purple))]/20',
+  },
+}
+
+function ToolsTab({
+  agent,
+  onRefresh,
+}: {
+  agent: Agent
+  onRefresh: () => void
+}) {
+  const initial = useMemo(() => {
+    if (agent.toolPreset === 'custom') return agent.customTools || []
+    return PRESET_MAP[agent.toolPreset || 'full'] || PRESET_MAP.full
+  }, [agent.id, agent.toolPreset, agent.customTools])
+
+  const [enabled, setEnabled] = useState<string[]>([...initial])
+  const [saving, setSaving] = useState(false)
+  const preset = detectPreset(enabled)
+
+  useEffect(() => {
+    setEnabled([...initial])
+  }, [initial])
+
+  const toggle = (id: string) => {
+    setEnabled((prev) =>
+      prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id],
+    )
+  }
+
+  const applyPreset = (name: string) => setEnabled([...PRESET_MAP[name]])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      const p = detectPreset(enabled)
+      const body =
+        p !== 'custom'
+          ? { toolPreset: p, customTools: [] }
+          : { toolPreset: 'custom', customTools: enabled }
+      await api('/agents/' + agent.id, { method: 'PUT', body })
+      console.log('Tool configuration saved')
+      onRefresh()
+    } catch (e: any) {
+      console.error('Save failed:', e.message)
+    }
+    setSaving(false)
+  }
+
+  const totalEnabled = enabled.length
+  const totalTools = ALL_TOOL_IDS.length
+
+  return (
+    <div className="space-y-6">
+      {/* Preset buttons */}
+      <div className="flex items-center flex-wrap gap-2">
+        {Object.entries(PRESET_STYLES).map(([key, style]) => (
+          <button
+            key={key}
+            onClick={() => applyPreset(key)}
+            className={cn(
+              "px-4 py-1.5 rounded-full text-[13px] font-semibold border-2 transition-all",
+              style.className,
+              preset === key && "ring-1 ring-current",
+            )}
+          >
+            {style.label}
+          </button>
+        ))}
+        {preset === 'custom' && (
+          <Badge variant="outline" className="font-mono text-xs">
+            custom
+          </Badge>
+        )}
+        <span className="ml-auto text-xs text-muted-foreground/60">
+          {totalEnabled}/{totalTools} tools enabled
+        </span>
+      </div>
+
+      {/* Tool category sections */}
+      {TOOL_CATEGORIES.map((cat) => {
+        const catEnabled = cat.tools.filter((t) =>
+          enabled.includes(t.id),
+        ).length
+        const allEnabled = catEnabled === cat.tools.length
+        return (
+          <div key={cat.name}>
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-base">{cat.icon}</span>
+              <h4 className="text-sm font-semibold text-foreground">
+                {cat.label}
+              </h4>
+              <Badge
+                variant="outline"
+                className={cn(
+                  "text-xs",
+                  allEnabled
+                    ? "text-[hsl(var(--success))] border-[hsl(var(--success))]/30"
+                    : catEnabled > 0
+                      ? "text-[hsl(var(--warning))] border-[hsl(var(--warning))]/30"
+                      : "",
+                )}
+              >
+                {catEnabled}/{cat.tools.length}
+              </Badge>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              {cat.tools.map((tool) => {
+                const on = enabled.includes(tool.id)
+                return (
+                  <Card
+                    key={tool.id}
+                    className={cn(
+                      "transition-colors",
+                      on
+                        ? "border-[hsl(var(--success))]/40 hover:border-[hsl(var(--success))]/60"
+                        : "hover:border-muted-foreground/30",
+                    )}
+                  >
+                    <CardContent className="p-3 flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div
+                          className={cn(
+                            "text-[13px] font-medium truncate font-mono",
+                            on ? "text-foreground" : "text-muted-foreground",
+                          )}
+                        >
+                          {tool.id}
+                        </div>
+                        <div className="text-xs mt-0.5 truncate text-muted-foreground/60">
+                          {tool.desc}
+                        </div>
+                      </div>
+                      <Switch
+                        checked={on}
+                        onCheckedChange={() => toggle(tool.id)}
+                      />
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })}
+
+      {/* Save bar */}
+      <Separator />
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground/60">
+          Preset: <span className="text-muted-foreground">{preset}</span>
+        </span>
+        <Button size="sm" onClick={save} disabled={saving}>
+          {saving ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+              Saving...
+            </>
+          ) : (
+            <>
+              <Save className="h-3.5 w-3.5 mr-1.5" />
+              Save Tool Config
+            </>
+          )}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Sub: Memory Tab
+// ---------------------------------------------------------------------------
+
+function MemoryTab({ agentId }: { agentId: string }) {
+  const [files, setFiles] = useState<string[]>([])
+  const [selFile, setSelFile] = useState<string | null>(null)
+  const [content, setContent] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [loadingFile, setLoadingFile] = useState(false)
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<any[] | null>(null)
+
+  useEffect(() => {
+    setLoading(true)
+    setSelFile(null)
+    setContent('')
+    setResults(null)
+    api<{ files: string[] }>('/agents/' + agentId + '/memory')
+      .then((d) => setFiles(d.files || []))
+      .catch((e) => console.error('Failed to load memory:', e.message))
+      .finally(() => setLoading(false))
+  }, [agentId])
+
+  const openFile = async (file: string) => {
+    setSelFile(file)
+    setLoadingFile(true)
+    setResults(null)
+    try {
+      const seg =
+        file === 'MEMORY.md'
+          ? 'MEMORY.md'
+          : encodeURIComponent(file.replace('memory/', ''))
+      const d = await api<{ content: string }>(
+        '/agents/' + agentId + '/memory/' + seg,
+      )
+      setContent(d.content || '')
+    } catch (e: any) {
+      console.error('Failed to load file:', e.message)
+      setContent('')
+    }
+    setLoadingFile(false)
+  }
+
+  const search = async () => {
+    if (!query.trim()) return
+    try {
+      const d = await api<{ results: any[] }>(
+        '/agents/' + agentId + '/memory/search',
+        { method: 'POST', body: { query } },
+      )
+      setResults(d.results || [])
+      setSelFile(null)
+    } catch (e: any) {
+      console.error('Search failed:', e.message)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        <span className="text-sm">Loading memory files...</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Search bar */}
+      <div className="flex gap-2">
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && search()}
+          placeholder="Search memory (FTS5)..."
+          className="flex-1"
+        />
+        <Button variant="secondary" size="sm" onClick={search}>
+          <Search className="h-3.5 w-3.5 mr-1.5" />
+          Search
+        </Button>
+      </div>
+
+      {results !== null ? (
+        /* Search results view */
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">
+              {results.length} result{results.length !== 1 ? 's' : ''}
+            </span>
+            <button
+              className="text-xs text-primary hover:underline"
+              onClick={() => setResults(null)}
+            >
+              Clear results
+            </button>
+          </div>
+          {results.length === 0 ? (
+            <p className="text-sm py-4 text-muted-foreground">
+              No matching entries found.
+            </p>
+          ) : (
+            results.map((r, i) => (
+              <Card key={i}>
+                <CardContent className="p-3">
+                  <div className="text-xs font-mono mb-1 text-primary">
+                    {r.file || r.file_path || r.filename || 'memory'}
+                  </div>
+                  <div className="text-sm text-foreground whitespace-pre-wrap">
+                    {r.snippet || r.chunk_text || r.content || JSON.stringify(r)}
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </div>
+      ) : (
+        /* File list + content viewer */
+        <div className="flex gap-4 min-h-[300px]">
+          <div className="w-[180px] shrink-0 space-y-0.5 overflow-y-auto">
+            {files.length === 0 ? (
+              <p className="text-sm py-2 text-muted-foreground">No files.</p>
+            ) : (
+              files.map((f) => (
+                <button
+                  key={f}
+                  className={cn(
+                    "w-full text-left px-3 py-2 rounded-md text-sm truncate transition-colors flex items-center gap-1.5",
+                    selFile === f
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-secondary",
+                  )}
+                  onClick={() => openFile(f)}
+                >
+                  <FileText className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{f}</span>
+                </button>
+              ))
+            )}
+          </div>
+          <div className="flex-1 min-w-0">
+            {selFile ? (
+              loadingFile ? (
+                <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="text-sm">Loading file...</span>
+                </div>
+              ) : (
+                <div>
+                  <div className="text-xs font-mono mb-2 text-muted-foreground">
+                    {selFile}
+                  </div>
+                  <pre className="p-4 rounded-md text-sm bg-background border text-foreground font-mono max-h-[450px] overflow-auto whitespace-pre-wrap">
+                    {content}
+                  </pre>
+                </div>
+              )
+            ) : (
+              <div className="flex items-center justify-center h-full text-sm text-muted-foreground/60">
+                Select a file to view its contents.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Sub: Heartbeat Tab
+// ---------------------------------------------------------------------------
+
+function HeartbeatTab({ agentId }: { agentId: string }) {
+  const [content, setContent] = useState('')
+  const [interval, setIntervalVal] = useState('30m')
+  const [activeStart, setActiveStart] = useState('09:00')
+  const [activeEnd, setActiveEnd] = useState('22:00')
+  const [hbEnabled, setHbEnabled] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    setLoading(true)
+    Promise.all([
+      api<{ content: string }>('/agents/' + agentId + '/heartbeat').catch(
+        () => ({ content: '' }),
+      ),
+      api<{ agent: Record<string, any> }>('/agents/' + agentId).catch(() => ({
+        agent: {},
+      })),
+    ])
+      .then(([hb, ag]) => {
+        setContent(hb.content || '')
+        const c = (ag as any).agent?.heartbeat || {}
+        setIntervalVal(c.interval || '30m')
+        setActiveStart(c.activeHours?.start || '09:00')
+        setActiveEnd(c.activeHours?.end || '22:00')
+        setHbEnabled(!!c.enabled)
+      })
+      .finally(() => setLoading(false))
+  }, [agentId])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await Promise.all([
+        api('/agents/' + agentId + '/heartbeat', {
+          method: 'PUT',
+          body: { content },
+        }),
+        api('/agents/' + agentId, {
+          method: 'PUT',
+          body: {
+            heartbeat: {
+              enabled: hbEnabled,
+              interval,
+              activeHours: { start: activeStart, end: activeEnd },
+            },
+          },
+        }),
+      ])
+      console.log('Heartbeat settings saved')
+    } catch (e: any) {
+      console.error('Save failed:', e.message)
+    }
+    setSaving(false)
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        <span className="text-sm">Loading heartbeat...</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="max-w-2xl space-y-5">
+      {/* Enable toggle */}
+      <div className="flex items-center gap-3">
+        <Switch
+          checked={hbEnabled}
+          onCheckedChange={(v) => setHbEnabled(v)}
+        />
+        <span
+          className={cn(
+            "text-sm font-medium",
+            hbEnabled
+              ? "text-[hsl(var(--success))]"
+              : "text-muted-foreground",
+          )}
+        >
+          Heartbeat {hbEnabled ? 'enabled' : 'disabled'}
+        </span>
+      </div>
+
+      {/* Settings row */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Interval</Label>
+          <select
+            value={interval}
+            onChange={(e) => setIntervalVal(e.target.value)}
+            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          >
+            <option value="15m">15 minutes</option>
+            <option value="30m">30 minutes</option>
+            <option value="1h">1 hour</option>
+            <option value="4h">4 hours</option>
+            <option value="daily">Daily</option>
+          </select>
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Active From</Label>
+          <Input
+            type="time"
+            value={activeStart}
+            onChange={(e) => setActiveStart(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Active Until</Label>
+          <Input
+            type="time"
+            value={activeEnd}
+            onChange={(e) => setActiveEnd(e.target.value)}
+          />
+        </div>
+      </div>
+
+      {/* HEARTBEAT.md editor */}
+      <div className="space-y-1.5">
+        <Label className="text-xs text-muted-foreground">HEARTBEAT.md</Label>
+        <Textarea
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          placeholder="# Heartbeat Checklist..."
+          spellCheck={false}
+          className="font-mono text-[13px] leading-relaxed min-h-[260px] resize-y"
+        />
+      </div>
+
+      <div className="flex justify-end">
+        <Button size="sm" onClick={save} disabled={saving}>
+          {saving ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+              Saving...
+            </>
+          ) : (
+            <>
+              <Save className="h-3.5 w-3.5 mr-1.5" />
+              Save Heartbeat
+            </>
+          )}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Sub: Agent Detail
+// ---------------------------------------------------------------------------
+
+function AgentDetail({
+  agent,
+  onRefresh,
+  onDeleted,
+}: {
+  agent: Agent
+  onRefresh: () => void
+  onDeleted?: () => void
+}) {
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  const handleDelete = async () => {
+    setDeleting(true)
+    try {
+      await api('/agents/' + agent.id, { method: 'DELETE' })
+      console.log('Agent "' + agent.id + '" deleted')
+      setShowDeleteConfirm(false)
+      onDeleted?.()
+    } catch (e: any) {
+      console.error('Delete failed:', e.message)
+    }
+    setDeleting(false)
+  }
+
+  return (
+    <div className="p-5 space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center justify-center rounded-full w-10 h-10 bg-secondary text-xl">
+            {agent.emoji || '\uD83E\uDD16'}
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">
+              {agent.name}
+            </h2>
+            <div className="text-xs text-muted-foreground">
+              {agent.id} {'\u00B7'} {agent.model || 'sonnet'} {'\u00B7'}{' '}
+              {agent.toolPreset}
+            </div>
+          </div>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="text-destructive border-destructive/30 hover:bg-destructive/10"
+          onClick={() => setShowDeleteConfirm(true)}
+        >
+          <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+          Delete Agent
+        </Button>
+      </div>
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete "{agent.name}"?</DialogTitle>
+            <DialogDescription>
+              This will remove the agent from config. Agent files in
+              ~/.clade/agents/{agent.id}/ will remain on disk.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowDeleteConfirm(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleting}
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                'Yes, delete'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Tabs */}
+      <Tabs defaultValue="soul">
+        <TabsList>
+          <TabsTrigger value="soul">Soul</TabsTrigger>
+          <TabsTrigger value="identity">Identity</TabsTrigger>
+          <TabsTrigger value="tools">Tools</TabsTrigger>
+          <TabsTrigger value="memory">Memory</TabsTrigger>
+          <TabsTrigger value="heartbeat">Heartbeat</TabsTrigger>
+        </TabsList>
+        <TabsContent value="soul">
+          <SoulTab agentId={agent.id} />
+        </TabsContent>
+        <TabsContent value="identity">
+          <IdentityTab agentId={agent.id} />
+        </TabsContent>
+        <TabsContent value="tools">
+          <ToolsTab agent={agent} onRefresh={onRefresh} />
+        </TabsContent>
+        <TabsContent value="memory">
+          <MemoryTab agentId={agent.id} />
+        </TabsContent>
+        <TabsContent value="heartbeat">
+          <HeartbeatTab agentId={agent.id} />
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Main: Agents Page
+// ---------------------------------------------------------------------------
+
+export function AgentsPage({
+  agents,
+  onRefresh,
+  onNavigateToAgent,
+  initialSelectedId,
+  onAgentDeleted,
+}: AgentsPageProps) {
+  const [selectedId, setSelectedId] = useState<string | null>(
+    initialSelectedId || null,
+  )
+  const [showCreate, setShowCreate] = useState(false)
+
+  // Sync external navigation
+  useEffect(() => {
+    if (initialSelectedId && agents.find((a) => a.id === initialSelectedId)) {
+      setSelectedId(initialSelectedId)
+    }
+  }, [initialSelectedId, agents])
+
+  // Auto-select first agent if none selected
+  useEffect(() => {
+    if (
+      agents.length > 0 &&
+      (!selectedId || !agents.find((a) => a.id === selectedId))
+    ) {
+      setSelectedId(agents[0].id)
+    }
+  }, [agents])
+
+  const selectedAgent = agents.find((a) => a.id === selectedId) || null
+
+  if (showCreate) {
+    // Import WelcomePage dynamically to avoid circular deps
+    // For now just toggle back -- in production this would show the welcome/create flow
+    return (
+      <div className="p-6">
+        <Button
+          variant="outline"
+          size="sm"
+          className="mb-4"
+          onClick={() => setShowCreate(false)}
+        >
+          <ArrowLeft className="h-3.5 w-3.5 mr-1.5" />
+          Back to Agents
+        </Button>
+        <WelcomeInline
+          onCreated={() => {
+            setShowCreate(false)
+            onRefresh()
+          }}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex h-full -m-6">
+      {/* Agent sub-sidebar */}
+      <div className="flex flex-col py-3 w-[200px] min-w-[200px] border-r bg-secondary/30">
+        <div className="flex items-center justify-between px-3 pb-2">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+            Agents
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 px-2 text-xs text-[hsl(var(--success))] border-[hsl(var(--success))]/30 hover:bg-[hsl(var(--success))]/10"
+            onClick={() => setShowCreate(true)}
+          >
+            <Plus className="h-3 w-3 mr-1" />
+            New
+          </Button>
+        </div>
+        <ScrollArea className="flex-1">
+          {agents.length === 0 ? (
+            <div className="px-3 py-4 text-sm text-muted-foreground">
+              No agents
+            </div>
+          ) : (
+            agents.map((a) => (
+              <button
+                key={a.id}
+                className={cn(
+                  "flex items-center gap-2 w-[calc(100%-16px)] mx-2 px-3 py-2.5 rounded-md text-sm transition-colors text-left",
+                  selectedId === a.id
+                    ? "bg-primary/10 text-primary"
+                    : "text-muted-foreground hover:bg-secondary",
+                )}
+                onClick={() => setSelectedId(a.id)}
+              >
+                <span className="shrink-0">{a.emoji || '\uD83E\uDD16'}</span>
+                <span className="truncate flex-1">{a.name || a.id}</span>
+                {a.skills && a.skills.length > 0 && (
+                  <span className="text-xs opacity-60">
+                    {a.skills.length}sk
+                  </span>
+                )}
+              </button>
+            ))
+          )}
+        </ScrollArea>
+      </div>
+
+      {/* Agent detail panel */}
+      <div className="flex-1 overflow-y-auto">
+        {selectedAgent ? (
+          <AgentDetail
+            agent={selectedAgent}
+            onRefresh={onRefresh}
+            onDeleted={onAgentDeleted}
+          />
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full text-center">
+            <Bot className="h-10 w-10 text-muted-foreground/30 mb-3" />
+            <p className="text-sm font-medium text-muted-foreground">
+              Select an agent
+            </p>
+            <p className="text-xs text-muted-foreground/60 mt-1">
+              Choose from the list to view details
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Inline Welcome (for creating agents from agents page)
+// ---------------------------------------------------------------------------
+
+function WelcomeInline({ onCreated }: { onCreated: () => void }) {
+  const [name, setName] = useState('')
+  const [template, setTemplate] = useState('coding')
+  const [creating, setCreating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const nameSlug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+
+  const create = async () => {
+    if (!nameSlug) {
+      setError('Name is required')
+      return
+    }
+    setCreating(true)
+    setError(null)
+    try {
+      await api('/agents', {
+        method: 'POST',
+        body: { name: nameSlug, template },
+      })
+      onCreated()
+    } catch (e: any) {
+      setError(e.message)
+    }
+    setCreating(false)
+  }
+
+  return (
+    <Card className="max-w-md">
+      <CardContent className="p-5 space-y-4">
+        <h3 className="text-sm font-semibold text-foreground">
+          Create New Agent
+        </h3>
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Agent Name</Label>
+          <Input
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value)
+              setError(null)
+            }}
+            onKeyDown={(e) => e.key === 'Enter' && create()}
+            placeholder="e.g. jarvis, scout, oracle"
+          />
+          {nameSlug && nameSlug !== name && (
+            <p className="text-xs text-muted-foreground/60">
+              Will be created as:{' '}
+              <code className="text-primary font-mono">{nameSlug}</code>
+            </p>
+          )}
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Template</Label>
+          <select
+            value={template}
+            onChange={(e) => setTemplate(e.target.value)}
+            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          >
+            <option value="coding">Coding Partner</option>
+            <option value="research">Research Analyst</option>
+            <option value="ops">Ops Monitor</option>
+            <option value="pm">Project Manager</option>
+          </select>
+        </div>
+        {error && (
+          <div className="p-3 rounded-md text-sm bg-destructive/10 border border-destructive/30 text-destructive">
+            {error}
+          </div>
+        )}
+        <Button
+          className="w-full"
+          onClick={create}
+          disabled={creating || !nameSlug}
+        >
+          {creating ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              Creating...
+            </>
+          ) : (
+            'Create Agent'
+          )}
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
