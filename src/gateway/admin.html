@@ -183,6 +183,220 @@
     }
     .stat-card:hover { transform: translateY(-1px); }
 
+    /* ── Chat bubbles ─────────────────────────────────────── */
+    .chat-bubble {
+      max-width: 75%;
+      padding: 10px 14px;
+      border-radius: 16px;
+      font-size: 14px;
+      line-height: 1.5;
+      word-wrap: break-word;
+      white-space: pre-wrap;
+    }
+    .chat-bubble-user {
+      background: rgba(88,166,255,0.15);
+      color: #e6edf3;
+      border-bottom-right-radius: 4px;
+      margin-left: auto;
+    }
+    .chat-bubble-agent {
+      background: #1c2128;
+      border: 1px solid #30363d;
+      color: #e6edf3;
+      border-bottom-left-radius: 4px;
+    }
+    .chat-bubble code {
+      background: rgba(110,118,129,0.2);
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-size: 13px;
+      font-family: ui-monospace, 'SF Mono', monospace;
+    }
+    .chat-bubble pre {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin: 8px 0;
+      overflow-x: auto;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .chat-bubble pre code {
+      background: none;
+      padding: 0;
+      font-size: 13px;
+    }
+    .chat-input-wrap {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      padding: 12px 16px;
+      background: #161b22;
+      border-top: 1px solid #30363d;
+    }
+    .chat-input-wrap textarea {
+      flex: 1;
+      resize: none;
+      min-height: 40px;
+      max-height: 120px;
+      padding: 10px 14px;
+      font-size: 14px;
+      border-radius: 20px;
+      background: #0f1117;
+      border: 1px solid #30363d;
+      color: #e6edf3;
+      outline: none;
+      transition: border-color 0.15s;
+      font-family: inherit;
+      line-height: 1.4;
+    }
+    .chat-input-wrap textarea:focus { border-color: #58a6ff; }
+    .chat-send-btn {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: #238636;
+      color: #fff;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: background 0.15s;
+      font-size: 16px;
+    }
+    .chat-send-btn:hover:not(:disabled) { background: #2ea043; }
+    .chat-send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .typing-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 10px 16px;
+      background: #1c2128;
+      border: 1px solid #30363d;
+      border-radius: 16px;
+      border-bottom-left-radius: 4px;
+    }
+    .typing-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #8b949e;
+      animation: typingBounce 1.4s ease-in-out infinite;
+    }
+    .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes typingBounce {
+      0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+      30% { transform: translateY(-4px); opacity: 1; }
+    }
+
+    .chat-attach-btn {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: transparent;
+      color: #8b949e;
+      border: 1px solid #30363d;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: all 0.15s;
+      font-size: 18px;
+    }
+    .chat-attach-btn:hover { background: #1c2128; color: #e6edf3; border-color: #484f58; }
+
+    .attachment-preview-bar {
+      display: flex;
+      gap: 8px;
+      padding: 8px 16px 0;
+      overflow-x: auto;
+      background: #161b22;
+    }
+    .attachment-preview {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      background: #1c2128;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      font-size: 12px;
+      color: #e6edf3;
+      max-width: 200px;
+      flex-shrink: 0;
+    }
+    .attachment-preview img {
+      width: 32px;
+      height: 32px;
+      object-fit: cover;
+      border-radius: 4px;
+    }
+    .attachment-preview .remove-btn {
+      position: absolute;
+      top: -6px;
+      right: -6px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #f85149;
+      color: #fff;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      line-height: 1;
+    }
+
+    .attachment-item {
+      margin-top: 8px;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .attachment-item img {
+      max-width: 300px;
+      max-height: 240px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .attachment-item img:hover { opacity: 0.85; }
+    .attachment-item a {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      background: rgba(88,166,255,0.1);
+      border: 1px solid rgba(88,166,255,0.3);
+      border-radius: 6px;
+      color: #58a6ff;
+      text-decoration: none;
+      font-size: 13px;
+      transition: background 0.15s;
+    }
+    .attachment-item a:hover { background: rgba(88,166,255,0.2); }
+
+    .chat-agent-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      cursor: pointer;
+      border-radius: 6px;
+      margin: 1px 6px;
+      transition: background 0.12s;
+    }
+    .chat-agent-item:hover { background: #1c2128; }
+    .chat-agent-item.active { background: rgba(88,166,255,0.1); }
+
     /* ── Misc ──────────────────────────────────────────────── */
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
@@ -399,8 +613,9 @@
 
     const NAV_ITEMS = [
       { id: 'dashboard', label: 'Dashboard',  icon: '\u{1F4CA}' },
+      { id: 'chat',      label: 'Chat',       icon: '\u{1F4AC}' },
       { id: 'agents',    label: 'Agents',     icon: '\u{1F916}' },
-      { id: 'sessions',  label: 'Sessions',   icon: '\u{1F4AC}' },
+      { id: 'sessions',  label: 'Sessions',   icon: '\u{1F5C2}' },
       { id: 'skills',    label: 'Skills',     icon: '\u{1F9E9}' },
       { id: 'channels',  label: 'Channels',   icon: '\u{1F4E1}' },
       { id: 'cron',      label: 'Cron',       icon: '\u{23F0}'  },
@@ -1130,6 +1345,405 @@ If nothing needs attention, respond with: HEARTBEAT_OK
                 >
                   ${creating ? html`<${Spinner} size=${14} /> Creating...` : 'Create Agent'}
                 </button>
+              </div>
+            `}
+          </div>
+        </div>
+      `;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  PAGE: Chat
+    // ═══════════════════════════════════════════════════════════════════
+
+    function formatRelativeTime(isoStr) {
+      if (!isoStr) return '';
+      const diff = (Date.now() - new Date(isoStr).getTime()) / 1000;
+      if (diff < 60) return 'just now';
+      if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+      if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+      return Math.floor(diff / 86400) + 'd ago';
+    }
+
+    function renderMarkdown(text) {
+      if (!text) return '';
+      // Code blocks
+      let result = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) =>
+        '<pre><code>' + code.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</code></pre>'
+      );
+      // Inline code
+      result = result.replace(/`([^`]+)`/g, '<code>$1</code>');
+      // Bold
+      result = result.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      // Italic
+      result = result.replace(/\*(.+?)\*/g, '<em>$1</em>');
+      // Line breaks (but not inside pre blocks)
+      return result;
+    }
+
+    function formatFileSize(bytes) {
+      if (!bytes || bytes === 0) return '0 B';
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function ChatPage({ agents }) {
+      const [selectedAgent, setSelectedAgent] = useState(null);
+      const [messages, setMessages] = useState([]);
+      const [inputText, setInputText] = useState('');
+      const [typing, setTyping] = useState(false);
+      const [wsConnected, setWsConnected] = useState(false);
+      const [conversations, setConversations] = useState({});
+      const [pendingAttachments, setPendingAttachments] = useState([]);
+      const wsRef = useRef(null);
+      const messagesEndRef = useRef(null);
+      const inputRef = useRef(null);
+      const fileInputRef = useRef(null);
+      const clientIdRef = useRef(localStorage.getItem('clade-chat-clientId') || '');
+
+      // Auto-scroll to bottom when messages change
+      const scrollToBottom = useCallback(() => {
+        if (messagesEndRef.current) {
+          messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+        }
+      }, []);
+
+      useEffect(() => { scrollToBottom(); }, [messages, typing]);
+
+      // Load conversations summary
+      useEffect(() => {
+        fetch('/api/chat/conversations')
+          .then(r => r.json())
+          .then(d => {
+            const map = {};
+            (d.conversations || []).forEach(c => { map[c.agentId] = c; });
+            setConversations(map);
+          })
+          .catch(() => {});
+      }, []);
+
+      // WebSocket connection
+      useEffect(() => {
+        let ws;
+        let reconTimer;
+
+        const connect = () => {
+          const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+          ws = new WebSocket(proto + '//' + location.host + '/ws');
+          wsRef.current = ws;
+
+          ws.onopen = () => setWsConnected(true);
+
+          ws.onmessage = (e) => {
+            try {
+              const data = JSON.parse(e.data);
+              switch (data.type) {
+                case 'connected':
+                  clientIdRef.current = data.clientId;
+                  localStorage.setItem('clade-chat-clientId', data.clientId);
+                  break;
+                case 'message_ack':
+                  // User message confirmed saved — add it to the UI
+                  setMessages(prev => [...prev, data.message]);
+                  // Update conversation preview
+                  setConversations(prev => ({
+                    ...prev,
+                    [data.message.agentId]: {
+                      ...prev[data.message.agentId],
+                      messageCount: (prev[data.message.agentId]?.messageCount || 0) + 1,
+                      lastMessage: { text: data.message.text.slice(0, 100), role: 'user', timestamp: data.message.timestamp },
+                    }
+                  }));
+                  break;
+                case 'typing':
+                  setTyping(true);
+                  break;
+                case 'message':
+                  setTyping(false);
+                  setMessages(prev => [...prev, data.message]);
+                  // Update conversation preview
+                  setConversations(prev => ({
+                    ...prev,
+                    [data.message.agentId]: {
+                      ...prev[data.message.agentId],
+                      messageCount: (prev[data.message.agentId]?.messageCount || 0) + 1,
+                      lastMessage: { text: data.message.text.slice(0, 100), role: 'assistant', timestamp: data.message.timestamp },
+                    }
+                  }));
+                  break;
+                case 'error':
+                  setTyping(false);
+                  showToast(data.text, 'error');
+                  break;
+              }
+            } catch (_) {}
+          };
+
+          ws.onclose = () => {
+            setWsConnected(false);
+            wsRef.current = null;
+            reconTimer = setTimeout(connect, 3000);
+          };
+
+          ws.onerror = () => ws.close();
+        };
+
+        connect();
+        return () => { clearTimeout(reconTimer); if (ws) ws.close(); };
+      }, []);
+
+      // Load history when agent is selected
+      useEffect(() => {
+        if (!selectedAgent) { setMessages([]); return; }
+        fetch('/api/chat/history?agentId=' + encodeURIComponent(selectedAgent))
+          .then(r => r.json())
+          .then(d => setMessages(d.messages || []))
+          .catch(() => setMessages([]));
+      }, [selectedAgent]);
+
+      // Focus input when agent changes
+      useEffect(() => {
+        if (selectedAgent && inputRef.current) inputRef.current.focus();
+      }, [selectedAgent]);
+
+      const sendMessage = useCallback(() => {
+        const text = inputText.trim();
+        if ((!text && pendingAttachments.length === 0) || !selectedAgent || !wsRef.current || wsRef.current.readyState !== 1) return;
+        const payload = {
+          type: 'message',
+          agentId: selectedAgent,
+          text: text || (pendingAttachments.length > 0 ? '(attached files)' : ''),
+        };
+        if (pendingAttachments.length > 0) {
+          payload.attachments = pendingAttachments.map(a => ({
+            name: a.name,
+            type: a.type,
+            size: a.size,
+            data: a.data,
+          }));
+        }
+        wsRef.current.send(JSON.stringify(payload));
+        setInputText('');
+        setPendingAttachments([]);
+        // Reset textarea height
+        if (inputRef.current) inputRef.current.style.height = 'auto';
+      }, [inputText, selectedAgent, pendingAttachments]);
+
+      const handleKeyDown = useCallback((e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendMessage();
+        }
+      }, [sendMessage]);
+
+      const handleInput = useCallback((e) => {
+        setInputText(e.target.value);
+        // Auto-resize textarea
+        e.target.style.height = 'auto';
+        e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+      }, []);
+
+      const handleFileSelect = useCallback((e) => {
+        const files = Array.from(e.target.files || []);
+        if (files.length === 0) return;
+
+        files.forEach(file => {
+          if (file.size > 10 * 1024 * 1024) {
+            showToast('File "' + file.name + '" exceeds 10 MB limit', 'error');
+            return;
+          }
+          const reader = new FileReader();
+          reader.onload = () => {
+            const base64 = reader.result.split(',')[1];
+            setPendingAttachments(prev => [...prev, {
+              id: Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+              name: file.name,
+              type: file.type || 'application/octet-stream',
+              size: file.size,
+              data: base64,
+              preview: file.type.startsWith('image/') ? reader.result : null,
+            }]);
+          };
+          reader.readAsDataURL(file);
+        });
+
+        // Reset file input so the same file can be re-selected
+        e.target.value = '';
+      }, []);
+
+      const removeAttachment = useCallback((id) => {
+        setPendingAttachments(prev => prev.filter(a => a.id !== id));
+      }, []);
+
+      const selectedAgentData = agents.find(a => a.id === selectedAgent);
+
+      return html`
+        <div class="page-enter flex h-full">
+          <!-- Agent conversation list (left panel) -->
+          <div class="flex flex-col" style="width:260px;min-width:260px;border-right:1px solid #30363d;background:#161b22">
+            <div class="px-4 py-3 flex items-center justify-between" style="border-bottom:1px solid #30363d">
+              <span class="text-sm font-semibold" style="color:#e6edf3">Conversations</span>
+              <div class="flex items-center gap-1.5">
+                <${StatusDot} connected=${wsConnected} size=${6} />
+                <span class="text-xs" style="color:#8b949e">${wsConnected ? 'Live' : 'Offline'}</span>
+              </div>
+            </div>
+            <div class="flex-1 overflow-y-auto py-2">
+              ${agents.length === 0
+                ? html`<div class="px-4 py-8 text-center text-sm" style="color:#8b949e">No agents configured</div>`
+                : agents.map(a => {
+                    const conv = conversations[a.id];
+                    return html`
+                      <div
+                        key=${a.id}
+                        class="chat-agent-item ${selectedAgent === a.id ? 'active' : ''}"
+                        onClick=${() => setSelectedAgent(a.id)}
+                      >
+                        <div class="flex items-center justify-center flex-shrink-0 rounded-full" style="width:36px;height:36px;background:#282e36;font-size:16px">
+                          ${a.emoji || '\u{1F916}'}
+                        </div>
+                        <div class="flex-1 min-w-0">
+                          <div class="flex items-center justify-between">
+                            <span class="text-sm font-medium truncate" style="color:${selectedAgent === a.id ? '#58a6ff' : '#e6edf3'}">${a.name || a.id}</span>
+                            ${conv?.lastMessage?.timestamp && html`
+                              <span class="text-xs flex-shrink-0" style="color:#484f58">${formatRelativeTime(conv.lastMessage.timestamp)}</span>
+                            `}
+                          </div>
+                          <div class="text-xs truncate" style="color:#8b949e;margin-top:1px">
+                            ${conv?.lastMessage
+                              ? (conv.lastMessage.role === 'user' ? 'You: ' : '') + conv.lastMessage.text
+                              : a.description || 'No messages yet'
+                            }
+                          </div>
+                        </div>
+                      </div>
+                    `;
+                  })
+              }
+            </div>
+          </div>
+
+          <!-- Chat area (right panel) -->
+          <div class="flex flex-col flex-1 min-w-0">
+            ${selectedAgentData ? html`
+              <!-- Chat header -->
+              <div class="flex items-center gap-3 px-5" style="height:56px;min-height:56px;border-bottom:1px solid #30363d;background:#161b22">
+                <div class="flex items-center justify-center rounded-full flex-shrink-0" style="width:32px;height:32px;background:#282e36;font-size:16px">
+                  ${selectedAgentData.emoji || '\u{1F916}'}
+                </div>
+                <div class="min-w-0">
+                  <div class="text-sm font-semibold truncate" style="color:#e6edf3">${selectedAgentData.name || selectedAgentData.id}</div>
+                  <div class="text-xs" style="color:#8b949e">${selectedAgentData.model || 'sonnet'} \u{00B7} ${selectedAgentData.toolPreset || 'full'}</div>
+                </div>
+              </div>
+
+              <!-- Messages area -->
+              <div class="flex-1 overflow-y-auto px-5 py-4" style="background:#0f1117">
+                ${messages.length === 0 && !typing ? html`
+                  <div class="flex flex-col items-center justify-center h-full text-center">
+                    <div class="text-4xl mb-3 opacity-40">${selectedAgentData.emoji || '\u{1F916}'}</div>
+                    <div class="text-sm font-medium" style="color:#8b949e">Start a conversation with ${selectedAgentData.name || selectedAgentData.id}</div>
+                    <div class="text-xs mt-1" style="color:#484f58">Messages are saved and persist across sessions</div>
+                  </div>
+                ` : html`
+                  <div class="flex flex-col gap-3">
+                    ${messages.map(msg => html`
+                      <div key=${msg.id} class="flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}">
+                        <div
+                          class="chat-bubble ${msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-agent'}"
+                        >
+                          <div dangerouslySetInnerHTML=${{ __html: msg.role === 'assistant' ? renderMarkdown(msg.text) : msg.text.replace(/</g, '&lt;').replace(/>/g, '&gt;') }} />
+                          ${msg.attachments && msg.attachments.length > 0 && html`
+                            <div class="flex flex-col gap-2 mt-2">
+                              ${msg.attachments.map(att => html`
+                                <div class="attachment-item" key=${att.url}>
+                                  ${att.type.startsWith('image/')
+                                    ? html`<a href=${att.url} target="_blank" rel="noopener"><img src=${att.url} alt=${att.name} loading="lazy" /></a>`
+                                    : html`<a href=${att.url} download=${att.name} target="_blank" rel="noopener">\u{1F4CE} ${att.name} (${formatFileSize(att.size)})</a>`
+                                  }
+                                </div>
+                              `)}
+                            </div>
+                          `}
+                        </div>
+                        <span class="text-xs mt-1 px-1" style="color:#484f58">${formatRelativeTime(msg.timestamp)}</span>
+                      </div>
+                    `)}
+                    ${typing && html`
+                      <div class="flex flex-col items-start">
+                        <div class="typing-indicator">
+                          <div class="typing-dot"></div>
+                          <div class="typing-dot"></div>
+                          <div class="typing-dot"></div>
+                        </div>
+                      </div>
+                    `}
+                    <div ref=${messagesEndRef} />
+                  </div>
+                `}
+              </div>
+
+              <!-- Attachment preview bar -->
+              ${pendingAttachments.length > 0 && html`
+                <div class="attachment-preview-bar">
+                  ${pendingAttachments.map(att => html`
+                    <div class="attachment-preview" key=${att.id}>
+                      ${att.preview
+                        ? html`<img src=${att.preview} alt=${att.name} />`
+                        : html`<span style="font-size:16px">\u{1F4CE}</span>`
+                      }
+                      <span class="truncate" style="max-width:120px">${att.name}</span>
+                      <button class="remove-btn" onClick=${() => removeAttachment(att.id)} title="Remove">\u{00D7}</button>
+                    </div>
+                  `)}
+                </div>
+              `}
+
+              <!-- Input bar -->
+              <div class="chat-input-wrap">
+                <input
+                  ref=${fileInputRef}
+                  type="file"
+                  multiple
+                  style="display:none"
+                  onChange=${handleFileSelect}
+                  accept="image/*,.txt,.md,.json,.csv,.xml,.yaml,.yml,.log,.pdf,.zip,.gz"
+                />
+                <button
+                  class="chat-attach-btn"
+                  onClick=${() => fileInputRef.current && fileInputRef.current.click()}
+                  disabled=${!wsConnected}
+                  title="Attach files"
+                >
+                  \u{1F4CE}
+                </button>
+                <textarea
+                  ref=${inputRef}
+                  value=${inputText}
+                  onInput=${handleInput}
+                  onKeyDown=${handleKeyDown}
+                  placeholder="Type a message... (Enter to send, Shift+Enter for newline)"
+                  rows="1"
+                  disabled=${!wsConnected}
+                />
+                <button
+                  class="chat-send-btn"
+                  onClick=${sendMessage}
+                  disabled=${(!inputText.trim() && pendingAttachments.length === 0) || !wsConnected || typing}
+                  title="Send message"
+                >
+                  \u{2191}
+                </button>
+              </div>
+            ` : html`
+              <!-- No agent selected -->
+              <div class="flex-1 flex items-center justify-center" style="background:#0f1117">
+                <${EmptyState}
+                  icon="\u{1F4AC}"
+                  title="Select an agent to chat"
+                  subtitle="Choose from the conversation list on the left"
+                />
               </div>
             `}
           </div>
@@ -2456,6 +3070,8 @@ If nothing needs attention, respond with: HEARTBEAT_OK
         switch (page) {
           case 'dashboard':
             return html`<${DashboardPage} health=${health} agents=${agents} sessions=${sessions} cronJobs=${cronJobs} onNavigateToAgent=${navigateToAgent} />`;
+          case 'chat':
+            return html`<${ChatPage} agents=${agents} />`;
           case 'agents':
             return html`<${AgentsPage} agents=${agents} onRefresh=${fetchAgents} onNavigate=${setPage} initialSelectedId=${selectedAgentId} onAgentDeleted=${() => { setSelectedAgentId(null); fetchAll(); }} />`;
           case 'sessions':
