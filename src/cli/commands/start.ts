@@ -199,6 +199,20 @@ interface ChatMessage {
   attachments?: ChatAttachment[];
 }
 
+interface Conversation {
+  id: string;
+  agentId: string;
+  label: string;
+  messages: ChatMessage[];
+  createdAt: string;
+  lastActiveAt: string;
+}
+
+interface AgentChatData {
+  conversations: Record<string, Conversation>;
+  order: string[]; // conversation IDs, most recent first
+}
+
 /** Format byte sizes for human display */
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return bytes + ' B';
@@ -206,8 +220,17 @@ function formatBytes(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
-/** In-memory cache of chat histories, keyed by agentId */
-const chatCache = new Map<string, ChatMessage[]>();
+/** Generate a short label from the first user message */
+function generateLabel(text: string): string {
+  const cleaned = text.replace(/\s+/g, ' ').trim();
+  if (cleaned.length <= 30) return cleaned;
+  const truncated = cleaned.slice(0, 30);
+  const lastSpace = truncated.lastIndexOf(' ');
+  return (lastSpace > 15 ? truncated.slice(0, lastSpace) : truncated) + '...';
+}
+
+/** In-memory cache of chat data, keyed by agentId */
+const chatCache = new Map<string, AgentChatData>();
 
 function chatDir(cladeHome: string): string {
   return join(cladeHome, 'data', 'chats');
@@ -217,27 +240,99 @@ function chatFilePath(cladeHome: string, agentId: string): string {
   return join(chatDir(cladeHome), `${agentId}.json`);
 }
 
-function loadChatHistory(cladeHome: string, agentId: string): ChatMessage[] {
+function emptyAgentChatData(): AgentChatData {
+  return { conversations: {}, order: [] };
+}
+
+/** Load agent chat data with auto-migration from old flat array format */
+function loadAgentChatData(cladeHome: string, agentId: string): AgentChatData {
   if (chatCache.has(agentId)) return chatCache.get(agentId)!;
   const filePath = chatFilePath(cladeHome, agentId);
   try {
     const raw = readFileSync(filePath, 'utf-8');
-    const messages = JSON.parse(raw) as ChatMessage[];
-    chatCache.set(agentId, messages);
-    return messages;
+    const parsed = JSON.parse(raw);
+    // Detect old flat array format and auto-migrate
+    if (Array.isArray(parsed)) {
+      const messages = parsed as ChatMessage[];
+      if (messages.length === 0) {
+        const data = emptyAgentChatData();
+        chatCache.set(agentId, data);
+        return data;
+      }
+      // Migrate into a single conversation
+      const convId = 'conv_' + randomUUID().slice(0, 12);
+      const firstUserMsg = messages.find(m => m.role === 'user');
+      const conv: Conversation = {
+        id: convId,
+        agentId,
+        label: firstUserMsg ? generateLabel(firstUserMsg.text) : 'Imported chat',
+        messages,
+        createdAt: messages[0]?.timestamp || new Date().toISOString(),
+        lastActiveAt: messages[messages.length - 1]?.timestamp || new Date().toISOString(),
+      };
+      const data: AgentChatData = {
+        conversations: { [convId]: conv },
+        order: [convId],
+      };
+      chatCache.set(agentId, data);
+      // Persist migrated format
+      saveAgentChatData(cladeHome, agentId, data);
+      return data;
+    }
+    // New format
+    const data = parsed as AgentChatData;
+    if (!data.conversations) data.conversations = {};
+    if (!data.order) data.order = [];
+    chatCache.set(agentId, data);
+    return data;
   } catch {
-    chatCache.set(agentId, []);
-    return [];
+    const data = emptyAgentChatData();
+    chatCache.set(agentId, data);
+    return data;
   }
 }
 
-function saveChatMessage(cladeHome: string, msg: ChatMessage): void {
+/** Write full AgentChatData to disk */
+function saveAgentChatData(cladeHome: string, agentId: string, data: AgentChatData): void {
   const dir = chatDir(cladeHome);
   mkdirSync(dir, { recursive: true });
-  const messages = loadChatHistory(cladeHome, msg.agentId);
-  messages.push(msg);
-  chatCache.set(msg.agentId, messages);
-  writeFileSync(chatFilePath(cladeHome, msg.agentId), JSON.stringify(messages, null, 2), 'utf-8');
+  chatCache.set(agentId, data);
+  writeFileSync(chatFilePath(cladeHome, agentId), JSON.stringify(data, null, 2), 'utf-8');
+}
+
+/** Append a message to a specific conversation */
+function saveChatMessage(cladeHome: string, msg: ChatMessage, conversationId: string): void {
+  const data = loadAgentChatData(cladeHome, msg.agentId);
+  const conv = data.conversations[conversationId];
+  if (!conv) return;
+  conv.messages.push(msg);
+  conv.lastActiveAt = msg.timestamp;
+  // Auto-generate label from first user message if still default
+  if (conv.label === 'New chat' && msg.role === 'user') {
+    conv.label = generateLabel(msg.text);
+  }
+  // Move conversation to front of order
+  data.order = [conversationId, ...data.order.filter(id => id !== conversationId)];
+  saveAgentChatData(cladeHome, msg.agentId, data);
+}
+
+/** Create a new conversation for an agent */
+function createConversation(cladeHome: string, agentId: string, label?: string): Conversation {
+  const data = loadAgentChatData(cladeHome, agentId);
+  const convId = 'conv_' + randomUUID().slice(0, 12);
+  const now = new Date().toISOString();
+  const conv: Conversation = {
+    id: convId,
+    agentId,
+    label: label || 'New chat',
+    messages: [],
+    createdAt: now,
+    lastActiveAt: now,
+  };
+  data.conversations[convId] = conv;
+  data.order = [convId, ...data.order];
+  saveAgentChatData(cladeHome, agentId, data);
+  return conv;
 }
 
 /** Build a dynamic identity/team-awareness context string for an agent */
@@ -366,6 +461,13 @@ async function startPlaceholderServer(
               return;
             }
 
+            // Resolve or create conversation
+            let conversationId: string = msg.conversationId || '';
+            if (!conversationId) {
+              const conv = createConversation(cladeHome, msg.agentId);
+              conversationId = conv.id;
+            }
+
             // Process attachments if present
             const savedAttachments: ChatAttachment[] = [];
             const incomingAttachments = Array.isArray(msg.attachments) ? msg.attachments : [];
@@ -396,13 +498,13 @@ async function startPlaceholderServer(
               timestamp: new Date().toISOString(),
               ...(savedAttachments.length > 0 ? { attachments: savedAttachments } : {}),
             };
-            saveChatMessage(cladeHome, userMsg);
+            saveChatMessage(cladeHome, userMsg, conversationId);
 
             // Confirm user message saved
-            socket.send(JSON.stringify({ type: 'message_ack', message: userMsg }));
+            socket.send(JSON.stringify({ type: 'message_ack', message: userMsg, conversationId }));
 
             // Send typing indicator
-            socket.send(JSON.stringify({ type: 'typing', agentId: msg.agentId }));
+            socket.send(JSON.stringify({ type: 'typing', agentId: msg.agentId, conversationId }));
 
             // Build prompt with attachment context
             let promptText = msg.text;
@@ -439,10 +541,10 @@ async function startPlaceholderServer(
               text: responseText,
               timestamp: new Date().toISOString(),
             };
-            saveChatMessage(cladeHome, assistantMsg);
+            saveChatMessage(cladeHome, assistantMsg, conversationId);
 
             // Send response
-            socket.send(JSON.stringify({ type: 'message', message: assistantMsg }));
+            socket.send(JSON.stringify({ type: 'message', message: assistantMsg, conversationId }));
           }
         } catch (err) {
           socket.send(JSON.stringify({
@@ -459,35 +561,92 @@ async function startPlaceholderServer(
   }
 
   // ── Chat REST endpoints ─────────────────────────────────────
-  fastify.get<{ Querystring: { agentId?: string } }>('/api/chat/history', async (req, reply) => {
+  fastify.get<{ Querystring: { agentId?: string; conversationId?: string } }>('/api/chat/history', async (req, reply) => {
+    const query = req.query as Record<string, string>;
+    const agentId = query.agentId;
+    if (!agentId) {
+      reply.status(400);
+      return { error: 'agentId query parameter is required' };
+    }
+    const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+    const chatData = loadAgentChatData(cladeHome, agentId);
+
+    // If conversationId provided, return that conversation's messages
+    if (query.conversationId) {
+      const conv = chatData.conversations[query.conversationId];
+      if (!conv) {
+        reply.status(404);
+        return { error: 'Conversation not found' };
+      }
+      return { conversation: { id: conv.id, label: conv.label, createdAt: conv.createdAt, lastActiveAt: conv.lastActiveAt }, messages: conv.messages };
+    }
+
+    // Otherwise return conversation list summary
+    const conversations = chatData.order.map(cid => {
+      const conv = chatData.conversations[cid];
+      if (!conv) return null;
+      const lastMsg = conv.messages.length > 0 ? conv.messages[conv.messages.length - 1] : null;
+      return {
+        id: conv.id,
+        label: conv.label,
+        messageCount: conv.messages.length,
+        createdAt: conv.createdAt,
+        lastActiveAt: conv.lastActiveAt,
+        lastMessage: lastMsg ? { text: lastMsg.text.slice(0, 100), role: lastMsg.role, timestamp: lastMsg.timestamp } : null,
+      };
+    }).filter(Boolean);
+    return { conversations };
+  });
+
+  // Create new conversation
+  fastify.post<{ Body: { agentId: string; label?: string } }>('/api/chat/conversations', async (req, reply) => {
+    const body = req.body as Record<string, unknown>;
+    const agentId = body?.agentId as string;
+    if (!agentId) {
+      reply.status(400);
+      return { error: 'agentId is required' };
+    }
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    if (!agents[agentId]) {
+      reply.status(404);
+      return { error: `Agent "${agentId}" not found` };
+    }
+    const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+    const conv = createConversation(cladeHome, agentId, body?.label as string | undefined);
+    return { conversation: { id: conv.id, label: conv.label, createdAt: conv.createdAt, lastActiveAt: conv.lastActiveAt, messageCount: 0 } };
+  });
+
+  // Delete one conversation
+  fastify.delete<{ Params: { id: string }; Querystring: { agentId?: string } }>('/api/chat/conversations/:id', async (req, reply) => {
+    const { id } = req.params;
     const agentId = (req.query as Record<string, string>).agentId;
     if (!agentId) {
       reply.status(400);
       return { error: 'agentId query parameter is required' };
     }
     const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
-    const messages = loadChatHistory(cladeHome, agentId);
-    return { messages };
+    const data = loadAgentChatData(cladeHome, agentId);
+    if (!data.conversations[id]) {
+      reply.status(404);
+      return { error: 'Conversation not found' };
+    }
+    delete data.conversations[id];
+    data.order = data.order.filter(cid => cid !== id);
+    saveAgentChatData(cladeHome, agentId, data);
+    return { success: true };
   });
 
-  fastify.get('/api/chat/conversations', async () => {
+  // Clear all conversations for agent
+  fastify.delete<{ Querystring: { agentId?: string } }>('/api/chat/conversations', async (req, reply) => {
+    const agentId = (req.query as Record<string, string>).agentId;
+    if (!agentId) {
+      reply.status(400);
+      return { error: 'agentId query parameter is required' };
+    }
     const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
-    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
-    const conversations = Object.keys(agents).map(agentId => {
-      const messages = loadChatHistory(cladeHome, agentId);
-      const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
-      return {
-        agentId,
-        agentName: agents[agentId]?.name ?? agentId,
-        messageCount: messages.length,
-        lastMessage: lastMessage ? {
-          text: lastMessage.text.slice(0, 100),
-          role: lastMessage.role,
-          timestamp: lastMessage.timestamp,
-        } : null,
-      };
-    });
-    return { conversations };
+    const data = emptyAgentChatData();
+    saveAgentChatData(cladeHome, agentId, data);
+    return { success: true };
   });
 
   // ── File uploads endpoint ─────────────────────────────────────
@@ -703,7 +862,31 @@ async function startPlaceholderServer(
     return { success: true };
   });
 
-  fastify.get('/api/sessions', async () => ({ sessions: [] }));
+  fastify.get('/api/sessions', async () => {
+    const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const fiveMinAgo = Date.now() - 5 * 60 * 1000;
+    const sessions: Array<Record<string, unknown>> = [];
+    for (const agentId of Object.keys(agents)) {
+      const data = loadAgentChatData(cladeHome, agentId);
+      for (const convId of data.order) {
+        const conv = data.conversations[convId];
+        if (!conv) continue;
+        const lastActive = new Date(conv.lastActiveAt).getTime();
+        sessions.push({
+          id: conv.id,
+          agentId: conv.agentId,
+          channel: 'webchat',
+          status: lastActive > fiveMinAgo ? 'active' : 'idle',
+          lastActiveAt: conv.lastActiveAt,
+          label: conv.label,
+          messageCount: conv.messages.length,
+        });
+      }
+    }
+    sessions.sort((a, b) => new Date(b.lastActiveAt as string).getTime() - new Date(a.lastActiveAt as string).getTime());
+    return { sessions };
+  });
   fastify.get('/api/skills', async () => ({ skills: [] }));
   fastify.get('/api/channels', async () => ({ channels: [] }));
   fastify.get('/api/cron', async () => ({ jobs: [] }));

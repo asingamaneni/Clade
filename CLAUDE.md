@@ -38,6 +38,7 @@ agents evolving from a common AI foundation, specializing over time.
 - **Portability**: Export/import agents as `.agent.tar.gz` bundles
 - **Platform**: Native OS interaction (notifications, clipboard, screenshots) via platform MCP
 - **Routing**: @mention-based agent routing (`@jarvis do this` routes to jarvis agent)
+- **Chat**: Multi-conversation tabs per agent, auto-migrating from legacy flat format
 - **Tools**: Claude Code's native tools (Read/Edit/Bash/Glob/Grep) + 5 custom MCP servers
 
 ## Tech Stack
@@ -110,6 +111,11 @@ src/
 
 12. **Config versioning**: Schema version in config.json with additive-only migrations.
     `npm update` never touches agent state.
+
+13. **Multi-conversation chat model**: Each agent supports multiple conversations (tabs)
+    stored in `~/.clade/data/chats/{agentId}.json` as an `AgentChatData` object containing
+    a `conversations` map and `order` array. Old flat `ChatMessage[]` format is auto-migrated
+    on first load. Sessions page derives real session data from active conversations.
 
 ## Common Tasks
 
