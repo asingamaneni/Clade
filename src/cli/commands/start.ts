@@ -8,6 +8,7 @@ import type { Command } from 'commander';
 import { listTemplates, getTemplate, configFromTemplate } from '../../agents/templates.js';
 import { resolveAllowedTools } from '../../agents/presets.js';
 import { DEFAULT_SOUL, DEFAULT_HEARTBEAT } from '../../config/defaults.js';
+import { runReflectionCycle } from '../../agents/reflection.js';
 
 interface StartOptions {
   port?: string;
@@ -1018,6 +1019,14 @@ async function startPlaceholderServer(
 
               // Send response
               socket.send(JSON.stringify({ type: 'message', message: assistantMsg, conversationId }));
+
+              // Fire reflection cycle in background (non-blocking)
+              if (msg.agentId) {
+                const reflCfg = (agentCfg.reflection ?? {}) as { enabled?: boolean };
+                if (reflCfg.enabled !== false) {
+                  runReflectionCycle(msg.agentId).catch(() => {});
+                }
+              }
             } finally {
               inflightProcesses.delete(conversationId);
             }
@@ -1286,6 +1295,58 @@ async function startPlaceholderServer(
     const hbPath = join(cladeHome, 'agents', id, 'HEARTBEAT.md');
     writeFileSync(hbPath, content, 'utf-8');
     return { success: true };
+  });
+
+  // ── Get reflection status ───────────────────────────────────
+  fastify.get<{ Params: { id: string } }>('/api/agents/:id/reflection', async (req, reply) => {
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const { id } = req.params;
+    if (!agents[id]) {
+      reply.status(404);
+      return { error: `Agent "${id}" not found` };
+    }
+    try {
+      const { getReflectionStatus: getStatus } = await import('../../agents/reflection.js');
+      const status = getStatus(id);
+      return { agentId: id, ...status };
+    } catch {
+      return { agentId: id, sessionsSinceReflection: 0, lastReflection: new Date(0).toISOString(), reflectionInterval: 10, enabled: true };
+    }
+  });
+
+  // ── Trigger reflection manually ─────────────────────────────
+  fastify.post<{ Params: { id: string } }>('/api/agents/:id/reflection', async (req, reply) => {
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const { id } = req.params;
+    if (!agents[id]) {
+      reply.status(404);
+      return { error: `Agent "${id}" not found` };
+    }
+    try {
+      const result = await runReflectionCycle(id, true);
+      return { triggered: true, result };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Reflection cycle failed';
+      reply.status(500);
+      return { error: message };
+    }
+  });
+
+  // ── Get reflection history ──────────────────────────────────
+  fastify.get<{ Params: { id: string } }>('/api/agents/:id/reflection/history', async (req, reply) => {
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const { id } = req.params;
+    if (!agents[id]) {
+      reply.status(404);
+      return { error: `Agent "${id}" not found` };
+    }
+    try {
+      const { getReflectionHistory: getHistory } = await import('../../agents/reflection.js');
+      const entries = getHistory(id);
+      return { agentId: id, entries };
+    } catch {
+      return { agentId: id, entries: [] };
+    }
   });
 
   // ── List agent memory files ─────────────────────────────────
@@ -1634,9 +1695,39 @@ async function startPlaceholderServer(
   });
 
   // ── Admin dashboard ───────────────────────────────────────────
+  // Prefer built React UI from ui/dist/, fall back to legacy admin.html
+  let uiDistDir: string | null = null;
+  try {
+    const thisDir = dirname(fileURLToPath(import.meta.url));
+    const candidates = [
+      join(thisDir, '..', '..', 'ui', 'dist'),       // dist/bin/ → ui/dist/
+      join(thisDir, '..', '..', '..', 'ui', 'dist'),  // src/cli/commands/ → ui/dist/
+    ];
+    for (const c of candidates) {
+      if (existsSync(join(c, 'index.html'))) { uiDistDir = c; break; }
+    }
+  } catch { /* fallback */ }
+
+  if (uiDistDir) {
+    // Serve React UI static assets under /admin/
+    const fastifyStatic = await import('@fastify/static').then(m => m.default).catch(() => null);
+    if (fastifyStatic) {
+      await fastify.register(fastifyStatic, {
+        root: uiDistDir,
+        prefix: '/admin/',
+        decorateReply: false,
+      });
+    }
+  }
+
   const adminHtmlPath = findAdminHtml();
 
   fastify.get('/admin', async (_req, reply) => {
+    // Prefer React UI
+    if (uiDistDir && existsSync(join(uiDistDir, 'index.html'))) {
+      return reply.redirect('/admin/');
+    }
+    // Fall back to legacy admin.html
     if (adminHtmlPath) {
       const html = readFileSync(adminHtmlPath, 'utf-8');
       reply.type('text/html').send(html);

@@ -10,6 +10,11 @@ import { homedir } from 'node:os';
 import { ConfigSchema } from '../config/schema.js';
 import { WebChatAdapter } from '../channels/webchat.js';
 import { createLogger } from '../utils/logger.js';
+import {
+  getReflectionStatus,
+  getReflectionHistory,
+  runReflectionCycle,
+} from '../agents/reflection.js';
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import type { Config } from '../config/schema.js';
@@ -581,6 +586,57 @@ function registerAgentRoutes(app: FastifyInstance, deps: GatewayDeps): void {
       }
     },
   );
+
+  // ── Get reflection status ─────────────────────────────────────
+  app.get<{ Params: { id: string } }>('/api/agents/:id/reflection', async (req, reply) => {
+    const { id } = req.params;
+    if (!reg.has(id)) {
+      return reply.code(404).send({ error: `Agent "${id}" not found` });
+    }
+    try {
+      const status = getReflectionStatus(id);
+      return { agentId: id, ...status };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to get reflection status';
+      return reply.code(500).send({ error: message });
+    }
+  });
+
+  // ── Trigger reflection manually ───────────────────────────────
+  app.post<{ Params: { id: string } }>('/api/agents/:id/reflection', async (req, reply) => {
+    const { id } = req.params;
+    if (!reg.has(id)) {
+      return reply.code(404).send({ error: `Agent "${id}" not found` });
+    }
+    try {
+      const result = await runReflectionCycle(id, true);
+      broadcastAdmin({
+        type: 'agent:reflection-complete',
+        agentId: id,
+        result,
+        timestamp: new Date().toISOString(),
+      });
+      return { triggered: true, result };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Reflection cycle failed';
+      return reply.code(500).send({ error: message });
+    }
+  });
+
+  // ── Get reflection history ────────────────────────────────────
+  app.get<{ Params: { id: string } }>('/api/agents/:id/reflection/history', async (req, reply) => {
+    const { id } = req.params;
+    if (!reg.has(id)) {
+      return reply.code(404).send({ error: `Agent "${id}" not found` });
+    }
+    try {
+      const entries = getReflectionHistory(id);
+      return { agentId: id, entries };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to get reflection history';
+      return reply.code(500).send({ error: message });
+    }
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

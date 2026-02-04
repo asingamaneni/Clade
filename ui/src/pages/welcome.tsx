@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import { ArrowLeft, Loader2, Sparkles } from "lucide-react"
+import { ArrowLeft, Loader2, Sparkles, Wand2 } from "lucide-react"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,6 +36,12 @@ interface TemplateMeta {
 }
 
 const TEMPLATE_META: Record<string, TemplateMeta> = {
+  orchestrator: {
+    icon: '\uD83D\uDD2E',
+    colorClass: 'text-[#f0883e]',
+    borderClass: 'border-[#f0883e]/40',
+    bgClass: 'bg-[#f0883e]/5',
+  },
   coding: {
     icon: '\uD83D\uDCBB',
     colorClass: 'text-[hsl(var(--chart-blue))]',
@@ -103,6 +109,134 @@ const FALLBACK_TEMPLATES: Template[] = [
     heartbeat: { interval: '1h' },
   },
 ]
+
+// ---------------------------------------------------------------------------
+// Onboarding — streamlined default orchestrator creation
+// ---------------------------------------------------------------------------
+
+export function OnboardingPage({
+  onCreated,
+  onPickTemplate,
+}: {
+  onCreated: () => void
+  onPickTemplate: () => void
+}) {
+  const [name, setName] = useState('assistant')
+  const [creating, setCreating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    inputRef.current?.focus()
+    inputRef.current?.select()
+  }, [])
+
+  const nameSlug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '') || 'assistant'
+
+  // Capitalize the user's name for the display name
+  const displayName = name.trim()
+    ? name.trim().split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+    : 'Assistant'
+
+  const handleCreate = async () => {
+    setCreating(true)
+    setError(null)
+    try {
+      await api('/agents', {
+        method: 'POST',
+        body: {
+          name: nameSlug,
+          template: 'orchestrator',
+          description: displayName,
+          setAsDefault: true,
+        },
+      })
+      onCreated()
+    } catch (e: any) {
+      setError(e.message)
+      setCreating(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[calc(100vh-8rem)] px-8">
+      <div className="w-full max-w-md text-center">
+        <div className="mb-4 text-6xl">{'\uD83D\uDD2E'}</div>
+        <h1 className="text-3xl font-bold mb-2 text-foreground">
+          Welcome to Clade
+        </h1>
+        <p className="text-base mb-1 text-muted-foreground">
+          Your personal team of AI agents, powered by Claude Code.
+        </p>
+        <p className="text-sm mb-8 text-muted-foreground/60">
+          Let's create your first agent — a personal assistant that can handle
+          anything and delegate to specialists.
+        </p>
+
+        <div className="text-left space-y-5">
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Name your assistant
+            </Label>
+            <Input
+              ref={inputRef}
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value)
+                setError(null)
+              }}
+              onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+              placeholder="e.g. assistant, jarvis, friday"
+              className="text-base h-12"
+            />
+            {nameSlug && nameSlug !== name.trim().toLowerCase() && (
+              <p className="text-xs text-muted-foreground/60">
+                Will be created as:{' '}
+                <code className="text-primary font-mono">{nameSlug}</code>
+              </p>
+            )}
+          </div>
+
+          {error && (
+            <div className="p-3 rounded-md text-sm bg-destructive/10 border border-destructive/30 text-destructive">
+              {error}
+            </div>
+          )}
+
+          <Button
+            className="w-full h-12 text-[15px]"
+            onClick={handleCreate}
+            disabled={creating}
+          >
+            {creating ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Creating...
+              </>
+            ) : (
+              <>
+                <Wand2 className="h-4 w-4 mr-2" />
+                Get Started
+              </>
+            )}
+          </Button>
+        </div>
+
+        <button
+          className="mt-6 text-sm text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+          onClick={onPickTemplate}
+        >
+          Or pick a specialist template instead
+        </button>
+      </div>
+    </div>
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Sub-components

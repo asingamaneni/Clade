@@ -20,6 +20,7 @@ export default defineConfig({
       '/health': 'http://localhost:7890',
     },
   },
+  base: '/admin/',
   build: {
     outDir: 'dist',
     emptyOutDir: true,

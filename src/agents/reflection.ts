@@ -10,6 +10,10 @@
 import { getAgentsDir } from '../config/index.js';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from 'fs';
 import { join } from 'path';
+import { runClaude } from '../engine/claude-cli.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('reflection');
 
 // ---------------------------------------------------------------------------
 // Types
@@ -324,4 +328,79 @@ export function getReflectionHistory(agentId: string): ReflectionHistoryEntry[] 
     const firstLine = content.split('\n').find((l) => l.trim().length > 0) || '';
     return { date, summary: firstLine.trim() };
   });
+}
+
+/**
+ * Return the current reflection tracker status for an agent.
+ */
+export function getReflectionStatus(agentId: string): ReflectionTracker & { enabled: boolean } {
+  const tracker = loadTracker(agentId);
+  // Check if the agent dir exists as a proxy for "agent exists"
+  const agentDir = join(getAgentsDir(), agentId);
+  const configPath = join(agentDir, 'config.json');
+  let enabled = true;
+  if (existsSync(configPath)) {
+    try {
+      const raw = JSON.parse(readFileSync(configPath, 'utf-8'));
+      if (raw.reflection?.enabled === false) enabled = false;
+    } catch { /* default to enabled */ }
+  }
+  return { ...tracker, enabled };
+}
+
+/**
+ * Run a full reflection cycle for an agent.
+ *
+ * Orchestrates: increment session count → check if due → build prompt →
+ * call Claude (single-turn, no tools) → apply result to SOUL.md.
+ *
+ * This is designed to be called fire-and-forget after a session completes.
+ * It never throws — errors are logged and swallowed.
+ *
+ * @param agentId  The agent to reflect for
+ * @param force    If true, skip the shouldReflect() check and run immediately
+ * @returns The reflection result, or null if skipped/failed
+ */
+export async function runReflectionCycle(
+  agentId: string,
+  force = false,
+): Promise<ReflectionResult | null> {
+  try {
+    // 1. Increment session count (unless forced — force is for manual triggers)
+    if (!force) {
+      incrementSessionCount(agentId);
+    }
+
+    // 2. Check if reflection is due
+    if (!force && !shouldReflect(agentId)) {
+      return null;
+    }
+
+    log.info('Starting reflection cycle', { agentId, force });
+
+    // 3. Build the reflection prompt
+    const prompt = buildReflectionPrompt(agentId);
+
+    // 4. Run Claude — single-turn, no MCP tools, no resume
+    const result = await runClaude({
+      prompt,
+      maxTurns: 1,
+      timeout: 120_000,
+    });
+
+    // 5. Apply the reflection output
+    const applied = applyReflection(agentId, result.text);
+
+    log.info('Reflection cycle complete', {
+      agentId,
+      applied: applied.applied,
+      diff: applied.diff,
+    });
+
+    return applied;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.warn('Reflection cycle failed', { agentId, error: message });
+    return null;
+  }
 }

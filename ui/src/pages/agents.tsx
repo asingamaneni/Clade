@@ -29,6 +29,9 @@ import {
   FileText,
   X,
   ArrowLeft,
+  RefreshCw,
+  Clock,
+  Sparkles,
 } from "lucide-react"
 
 // ---------------------------------------------------------------------------
@@ -868,6 +871,221 @@ function HeartbeatTab({ agentId }: { agentId: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// Sub: Reflection Tab
+// ---------------------------------------------------------------------------
+
+interface ReflectionStatus {
+  sessionsSinceReflection: number
+  lastReflection: string
+  reflectionInterval: number
+  enabled: boolean
+}
+
+interface ReflectionHistoryEntry {
+  date: string
+  summary: string
+}
+
+function ReflectionTab({ agentId }: { agentId: string }) {
+  const [status, setStatus] = useState<ReflectionStatus | null>(null)
+  const [history, setHistory] = useState<ReflectionHistoryEntry[]>([])
+  const [loading, setLoading] = useState(true)
+  const [running, setRunning] = useState(false)
+  const [lastResult, setLastResult] = useState<string | null>(null)
+
+  const loadData = async () => {
+    setLoading(true)
+    try {
+      const [statusRes, historyRes] = await Promise.all([
+        api<ReflectionStatus & { agentId: string }>(
+          '/agents/' + agentId + '/reflection',
+        ),
+        api<{ entries: ReflectionHistoryEntry[] }>(
+          '/agents/' + agentId + '/reflection/history',
+        ),
+      ])
+      setStatus(statusRes)
+      setHistory(historyRes.entries || [])
+    } catch (e: any) {
+      console.error('Failed to load reflection data:', e.message)
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    loadData()
+  }, [agentId])
+
+  const triggerReflection = async () => {
+    setRunning(true)
+    setLastResult(null)
+    try {
+      const res = await api<{ triggered: boolean; result: { applied: boolean; diff: string } | null }>(
+        '/agents/' + agentId + '/reflection',
+        { method: 'POST' },
+      )
+      setLastResult(
+        res.result
+          ? res.result.diff
+          : 'Reflection completed but no changes were made.',
+      )
+      // Reload data to reflect updated status
+      await loadData()
+    } catch (e: any) {
+      setLastResult('Error: ' + e.message)
+    }
+    setRunning(false)
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        <span className="text-sm">Loading reflection data...</span>
+      </div>
+    )
+  }
+
+  const lastDate = status?.lastReflection
+    ? new Date(status.lastReflection)
+    : null
+  const neverReflected =
+    !lastDate || lastDate.getTime() <= 0
+
+  return (
+    <div className="max-w-2xl space-y-6">
+      {/* Status cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Card>
+          <CardContent className="p-3 text-center">
+            <div className="text-2xl font-bold text-foreground">
+              {status?.sessionsSinceReflection ?? 0}
+            </div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              Sessions since last
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-3 text-center">
+            <div className="text-2xl font-bold text-foreground">
+              {status?.reflectionInterval ?? 10}
+            </div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              Interval (sessions)
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-3 text-center">
+            <div className="text-sm font-medium text-foreground truncate">
+              {neverReflected
+                ? 'Never'
+                : lastDate!.toLocaleDateString()}
+            </div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              Last reflection
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-3 text-center">
+            <Badge
+              variant="outline"
+              className={cn(
+                "text-xs",
+                status?.enabled
+                  ? "text-[hsl(var(--success))] border-[hsl(var(--success))]/30"
+                  : "text-muted-foreground",
+              )}
+            >
+              {status?.enabled ? 'Enabled' : 'Disabled'}
+            </Badge>
+            <div className="text-xs text-muted-foreground mt-1.5">
+              Status
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Manual trigger */}
+      <div className="flex items-center gap-3">
+        <Button
+          size="sm"
+          onClick={triggerReflection}
+          disabled={running}
+        >
+          {running ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+              Reflecting...
+            </>
+          ) : (
+            <>
+              <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+              Run Reflection Now
+            </>
+          )}
+        </Button>
+        <span className="text-xs text-muted-foreground">
+          Manually triggers a reflection cycle regardless of session count.
+        </span>
+      </div>
+
+      {/* Last result */}
+      {lastResult && (
+        <Card
+          className={cn(
+            "border",
+            lastResult.startsWith('Error')
+              ? "border-destructive/30 bg-destructive/5"
+              : "border-[hsl(var(--success))]/30 bg-[hsl(var(--success))]/5",
+          )}
+        >
+          <CardContent className="p-3">
+            <div className="text-xs font-semibold text-muted-foreground mb-1">
+              Result
+            </div>
+            <div className="text-sm text-foreground">{lastResult}</div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Separator />
+
+      {/* History */}
+      <div>
+        <h4 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+          <Clock className="h-4 w-4" />
+          Soul History
+        </h4>
+        {history.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-4">
+            No reflection history yet. Reflections create snapshots of
+            SOUL.md in soul-history/.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {history.map((entry) => (
+              <Card key={entry.date}>
+                <CardContent className="p-3 flex items-start gap-3">
+                  <div className="text-xs font-mono text-primary whitespace-nowrap pt-0.5">
+                    {entry.date}
+                  </div>
+                  <div className="text-sm text-muted-foreground truncate">
+                    {entry.summary || '(empty snapshot)'}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Sub: Agent Detail
 // ---------------------------------------------------------------------------
 
@@ -968,6 +1186,7 @@ function AgentDetail({
           <TabsTrigger value="tools">Tools</TabsTrigger>
           <TabsTrigger value="memory">Memory</TabsTrigger>
           <TabsTrigger value="heartbeat">Heartbeat</TabsTrigger>
+          <TabsTrigger value="reflection">Reflection</TabsTrigger>
         </TabsList>
         <TabsContent value="soul">
           <SoulTab agentId={agent.id} />
@@ -983,6 +1202,9 @@ function AgentDetail({
         </TabsContent>
         <TabsContent value="heartbeat">
           <HeartbeatTab agentId={agent.id} />
+        </TabsContent>
+        <TabsContent value="reflection">
+          <ReflectionTab agentId={agent.id} />
         </TabsContent>
       </Tabs>
     </div>
