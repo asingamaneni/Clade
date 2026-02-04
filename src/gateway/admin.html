@@ -2272,7 +2272,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
     //  PAGE 2: Agents
     // ═══════════════════════════════════════════════════════════════════
 
-    function AgentsPage({ agents, onRefresh, onNavigate, initialSelectedId, onAgentDeleted }) {
+    function AgentsPage({ agents, onRefresh, onNavigate, initialSelectedId, onAgentDeleted, refreshTick }) {
       const [selectedId, setSelectedId] = useState(initialSelectedId || null);
       const [showCreate, setShowCreate] = useState(false);
 
@@ -2332,7 +2332,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
           <!-- Agent detail panel -->
           <div class="flex-1 overflow-y-auto">
             ${selectedAgent
-              ? html`<${AgentDetail} agent=${selectedAgent} onRefresh=${onRefresh} onDeleted=${onAgentDeleted} />`
+              ? html`<${AgentDetail} agent=${selectedAgent} onRefresh=${onRefresh} onDeleted=${onAgentDeleted} refreshTick=${refreshTick} />`
               : html`<${EmptyState} icon="\u{1F916}" title="Select an agent" subtitle="Choose from the list to view details" />`
             }
           </div>
@@ -2342,7 +2342,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
 
     // ── Agent detail with tabs ───────────────────────────────────────
 
-    function AgentDetail({ agent, onRefresh, onDeleted }) {
+    function AgentDetail({ agent, onRefresh, onDeleted, refreshTick }) {
       const [tab, setTab] = useState('soul');
       const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
       const [deleting, setDeleting] = useState(false);
@@ -2409,11 +2409,11 @@ If nothing needs attention, respond with: HEARTBEAT_OK
           <${TabBar} tabs=${tabs} active=${tab} onChange=${setTab} />
 
           <div class="pt-4">
-            ${tab === 'soul'      && html`<${SoulTab} agentId=${agent.id} />`}
+            ${tab === 'soul'      && html`<${SoulTab} agentId=${agent.id} refreshTick=${refreshTick} />`}
             ${tab === 'identity'  && html`<${IdentityTab} agentId=${agent.id} />`}
             ${tab === 'tools'     && html`<${ToolsTab} agent=${agent} onRefresh=${onRefresh} />`}
-            ${tab === 'memory'    && html`<${MemoryTab} agentId=${agent.id} />`}
-            ${tab === 'heartbeat' && html`<${HeartbeatTab} agentId=${agent.id} />`}
+            ${tab === 'memory'    && html`<${MemoryTab} agentId=${agent.id} refreshTick=${refreshTick} />`}
+            ${tab === 'heartbeat' && html`<${HeartbeatTab} agentId=${agent.id} refreshTick=${refreshTick} />`}
           </div>
         </div>
       `;
@@ -2421,7 +2421,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
 
     // ── Soul Tab ─────────────────────────────────────────────────────
 
-    function SoulTab({ agentId }) {
+    function SoulTab({ agentId, refreshTick }) {
       const [content, setContent] = useState('');
       const [loading, setLoading] = useState(true);
       const [saving, setSaving] = useState(false);
@@ -2432,7 +2432,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
           .then(d => setContent(d.content || ''))
           .catch(e => showToast('Failed to load SOUL.md: ' + e.message, 'error'))
           .finally(() => setLoading(false));
-      }, [agentId]);
+      }, [agentId, refreshTick]);
 
       const save = async () => {
         setSaving(true);
@@ -2635,7 +2635,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
 
     // ── Memory Tab ───────────────────────────────────────────────────
 
-    function MemoryTab({ agentId }) {
+    function MemoryTab({ agentId, refreshTick }) {
       const [files, setFiles] = useState([]);
       const [selFile, setSelFile] = useState(null);
       const [content, setContent] = useState('');
@@ -2653,7 +2653,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
           .then(d => setFiles(d.files || []))
           .catch(e => showToast('Failed to load memory: ' + e.message, 'error'))
           .finally(() => setLoading(false));
-      }, [agentId]);
+      }, [agentId, refreshTick]);
 
       const openFile = async (file) => {
         setSelFile(file);
@@ -2758,7 +2758,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
 
     // ── Heartbeat Tab ────────────────────────────────────────────────
 
-    function HeartbeatTab({ agentId }) {
+    function HeartbeatTab({ agentId, refreshTick }) {
       const [content, setContent] = useState('');
       const [interval, setInterval_] = useState('30m');
       const [activeStart, setActiveStart] = useState('09:00');
@@ -2780,7 +2780,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
           setActiveEnd(c.activeHours?.end || '22:00');
           setHbEnabled(!!c.enabled);
         }).finally(() => setLoading(false));
-      }, [agentId]);
+      }, [agentId, refreshTick]);
 
       const save = async () => {
         setSaving(true);
@@ -3414,6 +3414,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
       const [skills, setSkills]     = useState([]);
       const [cronJobs, setCronJobs] = useState([]);
       const [channels, setChannels] = useState([]);
+      const [agentFilesTick, setAgentFilesTick] = useState(0);
       const wsRef = useRef(null);
 
       // ── Fetch helpers ────────────────────────────────────────────
@@ -3450,7 +3451,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
                 fetchAll();
               } else if (msg.type) {
                 const domain = msg.type.split(':')[0];
-                if (domain === 'agent' || domain === 'memory')  fetchAgents();
+                if (domain === 'agent' || domain === 'memory')  { fetchAgents(); setAgentFilesTick(t => t + 1); }
                 else if (domain === 'session')                   fetchSessions();
                 else if (domain === 'skill')                     fetchSkills();
                 else if (domain === 'cron')                      fetchCron();
@@ -3506,7 +3507,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
           case 'chat':
             return html`<${ChatPage} agents=${agents} />`;
           case 'agents':
-            return html`<${AgentsPage} agents=${agents} onRefresh=${fetchAgents} onNavigate=${setPage} initialSelectedId=${selectedAgentId} onAgentDeleted=${() => { setSelectedAgentId(null); fetchAll(); }} />`;
+            return html`<${AgentsPage} agents=${agents} onRefresh=${fetchAgents} onNavigate=${setPage} initialSelectedId=${selectedAgentId} onAgentDeleted=${() => { setSelectedAgentId(null); fetchAll(); }} refreshTick=${agentFilesTick} />`;
           case 'sessions':
             return html`<${SessionsPage} sessions=${sessions} onRefresh=${fetchSessions} />`;
           case 'skills':

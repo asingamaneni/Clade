@@ -1420,6 +1420,27 @@ async function startPlaceholderServer(
   const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
   const agentCount = Object.keys(agents).length;
 
+  // ── Watch agents/ dir for file changes (memory, soul, heartbeat) ──────────
+  const agentsWatchDir = join(cladeHome, 'agents');
+  let agentsDirDebounce: ReturnType<typeof setTimeout> | null = null;
+  if (existsSync(agentsWatchDir)) {
+    watch(agentsWatchDir, { recursive: true }, (_eventType, filename) => {
+      if (agentsDirDebounce) clearTimeout(agentsDirDebounce);
+      agentsDirDebounce = setTimeout(() => {
+        // Extract agentId from path (first segment under agents/)
+        const agentId = filename ? String(filename).split(/[/\\]/)[0] : undefined;
+        const payload = JSON.stringify({
+          type: 'agent:files_changed',
+          agentId: agentId || null,
+          timestamp: new Date().toISOString(),
+        });
+        for (const ws of wsClients) {
+          if (ws.readyState === 1) ws.send(payload);
+        }
+      }, 500);
+    });
+  }
+
   // ── Watch config.json for external changes (e.g. agents created via CLI) ──
   const configWatchPath = join(cladeHome, 'config.json');
   let configDebounce: ReturnType<typeof setTimeout> | null = null;
