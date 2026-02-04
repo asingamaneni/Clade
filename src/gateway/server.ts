@@ -13,6 +13,7 @@ import { createLogger } from '../utils/logger.js';
 import {
   getReflectionStatus,
   getReflectionHistory,
+  getReflectionHistoryEntry,
   runReflectionCycle,
 } from '../agents/reflection.js';
 import type { FastifyInstance } from 'fastify';
@@ -634,6 +635,24 @@ function registerAgentRoutes(app: FastifyInstance, deps: GatewayDeps): void {
       return { agentId: id, entries };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to get reflection history';
+      return reply.code(500).send({ error: message });
+    }
+  });
+
+  // ── Get specific reflection history entry ──────────────────
+  app.get<{ Params: { id: string; date: string } }>('/api/agents/:id/reflection/history/:date', async (req, reply) => {
+    const { id, date } = req.params;
+    if (!reg.has(id)) {
+      return reply.code(404).send({ error: `Agent "${id}" not found` });
+    }
+    try {
+      const content = getReflectionHistoryEntry(id, date);
+      if (content === null) {
+        return reply.code(404).send({ error: `No history entry for date "${date}"` });
+      }
+      return { agentId: id, date, content };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to read history entry';
       return reply.code(500).send({ error: message });
     }
   });

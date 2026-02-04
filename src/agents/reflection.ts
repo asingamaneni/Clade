@@ -312,15 +312,18 @@ export function applyReflection(
 
 /**
  * List the reflection history for an agent.
- * Returns entries sorted chronologically with date and first-line summary.
+ * Returns entries sorted reverse-chronologically (newest first) with date
+ * and first-line summary. Limited to the most recent `limit` entries.
  */
-export function getReflectionHistory(agentId: string): ReflectionHistoryEntry[] {
+export function getReflectionHistory(agentId: string, limit = 15): ReflectionHistoryEntry[] {
   const historyDir = getSoulHistoryDir(agentId);
   if (!existsSync(historyDir)) return [];
 
   const files = readdirSync(historyDir)
     .filter((f) => f.endsWith('.md'))
-    .sort();
+    .sort()
+    .reverse()
+    .slice(0, limit);
 
   return files.map((file) => {
     const date = file.replace('.md', '');
@@ -328,6 +331,20 @@ export function getReflectionHistory(agentId: string): ReflectionHistoryEntry[] 
     const firstLine = content.split('\n').find((l) => l.trim().length > 0) || '';
     return { date, summary: firstLine.trim() };
   });
+}
+
+/**
+ * Get the full content of a specific soul history snapshot.
+ * Returns the markdown content or null if not found.
+ */
+export function getReflectionHistoryEntry(agentId: string, date: string): string | null {
+  // Validate date format to prevent path traversal
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+
+  const historyDir = getSoulHistoryDir(agentId);
+  const filePath = join(historyDir, `${date}.md`);
+  if (!existsSync(filePath)) return null;
+  return readFileSync(filePath, 'utf-8');
 }
 
 /**

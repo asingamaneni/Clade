@@ -12,6 +12,7 @@ import {
   buildReflectionPrompt,
   applyReflection,
   getReflectionHistory,
+  getReflectionHistoryEntry,
 } from '../../src/agents/reflection.js';
 
 const TEST_HOME = join(tmpdir(), `clade-test-reflection-${Date.now()}`);
@@ -526,14 +527,14 @@ describe('Reflection Cycle', () => {
       const history = getReflectionHistory('test-agent');
 
       expect(history).toHaveLength(3);
-      // Should be sorted chronologically (ascending)
-      expect(history[0]!.date).toBe('2024-01-10');
+      // Should be sorted reverse-chronologically (newest first)
+      expect(history[0]!.date).toBe('2024-01-20');
       expect(history[1]!.date).toBe('2024-01-15');
-      expect(history[2]!.date).toBe('2024-01-20');
-      // Summary is the first non-empty line
-      expect(history[0]!.summary).toBe('# Soul v0');
+      expect(history[2]!.date).toBe('2024-01-10');
+      // Summary is the first non-empty line (matches date order)
+      expect(history[0]!.summary).toBe('# Soul v2');
       expect(history[1]!.summary).toBe('# Soul v1');
-      expect(history[2]!.summary).toBe('# Soul v2');
+      expect(history[2]!.summary).toBe('# Soul v0');
     });
 
     it('returns empty array when no history exists', () => {
@@ -581,6 +582,51 @@ describe('Reflection Cycle', () => {
       expect(history).toHaveLength(1);
       expect(history[0]!.date).toBe('2024-03-01');
       expect(history[0]!.summary).toBe('');
+    });
+
+    it('respects the limit parameter', () => {
+      setupAgent('test-agent');
+      const historyDir = join(TEST_HOME, 'agents', 'test-agent', 'soul-history');
+      mkdirSync(historyDir, { recursive: true });
+
+      for (let i = 1; i <= 20; i++) {
+        const day = String(i).padStart(2, '0');
+        writeFileSync(join(historyDir, `2024-01-${day}.md`), `# Soul v${i}`, 'utf-8');
+      }
+
+      const history = getReflectionHistory('test-agent', 5);
+      expect(history).toHaveLength(5);
+      // Newest first
+      expect(history[0]!.date).toBe('2024-01-20');
+      expect(history[4]!.date).toBe('2024-01-16');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getReflectionHistoryEntry
+  // -------------------------------------------------------------------------
+
+  describe('getReflectionHistoryEntry', () => {
+    it('returns full content for a valid date', () => {
+      setupAgent('test-agent');
+      const historyDir = join(TEST_HOME, 'agents', 'test-agent', 'soul-history');
+      mkdirSync(historyDir, { recursive: true });
+      writeFileSync(join(historyDir, '2024-01-15.md'), '# Soul v1\n\nFull content here.', 'utf-8');
+
+      const content = getReflectionHistoryEntry('test-agent', '2024-01-15');
+      expect(content).toBe('# Soul v1\n\nFull content here.');
+    });
+
+    it('returns null for non-existent date', () => {
+      setupAgent('test-agent');
+      const content = getReflectionHistoryEntry('test-agent', '2024-01-01');
+      expect(content).toBeNull();
+    });
+
+    it('returns null for invalid date format', () => {
+      setupAgent('test-agent');
+      const content = getReflectionHistoryEntry('test-agent', '../../../etc/passwd');
+      expect(content).toBeNull();
     });
   });
 });

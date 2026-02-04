@@ -1349,6 +1349,28 @@ async function startPlaceholderServer(
     }
   });
 
+  // ── Get specific reflection history entry ─────────────────
+  fastify.get<{ Params: { id: string; date: string } }>('/api/agents/:id/reflection/history/:date', async (req, reply) => {
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const { id, date } = req.params;
+    if (!agents[id]) {
+      reply.status(404);
+      return { error: `Agent "${id}" not found` };
+    }
+    try {
+      const { getReflectionHistoryEntry: getEntry } = await import('../../agents/reflection.js');
+      const content = getEntry(id, date);
+      if (content === null) {
+        reply.status(404);
+        return { error: `No history entry for date "${date}"` };
+      }
+      return { agentId: id, date, content };
+    } catch {
+      reply.status(500);
+      return { error: 'Failed to read history entry' };
+    }
+  });
+
   // ── List agent memory files ─────────────────────────────────
   fastify.get<{ Params: { id: string } }>('/api/agents/:id/memory', async (req, reply) => {
     const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
