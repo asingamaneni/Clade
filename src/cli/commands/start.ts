@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, readdirSync, watch } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -1403,6 +1403,32 @@ async function startPlaceholderServer(
   const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
   const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
   const agentCount = Object.keys(agents).length;
+
+  // ── Watch config.json for external changes (e.g. agents created via CLI) ──
+  const configWatchPath = join(cladeHome, 'config.json');
+  let configDebounce: ReturnType<typeof setTimeout> | null = null;
+  if (existsSync(configWatchPath)) {
+    watch(configWatchPath, () => {
+      if (configDebounce) clearTimeout(configDebounce);
+      configDebounce = setTimeout(() => {
+        try {
+          const raw = readFileSync(configWatchPath, 'utf-8');
+          const updated = JSON.parse(raw) as Record<string, unknown>;
+          // Sync the in-memory config object
+          Object.assign(config, updated);
+          // Broadcast to admin UI so it refreshes agent list
+          const payload = JSON.stringify({ type: 'snapshot', timestamp: new Date().toISOString() });
+          for (const ws of wsClients) {
+            if (ws.readyState === 1) ws.send(payload);
+          }
+          const newAgentCount = Object.keys((config.agents ?? {}) as Record<string, unknown>).length;
+          console.log(`  [ok] Config reloaded (${newAgentCount} agents)`);
+        } catch {
+          // Ignore transient parse errors during partial writes
+        }
+      }, 300);
+    });
+  }
   const channels = (config.channels ?? {}) as Record<string, { enabled?: boolean }>;
 
   // ── Connect channel adapters (Slack, Telegram, Discord) ─────────
