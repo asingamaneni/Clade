@@ -77,6 +77,9 @@ async function runStart(opts: StartOptions): Promise<void> {
     shuttingDown = true;
     console.log(`\n  Received ${signal}. Shutting down gracefully...\n`);
 
+    // Shut down managed Chrome browser
+    shutdownBrowser();
+
     // Allow time for cleanup then force exit
     setTimeout(() => {
       console.log('  Forced shutdown after timeout.');
@@ -223,6 +226,9 @@ const chatCache = new Map<string, AgentChatData>();
 
 /** Track connected channel adapter names (populated after server starts) */
 const activeChannelNames = new Set<string>();
+
+/** Track in-flight claude processes for cancellation, keyed by conversationId */
+const inflightProcesses = new Map<string, AbortController>();
 
 function chatDir(cladeHome: string): string {
   return join(cladeHome, 'data', 'chats');
@@ -433,6 +439,7 @@ function buildMcpConfigForAgent(
   agentId: string,
   cladeHome: string,
   toolPreset: string,
+  browserConfig?: { enabled?: boolean; userDataDir?: string; browser?: string; cdpEndpoint?: string; headless?: boolean },
 ): string | undefined {
   // Determine which MCP servers this preset needs
   const MCP_SERVERS_BY_PRESET: Record<string, string[]> = {
@@ -458,6 +465,7 @@ function buildMcpConfigForAgent(
       env: {
         CLADE_AGENT_ID: agentId,
         CLADE_HOME: cladeHome,
+        ...(process.env['CLADE_IPC_SOCKET'] ? { CLADE_IPC_SOCKET: process.env['CLADE_IPC_SOCKET'] } : {}),
       },
     };
   }
@@ -482,6 +490,28 @@ function buildMcpConfigForAgent(
     } catch { /* skip if unreadable */ }
   }
 
+  // Inject Playwright browser MCP if enabled
+  if (browserConfig?.enabled) {
+    const pwArgs: string[] = ['@playwright/mcp@latest'];
+    const defaultProfileDir = join(cladeHome, 'browser-profile');
+    const userDataDir = browserConfig.userDataDir || defaultProfileDir;
+    mkdirSync(userDataDir, { recursive: true });
+    pwArgs.push('--user-data-dir', userDataDir);
+
+    if (browserConfig.cdpEndpoint) {
+      pwArgs.push('--cdp-endpoint', browserConfig.cdpEndpoint);
+    } else {
+      if (browserConfig.browser && browserConfig.browser !== 'chromium') {
+        pwArgs.push('--browser', browserConfig.browser);
+      }
+      if (browserConfig.headless) {
+        pwArgs.push('--headless');
+      }
+    }
+
+    mcpServers['playwright'] = { command: 'npx', args: pwArgs };
+  }
+
   // Write to temp file
   const tmpDir = join(tmpdir(), 'clade-mcp');
   mkdirSync(tmpDir, { recursive: true });
@@ -497,6 +527,121 @@ function cleanupMcpConfig(path: string | undefined): void {
 }
 
 // ---------------------------------------------------------------------------
+// CDP browser management — shared Chrome instance for all agents
+// ---------------------------------------------------------------------------
+
+/** The CDP WebSocket endpoint URL, set after Chrome is launched */
+let cdpEndpointUrl: string | undefined;
+
+/** The Chrome child process, tracked for cleanup on shutdown */
+let chromeProcess: ReturnType<typeof spawn> | undefined;
+
+/**
+ * Launch Chrome with remote debugging enabled so agents can connect via CDP.
+ * Uses the user's actual Chrome profile for logged-in state.
+ * Returns the WebSocket debugger URL.
+ */
+async function launchBrowserForAgents(
+  browserConfig: { enabled?: boolean; userDataDir?: string; browser?: string; cdpEndpoint?: string; headless?: boolean },
+  cladeHome: string,
+): Promise<string | undefined> {
+  if (!browserConfig.enabled) return undefined;
+
+  // If user provided an explicit CDP endpoint, use it directly
+  if (browserConfig.cdpEndpoint) {
+    cdpEndpointUrl = browserConfig.cdpEndpoint;
+    console.log(`  [ok] Using existing CDP endpoint: ${browserConfig.cdpEndpoint}`);
+    return browserConfig.cdpEndpoint;
+  }
+
+  const debugPort = 9222;
+
+  // Check if Chrome already has debugging enabled on this port
+  try {
+    const resp = await fetch(`http://localhost:${debugPort}/json/version`);
+    if (resp.ok) {
+      const data = await resp.json() as { webSocketDebuggerUrl?: string };
+      if (data.webSocketDebuggerUrl) {
+        cdpEndpointUrl = data.webSocketDebuggerUrl;
+        console.log(`  [ok] Connected to existing Chrome debug session on port ${debugPort}`);
+        return cdpEndpointUrl;
+      }
+    }
+  } catch {
+    // No Chrome with debugging running — we'll launch one
+  }
+
+  // Determine Chrome binary path
+  const chromePaths = [
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+  ];
+  const chromeBin = chromePaths.find(p => existsSync(p));
+  if (!chromeBin) {
+    console.error('  [!!] Chrome not found — browser tools will not be available');
+    return undefined;
+  }
+
+  // Use a dedicated Clade browser profile — separate from the user's personal
+  // Chrome so both can run simultaneously. Logins persist across agent sessions.
+  const defaultProfileDir = join(cladeHome, 'browser-profile');
+  const userDataDir = browserConfig.userDataDir || defaultProfileDir;
+  mkdirSync(userDataDir, { recursive: true });
+
+  // Remove stale SingletonLock if present (left over from a crash/kill)
+  const lockFile = join(userDataDir, 'SingletonLock');
+  try { unlinkSync(lockFile); } catch { /* doesn't exist */ }
+
+  // Launch Chrome with remote debugging
+  const chromeArgs = [
+    `--remote-debugging-port=${debugPort}`,
+    `--user-data-dir=${userDataDir}`,
+    '--no-first-run',
+    '--no-default-browser-check',
+  ];
+  if (browserConfig.headless) {
+    chromeArgs.push('--headless=new');
+  }
+
+  chromeProcess = spawn(chromeBin, chromeArgs, {
+    stdio: 'ignore',
+    detached: true,
+  });
+  chromeProcess.unref();
+
+  // Wait for CDP endpoint to become available (up to 10s)
+  for (let i = 0; i < 20; i++) {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    try {
+      const resp = await fetch(`http://localhost:${debugPort}/json/version`);
+      if (resp.ok) {
+        const data = await resp.json() as { webSocketDebuggerUrl?: string };
+        if (data.webSocketDebuggerUrl) {
+          cdpEndpointUrl = data.webSocketDebuggerUrl;
+          console.log(`  [ok] Chrome launched with CDP on port ${debugPort} (profile: ${userDataDir})`);
+          return cdpEndpointUrl;
+        }
+      }
+    } catch {
+      // Keep waiting
+    }
+  }
+
+  console.error('  [!!] Chrome launched but CDP endpoint not available — browser tools may not work');
+  return undefined;
+}
+
+/** Shut down the managed Chrome process */
+function shutdownBrowser(): void {
+  if (chromeProcess) {
+    try { chromeProcess.kill(); } catch { /* best effort */ }
+    chromeProcess = undefined;
+  }
+  cdpEndpointUrl = undefined;
+}
+
+// ---------------------------------------------------------------------------
 // askClaude — spawn claude CLI with full MCP + memory context
 // ---------------------------------------------------------------------------
 
@@ -509,7 +654,9 @@ function askClaude(
   agentId?: string,
   cladeHome?: string,
   toolPreset?: string,
-): Promise<{ text: string; sessionId?: string }> {
+  browserConfig?: { enabled?: boolean; userDataDir?: string; browser?: string; cdpEndpoint?: string; headless?: boolean },
+  signal?: AbortSignal,
+): Promise<{ text: string; sessionId?: string; cancelled?: boolean }> {
   const home = cladeHome || process.env['CLADE_HOME'] || join(homedir(), '.clade');
   return new Promise((resolve) => {
     const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose', '--add-dir', '/', '--permission-mode', 'bypassPermissions'];
@@ -566,8 +713,8 @@ function askClaude(
 
     // Build and pass MCP config so agent has access to memory/skills/sessions tools
     const mcpConfigPath = (agentId && toolPreset)
-      ? buildMcpConfigForAgent(agentId, home, toolPreset)
-      : buildMcpConfigForAgent(agentId || 'default', home, 'coding');
+      ? buildMcpConfigForAgent(agentId, home, toolPreset, browserConfig)
+      : buildMcpConfigForAgent(agentId || 'default', home, 'coding', browserConfig);
 
     if (mcpConfigPath) {
       args.push('--mcp-config', mcpConfigPath);
@@ -580,6 +727,12 @@ function askClaude(
       args.push('--allowedTools', allowedTools.join(','));
     }
 
+    // Check if already aborted before spawning
+    if (signal?.aborted) {
+      cleanupMcpConfig(mcpConfigPath);
+      return resolve({ text: '', cancelled: true });
+    }
+
     let stdout = '';
     let stderr = '';
     const child = spawn('claude', args, {
@@ -588,10 +741,30 @@ function askClaude(
       env: { ...process.env },
     });
 
+    // Wire up abort signal to kill the child process
+    let aborted = false;
+    const onAbort = () => {
+      aborted = true;
+      try { child.kill('SIGTERM'); } catch { /* already exited */ }
+    };
+    if (signal) {
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+
     child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
     child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
 
     child.on('close', (code) => {
+      // Clean up abort listener
+      if (signal) {
+        signal.removeEventListener('abort', onAbort);
+      }
+
+      // If aborted, return cancellation result
+      if (aborted) {
+        cleanupMcpConfig(mcpConfigPath);
+        return resolve({ text: '', cancelled: true });
+      }
       // Parse stream-json output regardless of exit code — tool-heavy
       // sessions may time out or miss the final result event (known CLI
       // bug) but still produce valid assistant messages in stdout.
@@ -663,10 +836,17 @@ function askClaude(
     });
 
     child.on('error', () => {
+      if (signal) {
+        signal.removeEventListener('abort', onAbort);
+      }
       cleanupMcpConfig(mcpConfigPath);
-      resolve({
-        text: 'The `claude` CLI is not installed or not in PATH. Install it to enable agent responses.',
-      });
+      if (aborted) {
+        resolve({ text: '', cancelled: true });
+      } else {
+        resolve({
+          text: 'The `claude` CLI is not installed or not in PATH. Install it to enable agent responses.',
+        });
+      }
     });
   });
 }
@@ -707,6 +887,20 @@ async function startPlaceholderServer(
       socket.on('message', async (raw: Buffer | string) => {
         try {
           const msg = JSON.parse(typeof raw === 'string' ? raw : raw.toString());
+
+          // ── Handle cancel requests ──────────────────────────────
+          if (msg.type === 'cancel' && msg.conversationId) {
+            const controller = inflightProcesses.get(msg.conversationId);
+            if (controller) {
+              controller.abort();
+              inflightProcesses.delete(msg.conversationId);
+              socket.send(JSON.stringify({ type: 'cancelled', conversationId: msg.conversationId }));
+            } else {
+              socket.send(JSON.stringify({ type: 'error', text: 'No active request for this conversation' }));
+            }
+            return;
+          }
+
           if (msg.type === 'message' && msg.agentId && msg.text) {
             const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
             const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
@@ -788,21 +982,45 @@ async function startPlaceholderServer(
             const soulPath = join(cladeHome, 'agents', msg.agentId, 'SOUL.md');
             const agentCfg = agents[msg.agentId] ?? {};
             const toolPreset = (agentCfg.toolPreset as string) || 'coding';
-            const result = await askClaude(promptText, soulPath, agentContext, conversationId, msg.agentId, cladeHome, toolPreset);
-            const responseText = result.text;
+            const browserCfg = { ...(config.browser ?? {}) } as { enabled?: boolean; userDataDir?: string; browser?: string; cdpEndpoint?: string; headless?: boolean };
+            if (cdpEndpointUrl) browserCfg.cdpEndpoint = cdpEndpointUrl;
 
-            // Save assistant message
-            const assistantMsg: ChatMessage = {
-              id: 'msg_' + randomUUID().slice(0, 12),
-              agentId: msg.agentId,
-              role: 'assistant',
-              text: responseText,
-              timestamp: new Date().toISOString(),
-            };
-            saveChatMessage(cladeHome, assistantMsg, conversationId);
+            // Cancel any existing in-flight request for this conversation
+            const existingController = inflightProcesses.get(conversationId);
+            if (existingController) {
+              existingController.abort();
+              inflightProcesses.delete(conversationId);
+            }
 
-            // Send response
-            socket.send(JSON.stringify({ type: 'message', message: assistantMsg, conversationId }));
+            // Create AbortController for this request
+            const abortController = new AbortController();
+            inflightProcesses.set(conversationId, abortController);
+
+            try {
+              const result = await askClaude(promptText, soulPath, agentContext, conversationId, msg.agentId, cladeHome, toolPreset, browserCfg, abortController.signal);
+
+              // If cancelled, don't save or send a response
+              if (result.cancelled) {
+                return;
+              }
+
+              const responseText = result.text;
+
+              // Save assistant message
+              const assistantMsg: ChatMessage = {
+                id: 'msg_' + randomUUID().slice(0, 12),
+                agentId: msg.agentId,
+                role: 'assistant',
+                text: responseText,
+                timestamp: new Date().toISOString(),
+              };
+              saveChatMessage(cladeHome, assistantMsg, conversationId);
+
+              // Send response
+              socket.send(JSON.stringify({ type: 'message', message: assistantMsg, conversationId }));
+            } finally {
+              inflightProcesses.delete(conversationId);
+            }
           }
         } catch (err) {
           socket.send(JSON.stringify({
@@ -905,6 +1123,24 @@ async function startPlaceholderServer(
     const data = emptyAgentChatData();
     saveAgentChatData(cladeHome, agentId, data);
     return { success: true };
+  });
+
+  // ── Cancel in-flight request ────────────────────────────────────
+  fastify.post<{ Body: { conversationId: string } }>('/api/chat/cancel', async (req, reply) => {
+    const body = req.body as Record<string, unknown>;
+    const conversationId = body?.conversationId as string;
+    if (!conversationId) {
+      reply.status(400);
+      return { error: 'conversationId is required' };
+    }
+    const controller = inflightProcesses.get(conversationId);
+    if (!controller) {
+      reply.status(404);
+      return { error: 'No active request for this conversation' };
+    }
+    controller.abort();
+    inflightProcesses.delete(conversationId);
+    return { success: true, conversationId };
   });
 
   // ── File uploads endpoint ─────────────────────────────────────
@@ -1420,6 +1656,12 @@ async function startPlaceholderServer(
   const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
   const agentCount = Object.keys(agents).length;
 
+  // ── Launch shared Chrome with CDP for agent browser tools ──────────
+  const browserConfig = (config.browser ?? {}) as { enabled?: boolean; userDataDir?: string; browser?: string; cdpEndpoint?: string; headless?: boolean };
+  if (browserConfig.enabled) {
+    await launchBrowserForAgents(browserConfig, cladeHome);
+  }
+
   // ── Watch agents/ dir for file changes (memory, soul, heartbeat) ──────────
   const agentsWatchDir = join(cladeHome, 'agents');
   let agentsDirDebounce: ReturnType<typeof setTimeout> | null = null;
@@ -1566,7 +1808,19 @@ async function connectChannelAdapters(
 
     console.log(`  [${msg.channel}] ${msg.userId} → ${agentId}: ${msg.text.slice(0, 80)}${msg.text.length > 80 ? '...' : ''}`);
 
+    // Cancel any existing in-flight request for this session
+    const existingController = inflightProcesses.get(sessionKey);
+    if (existingController) {
+      existingController.abort();
+      inflightProcesses.delete(sessionKey);
+    }
+
+    const abortController = new AbortController();
+    inflightProcesses.set(sessionKey, abortController);
+
     try {
+      const browserCfg = { ...(config.browser ?? {}) } as { enabled?: boolean; userDataDir?: string; browser?: string; cdpEndpoint?: string; headless?: boolean };
+      if (cdpEndpointUrl) browserCfg.cdpEndpoint = cdpEndpointUrl;
       const result = await askClaude(
         strippedText,
         soulPath,
@@ -1575,7 +1829,14 @@ async function connectChannelAdapters(
         agentId,
         cladeHome,
         toolPreset,
+        browserCfg,
+        abortController.signal,
       );
+
+      // If cancelled, don't send a response
+      if (result.cancelled) {
+        return;
+      }
 
       await adapter.sendMessage(replyTo, result.text, { threadId: msg.threadId });
       console.log(`  [${msg.channel}] ${agentId} → ${msg.userId}: ${result.text.slice(0, 80)}${result.text.length > 80 ? '...' : ''}`);
@@ -1585,6 +1846,8 @@ async function connectChannelAdapters(
       try {
         await adapter.sendMessage(replyTo, 'Sorry, I encountered an error processing your message.', { threadId: msg.threadId });
       } catch { /* best effort */ }
+    } finally {
+      inflightProcesses.delete(sessionKey);
     }
   };
 

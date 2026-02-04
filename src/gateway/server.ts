@@ -17,6 +17,7 @@ import type { SessionManager } from '../engine/manager.js';
 import type { Store } from '../store/sqlite.js';
 import type { AgentRegistry } from '../agents/registry.js';
 import type { ChannelAdapter } from '../channels/base.js';
+import { createIpcServer, type IpcServer } from './ipc.js';
 
 const log = createLogger('gateway');
 
@@ -353,6 +354,30 @@ export async function createGateway(deps: GatewayDeps) {
       }
     },
   );
+
+  // ── Start IPC server for MCP subprocess communication ──────
+  let ipcServer: IpcServer | undefined;
+  try {
+    ipcServer = await createIpcServer({
+      sessionManager: deps.sessionManager,
+      agentRegistry: deps.agentRegistry,
+      store: deps.store,
+      channels: deps.channels,
+    });
+    process.env['CLADE_IPC_SOCKET'] = ipcServer.socketPath;
+    log.info('IPC server started', { socketPath: ipcServer.socketPath });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.warn('Failed to start IPC server — agent delegation will be unavailable', { error: msg });
+  }
+
+  // Attach IPC server for cleanup on gateway close
+  app.addHook('onClose', async () => {
+    if (ipcServer) {
+      await ipcServer.close();
+      log.info('IPC server closed');
+    }
+  });
 
   return app;
 }

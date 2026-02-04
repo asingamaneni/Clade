@@ -358,6 +358,7 @@ export class SessionManager {
         env: {
           CLADE_AGENT_ID: agentId,
           CLADE_HOME: homeDir,
+          ...(process.env['CLADE_IPC_SOCKET'] ? { CLADE_IPC_SOCKET: process.env['CLADE_IPC_SOCKET'] } : {}),
         },
       };
     }
