@@ -153,4 +153,5 @@ export type {
   RoutingRule,
   RoutingConfig,
   SkillsConfig,
+  BrowserConfig,
 } from './schema.js';
