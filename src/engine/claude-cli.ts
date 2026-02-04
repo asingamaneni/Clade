@@ -13,6 +13,7 @@ export interface ClaudeOptions {
   workingDirectory?: string;
   verbose?: boolean;
   timeout?: number;
+  permissionMode?: 'default' | 'bypassPermissions';
 }
 
 export interface ClaudeResult {
@@ -99,15 +100,23 @@ export class ClaudeCliRunner extends EventEmitter {
         return;
       }
 
+      // Close stdin immediately — we pass the prompt via -p flag, not stdin.
+      // Leaving stdin open as a pipe can cause claude CLI to hang waiting.
+      proc.stdin?.end();
+
       let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      let settled = false;
       if (options.timeout && options.timeout > 0) {
         timeoutId = setTimeout(() => {
           proc.kill('SIGTERM');
           const timeoutErr = new Error(
             `claude process timed out after ${options.timeout}ms`,
           );
-          this.emit('error', timeoutErr);
-          reject(timeoutErr);
+          if (!settled) {
+            settled = true;
+            this.emit('error', timeoutErr);
+            reject(timeoutErr);
+          }
         }, options.timeout);
       }
 
@@ -197,6 +206,8 @@ export class ClaudeCliRunner extends EventEmitter {
 
       proc.on('error', (err: Error) => {
         if (timeoutId !== undefined) clearTimeout(timeoutId);
+        if (settled) return;
+        settled = true;
 
         if (
           'code' in err &&
@@ -226,6 +237,7 @@ export class ClaudeCliRunner extends EventEmitter {
 
       proc.on('close', (code: number | null) => {
         if (timeoutId !== undefined) clearTimeout(timeoutId);
+        if (settled) return;
 
         // Process any remaining buffer content
         if (buffer.trim()) {
@@ -274,7 +286,7 @@ export class ClaudeCliRunner extends EventEmitter {
   }
 
   private buildArgs(options: ClaudeOptions): string[] {
-    const args = ['-p', options.prompt, '--output-format', 'stream-json'];
+    const args = ['-p', options.prompt, '--output-format', 'stream-json', '--verbose'];
 
     if (options.resumeSessionId) {
       args.push('--resume', options.resumeSessionId);
@@ -300,8 +312,8 @@ export class ClaudeCliRunner extends EventEmitter {
       args.push('--model', options.model);
     }
 
-    if (options.verbose) {
-      args.push('--verbose');
+    if (options.permissionMode) {
+      args.push('--permission-mode', options.permissionMode);
     }
 
     return args;
@@ -313,5 +325,9 @@ export class ClaudeCliRunner extends EventEmitter {
  */
 export async function runClaude(options: ClaudeOptions): Promise<ClaudeResult> {
   const runner = new ClaudeCliRunner();
+  // Attach a no-op error listener to prevent unhandled 'error' events from
+  // crashing the process. The error is still propagated via the rejected
+  // promise returned by runner.run().
+  runner.on('error', () => {});
   return runner.run(options);
 }

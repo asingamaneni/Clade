@@ -381,11 +381,15 @@ export async function runReflectionCycle(
     // 3. Build the reflection prompt
     const prompt = buildReflectionPrompt(agentId);
 
-    // 4. Run Claude — single-turn, no MCP tools, no resume
+    // 4. Run Claude — single-turn, no MCP tools, no resume.
+    //    Uses sonnet for a good balance of speed and quality.
+    //    maxTurns=1 ensures a single response without tool-use loops.
     const result = await runClaude({
       prompt,
       maxTurns: 1,
+      model: 'sonnet',
       timeout: 120_000,
+      permissionMode: 'bypassPermissions',
     });
 
     // 5. Apply the reflection output
