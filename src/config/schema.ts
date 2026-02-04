@@ -213,6 +213,56 @@ export const SkillsConfigSchema = z.object({
 export type SkillsConfig = z.infer<typeof SkillsConfigSchema>;
 
 // ---------------------------------------------------------------------------
+// Browser / Playwright MCP configuration
+// ---------------------------------------------------------------------------
+
+export const BrowserConfigSchema = z.object({
+  /**
+   * Whether to inject a Playwright MCP server into agent sessions.
+   * When enabled, agents get browser automation with a persistent profile.
+   */
+  enabled: z.boolean().default(false),
+
+  /**
+   * Persistent profile directory for browser state (cookies, localStorage,
+   * logins). Reused across sessions so logged-in state survives restarts.
+   * Defaults to ~/.clade/browser-profile.
+   */
+  userDataDir: z.string().optional(),
+
+  /**
+   * Which browser to use.
+   *  - "chromium": Playwright's bundled Chromium (default, always available)
+   *  - "chrome": System-installed Google Chrome (shares update channel, not profile)
+   *  - "msedge": System-installed Microsoft Edge
+   *  - "firefox": System-installed Firefox
+   */
+  browser: z
+    .enum(['chromium', 'chrome', 'msedge', 'firefox'])
+    .default('chromium'),
+
+  /**
+   * If set, Playwright MCP will connect to an already-running browser via
+   * Chrome DevTools Protocol instead of launching a new instance.
+   * This keeps the browser open across sessions.
+   *
+   * Example: "ws://127.0.0.1:9222"
+   *
+   * To use this, launch Chrome manually first:
+   *   google-chrome --remote-debugging-port=9222
+   */
+  cdpEndpoint: z.string().optional(),
+
+  /**
+   * Run in headless mode (no visible browser window).
+   * Default false — browser is visible so the user can see what's happening.
+   */
+  headless: z.boolean().default(false),
+});
+
+export type BrowserConfig = z.infer<typeof BrowserConfigSchema>;
+
+// ---------------------------------------------------------------------------
 // Root configuration schema
 // ---------------------------------------------------------------------------
 
@@ -232,6 +282,9 @@ export const ConfigSchema = z.object({
   routing: RoutingConfigSchema.default({}),
 
   skills: SkillsConfigSchema.default({}),
+
+  /** Browser automation configuration (Playwright MCP). */
+  browser: BrowserConfigSchema.default({}),
 }).passthrough();
 
 export type Config = z.infer<typeof ConfigSchema>;

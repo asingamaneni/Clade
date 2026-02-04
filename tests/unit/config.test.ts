@@ -209,6 +209,56 @@ describe('Config Load/Save Round-trip', () => {
   });
 });
 
+describe('Browser Config', () => {
+  it('should default to disabled', () => {
+    const config = ConfigSchema.parse({});
+    expect(config.browser).toBeDefined();
+    expect(config.browser.enabled).toBe(false);
+  });
+
+  it('should accept fully specified browser config', () => {
+    const config = ConfigSchema.parse({
+      browser: {
+        enabled: true,
+        userDataDir: '/custom/profile',
+        browser: 'chrome',
+        headless: false,
+      },
+    });
+    expect(config.browser.enabled).toBe(true);
+    expect(config.browser.userDataDir).toBe('/custom/profile');
+    expect(config.browser.browser).toBe('chrome');
+    expect(config.browser.headless).toBe(false);
+  });
+
+  it('should accept cdpEndpoint for persistent browser', () => {
+    const config = ConfigSchema.parse({
+      browser: {
+        enabled: true,
+        cdpEndpoint: 'ws://127.0.0.1:9222',
+      },
+    });
+    expect(config.browser.cdpEndpoint).toBe('ws://127.0.0.1:9222');
+  });
+
+  it('should reject invalid browser type', () => {
+    const result = ConfigSchema.safeParse({
+      browser: { enabled: true, browser: 'safari' },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('should apply browser defaults', () => {
+    const config = ConfigSchema.parse({
+      browser: { enabled: true },
+    });
+    expect(config.browser.browser).toBe('chromium');
+    expect(config.browser.headless).toBe(false);
+    expect(config.browser.cdpEndpoint).toBeUndefined();
+    expect(config.browser.userDataDir).toBeUndefined();
+  });
+});
+
 describe('Default Config Generation', () => {
   it('should generate a complete default config', () => {
     const config = generateDefaultConfig();
@@ -217,6 +267,7 @@ describe('Default Config Generation', () => {
     expect(config.gateway).toBeDefined();
     expect(config.routing).toBeDefined();
     expect(config.skills).toBeDefined();
+    expect(config.browser).toBeDefined();
   });
 
   it('should have a default SOUL template', () => {

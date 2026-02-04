@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -12,7 +12,7 @@ import { SessionNotFoundError, AgentNotFoundError } from '../utils/errors.js';
 import type { ClaudeOptions, ClaudeResult } from './claude-cli.js';
 import type { Store, SessionRow } from '../store/sqlite.js';
 import type { AgentRegistry } from '../agents/registry.js';
-import type { Config, AgentConfig } from '../config/schema.js';
+import type { Config, AgentConfig, BrowserConfig } from '../config/schema.js';
 
 // ---------------------------------------------------------------------------
 // Logging
@@ -387,6 +387,9 @@ export class SessionManager {
       }
     }
 
+    // Add Playwright browser MCP if enabled in global config
+    this.injectBrowserMcp(mcpConfig, this.config.browser);
+
     // Write to a temp file
     const tmpDir = join(tmpdir(), 'clade-mcp');
     mkdirSync(tmpDir, { recursive: true });
@@ -394,6 +397,57 @@ export class SessionManager {
     writeFileSync(tmpPath, JSON.stringify(mcpConfig, null, 2), 'utf-8');
 
     return tmpPath;
+  }
+
+  /**
+   * Inject a Playwright MCP server entry into the config when browser
+   * automation is enabled.
+   *
+   * Uses a persistent user-data-dir so that cookies, logins, and
+   * localStorage survive across sessions.  Optionally connects to an
+   * already-running browser via CDP to avoid the open/close cycle.
+   */
+  private injectBrowserMcp(
+    mcpConfig: McpConfig,
+    browserCfg: BrowserConfig | undefined,
+  ): void {
+    if (!browserCfg?.enabled) return;
+
+    const args: string[] = ['@playwright/mcp@latest'];
+
+    // Persistent profile directory — keeps logged-in state across sessions
+    const defaultProfileDir = join(
+      process.env['CLADE_HOME'] || join(homedir(), '.clade'),
+      'browser-profile',
+    );
+    const userDataDir = browserCfg.userDataDir || defaultProfileDir;
+    mkdirSync(userDataDir, { recursive: true });
+    args.push('--user-data-dir', userDataDir);
+
+    // CDP endpoint — connect to an existing browser instead of launching one.
+    // This prevents the browser from closing/reopening on every session.
+    if (browserCfg.cdpEndpoint) {
+      args.push('--cdp-endpoint', browserCfg.cdpEndpoint);
+    } else {
+      // Only set browser channel and headless when launching (not CDP)
+      if (browserCfg.browser && browserCfg.browser !== 'chromium') {
+        args.push('--browser', browserCfg.browser);
+      }
+      if (browserCfg.headless) {
+        args.push('--headless');
+      }
+    }
+
+    mcpConfig.mcpServers['playwright'] = {
+      command: 'npx',
+      args,
+    };
+
+    log.debug('Injected Playwright MCP', {
+      userDataDir,
+      cdpEndpoint: browserCfg.cdpEndpoint ?? 'none (launches browser)',
+      browser: browserCfg.browser,
+    });
   }
 
   /**
