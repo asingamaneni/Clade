@@ -583,7 +583,7 @@ function askClaude(
     let stdout = '';
     let stderr = '';
     const child = spawn('claude', args, {
-      timeout: 120_000,
+      timeout: 300_000,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env },
     });
@@ -592,56 +592,72 @@ function askClaude(
     child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
 
     child.on('close', (code) => {
-      if (code === 0 && stdout.trim()) {
-        // Parse stream-json output to extract text and session ID
-        let resultText = '';
-        let resultSessionId: string | undefined;
+      // Parse stream-json output regardless of exit code — tool-heavy
+      // sessions may time out or miss the final result event (known CLI
+      // bug) but still produce valid assistant messages in stdout.
+      let resultText = '';
+      let lastAssistantText = '';
+      let resultSessionId: string | undefined;
+
+      if (stdout.trim()) {
         const lines = stdout.trim().split('\n');
         for (const line of lines) {
           try {
             const event = JSON.parse(line);
-            if (event.type === 'result' && event.result) {
-              // event.result is a string in claude CLI stream-json format
-              resultText = typeof event.result === 'string'
-                ? event.result
-                : (event.result.text || event.result.content || '');
-              resultSessionId = event.session_id || (typeof event.result === 'object' ? event.result.session_id : undefined);
+            if (event.type === 'result') {
+              // Prefer explicit result text if present
+              if (event.result) {
+                const r = typeof event.result === 'string'
+                  ? event.result
+                  : (event.result.text || event.result.content || '');
+                if (r) resultText = r;
+              }
+              if (event.session_id) resultSessionId = event.session_id;
             } else if (event.type === 'assistant' && event.message?.content) {
-              // Accumulate text from assistant messages
+              // Track the last assistant text block (not cumulative —
+              // only the final turn's text is what the user should see)
+              let turnText = '';
               for (const block of event.message.content) {
                 if (block.type === 'text') {
-                  resultText += block.text;
+                  turnText += block.text;
                 }
               }
+              if (turnText) lastAssistantText = turnText;
             } else if (event.type === 'content_block_delta' && event.delta?.text) {
-              resultText += event.delta.text;
+              lastAssistantText += event.delta.text;
             }
-            // Check for session_id in any event
+            // Capture session_id from any event
             if (event.session_id && !resultSessionId) {
               resultSessionId = event.session_id;
             }
           } catch {
             // Not JSON, might be plain text
             if (!line.startsWith('{')) {
-              resultText += line;
+              lastAssistantText += line;
             }
           }
         }
+      }
 
-        // Store session ID for future resume (persistent to disk)
-        if (conversationId && resultSessionId) {
-          saveSessionMapping(home, conversationId, resultSessionId);
-        }
+      // Use result text if available, otherwise fall back to last
+      // assistant message (covers timeout / missing result event cases)
+      const finalText = resultText.trim() || lastAssistantText.trim();
 
-        cleanupMcpConfig(mcpConfigPath);
-        resolve({
-          text: resultText.trim() || 'I received your message but could not parse the response.',
-          sessionId: resultSessionId,
-        });
+      // Store session ID for future resume (persistent to disk)
+      if (conversationId && resultSessionId) {
+        saveSessionMapping(home, conversationId, resultSessionId);
+      }
+
+      cleanupMcpConfig(mcpConfigPath);
+
+      if (finalText) {
+        resolve({ text: finalText, sessionId: resultSessionId });
+      } else if (code !== 0 && stderr.trim()) {
+        // Only show CLI error if we got no useful output at all
+        resolve({ text: stderr.trim() });
       } else {
-        cleanupMcpConfig(mcpConfigPath);
         resolve({
-          text: stderr.trim() || 'Sorry, I could not generate a response. Is the `claude` CLI installed and authenticated?',
+          text: 'Sorry, I could not generate a response. Is the `claude` CLI installed and authenticated?',
         });
       }
     });
