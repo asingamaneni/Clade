@@ -1959,15 +1959,16 @@ If nothing needs attention, respond with: HEARTBEAT_OK
         const map = {};
         for (const [agentId, convs] of Object.entries(agentConversations)) {
           if (!Array.isArray(convs) || convs.length === 0) continue;
-          // Use the most recent conversation for sidebar preview
-          const latest = convs[0];
+          const activeId = activeConvId[agentId];
+          const active = activeId ? convs.find(c => c.id === activeId) : convs[0];
+          const latest = active || convs[0];
           map[agentId] = {
             messageCount: convs.reduce((sum, c) => sum + (c.messageCount || 0), 0),
             lastMessage: latest?.lastMessage || null,
           };
         }
         return map;
-      }, [agentConversations]);
+      }, [agentConversations, activeConvId]);
 
       return html`
         <div class="page-enter flex h-full">

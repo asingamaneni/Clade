@@ -634,8 +634,10 @@ export function useChat(): UseChatReturn {
       (sum, c) => sum + (c.messageCount || 0),
       0
     )
-    // Use the most recent conversation's last message for the preview
-    const mostRecent = convs.length > 0 ? convs[0] : null
+    // Use the active conversation's last message for the preview
+    const activeId = activeConversationIds[agentId]
+    const active = activeId ? convs.find((c) => c.id === activeId) : convs[0]
+    const mostRecent = active || (convs.length > 0 ? convs[0] : null)
     conversationPreviews[agentId] = {
       messageCount: totalMessages,
       lastMessage: mostRecent?.lastMessage ?? null,
