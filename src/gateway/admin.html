@@ -2468,7 +2468,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
     // ── Identity Tab ─────────────────────────────────────────────────
 
     function IdentityTab({ agentId }) {
-      const [form, setForm] = useState({ name: '', creature: '', vibe: '', emoji: '', avatar: '' });
+      const [form, setForm] = useState({ name: '', creature: '', vibe: '', emoji: '', avatar: '', model: 'sonnet' });
       const [loading, setLoading] = useState(true);
       const [saving, setSaving] = useState(false);
 
@@ -2483,6 +2483,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
               vibe:     a.vibe     || '',
               emoji:    a.emoji    || '',
               avatar:   a.avatar   || '',
+              model:    a.model    || 'sonnet',
             });
           })
           .catch(e => showToast('Failed to load identity: ' + e.message, 'error'))
@@ -2518,6 +2519,14 @@ If nothing needs attention, respond with: HEARTBEAT_OK
               <input type="text" value=${form[f.key]} onInput=${e => upd(f.key, e.target.value)} placeholder=${f.ph} />
             </div>
           `)}
+          <div>
+            <label class="block text-xs font-medium mb-1.5" style="color:#8b949e">Model</label>
+            <select value=${form.model} onChange=${e => upd('model', e.target.value)}>
+              <option value="sonnet">Sonnet</option>
+              <option value="opus">Opus</option>
+              <option value="haiku">Haiku</option>
+            </select>
+          </div>
           <div class="flex justify-end pt-2">
             <button class="btn btn-primary" onClick=${save} disabled=${saving}>
               ${saving ? 'Saving...' : 'Save Identity'}
