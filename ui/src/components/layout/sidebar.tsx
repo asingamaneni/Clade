@@ -5,7 +5,7 @@ import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   LayoutDashboard, MessageSquare, Bot, FolderOpen, Puzzle,
-  Radio, Clock, Settings, ChevronRight
+  Radio, Clock, Settings, ChevronRight, User
 } from "lucide-react"
 
 interface Agent {
@@ -28,6 +28,7 @@ const NAV_ITEMS = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'chat', label: 'Chat', icon: MessageSquare },
   { id: 'agents', label: 'Agents', icon: Bot },
+  { id: 'user', label: 'User Profile', icon: User },
   { id: 'sessions', label: 'Sessions', icon: FolderOpen },
   { id: 'skills', label: 'Skills', icon: Puzzle },
   { id: 'channels', label: 'Channels', icon: Radio },

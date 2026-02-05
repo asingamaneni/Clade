@@ -7,6 +7,7 @@ import { ClaudeCliRunner } from './claude-cli.js';
 import { buildSessionKey } from './session.js';
 import { getConfigDir } from '../config/index.js';
 import { resolveAllowedTools } from '../agents/presets.js';
+import { runReflectionCycle } from '../agents/reflection.js';
 import { createLogger } from '../utils/logger.js';
 import { SessionNotFoundError, AgentNotFoundError } from '../utils/errors.js';
 import type { ClaudeOptions, ClaudeResult } from './claude-cli.js';
@@ -168,6 +169,9 @@ export class SessionManager {
       // 6. Clean up temp MCP config
       this.cleanupMcpConfig(mcpConfigPath);
 
+      // 7. Fire reflection cycle in background (non-blocking)
+      this.tryReflection(agentId);
+
       return result;
     });
   }
@@ -222,6 +226,9 @@ export class SessionManager {
       this.store.touchSession(sessionId);
       this.cleanupMcpConfig(mcpConfigPath);
 
+      // Fire reflection cycle in background (non-blocking)
+      this.tryReflection(session.agent_id);
+
       return result;
     });
   }
@@ -237,6 +244,28 @@ export class SessionManager {
   // -------------------------------------------------------------------------
   // Private helpers
   // -------------------------------------------------------------------------
+
+  /**
+   * Fire a background reflection cycle for an agent if reflection is enabled.
+   * Never awaited — runs asynchronously and logs errors without propagating.
+   */
+  private tryReflection(agentId: string): void {
+    const agent = this.registry.tryGet(agentId);
+    if (!agent) return;
+
+    // Check agent config for reflection.enabled (default true)
+    const reflectionCfg = (agent.config as Record<string, unknown>).reflection as
+      | { enabled?: boolean }
+      | undefined;
+    if (reflectionCfg?.enabled === false) return;
+
+    runReflectionCycle(agentId).catch((err) => {
+      log.warn('Reflection cycle failed', {
+        agentId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
 
   /**
    * Build a combined system prompt: SOUL.md content + MEMORY.md + today's

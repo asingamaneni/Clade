@@ -45,6 +45,20 @@ export function getSkillsDir(): string {
   return join(getConfigDir(), 'skills');
 }
 
+/**
+ * Path to the global USER.md file.
+ */
+export function getUserMdPath(): string {
+  return join(getConfigDir(), 'USER.md');
+}
+
+/**
+ * Directory for USER.md version history.
+ */
+export function getUserHistoryDir(): string {
+  return join(getConfigDir(), 'user-history');
+}
+
 // ---------------------------------------------------------------------------
 // Environment variable expansion
 // ---------------------------------------------------------------------------
@@ -135,6 +149,7 @@ export function ensureDirectories(): void {
     getSkillsDir(),
     join(getSkillsDir(), 'pending'),
     join(getSkillsDir(), 'active'),
+    getUserHistoryDir(),
   ];
   for (const dir of dirs) {
     mkdirSync(dir, { recursive: true });

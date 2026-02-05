@@ -13,7 +13,8 @@ import { SkillsPage } from '@/pages/skills'
 import { ChannelsPage } from '@/pages/channels'
 import { CronPage } from '@/pages/cron'
 import { ConfigPage } from '@/pages/config'
-import { WelcomePage } from '@/pages/welcome'
+import { UserProfilePage } from '@/pages/user'
+import { WelcomePage, OnboardingPage } from '@/pages/welcome'
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -113,6 +114,7 @@ function ToastContainer() {
 export default function App() {
   const [page, setPage] = useState('dashboard')
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false)
   const [connected, setConnected] = useState(false)
   const [health, setHealth] = useState<any>(null)
   const [agents, setAgents] = useState<Agent[]>([])
@@ -120,6 +122,7 @@ export default function App() {
   const [skills, setSkills] = useState<Skill[]>([])
   const [cronJobs, setCronJobs] = useState<CronJob[]>([])
   const [channels, setChannels] = useState<Channel[]>([])
+  const [initialLoaded, setInitialLoaded] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
 
   // ── Fetch helpers ──────────────────────────────────────────
@@ -204,7 +207,7 @@ export default function App() {
   }, [fetchAll, fetchAgents, fetchSessions, fetchSkills, fetchCron, fetchChannels])
 
   // ── Initial load ───────────────────────────────────────────
-  useEffect(() => { fetchAll() }, [])
+  useEffect(() => { fetchAll().finally(() => setInitialLoaded(true)) }, [])
 
   // ── Periodic health refresh ────────────────────────────────
   useEffect(() => {
@@ -220,9 +223,20 @@ export default function App() {
 
   // ── Page renderer ──────────────────────────────────────────
   const renderPage = () => {
-    // Show welcome when no agents exist
+    // Don't render any page until we know if agents exist
+    if (!initialLoaded) return null
+
+    // Show welcome/onboarding when no agents exist
     if (agents.length === 0 && (page === 'dashboard' || page === 'agents')) {
-      return <WelcomePage onCreated={fetchAll} />
+      if (showTemplatePicker) {
+        return <WelcomePage onCreated={fetchAll} />
+      }
+      return (
+        <OnboardingPage
+          onCreated={() => { fetchAll().then(() => setPage('chat')) }}
+          onPickTemplate={() => setShowTemplatePicker(true)}
+        />
+      )
     }
 
     switch (page) {
@@ -247,6 +261,8 @@ export default function App() {
             onAgentDeleted={() => { setSelectedAgentId(null); fetchAll() }}
           />
         )
+      case 'user':
+        return <UserProfilePage />
       case 'sessions':
         return <SessionsPage sessions={sessions} onRefresh={fetchSessions} />
       case 'skills':

@@ -7,7 +7,9 @@ import { randomUUID } from 'node:crypto';
 import type { Command } from 'commander';
 import { listTemplates, getTemplate, configFromTemplate } from '../../agents/templates.js';
 import { resolveAllowedTools } from '../../agents/presets.js';
-import { DEFAULT_SOUL, DEFAULT_HEARTBEAT } from '../../config/defaults.js';
+import { DEFAULT_SOUL, DEFAULT_HEARTBEAT, DEFAULT_USER_MD, DEFAULT_TOOLS_MD } from '../../config/defaults.js';
+import { runReflectionCycle } from '../../agents/reflection.js';
+import { saveVersion, getVersionHistory, getVersionContent } from '../../agents/versioning.js';
 
 interface StartOptions {
   port?: string;
@@ -1018,6 +1020,14 @@ async function startPlaceholderServer(
 
               // Send response
               socket.send(JSON.stringify({ type: 'message', message: assistantMsg, conversationId }));
+
+              // Fire reflection cycle in background (non-blocking)
+              if (msg.agentId) {
+                const reflCfg = (agentCfg.reflection ?? {}) as { enabled?: boolean };
+                if (reflCfg.enabled !== false) {
+                  runReflectionCycle(msg.agentId).catch(() => {});
+                }
+              }
             } finally {
               inflightProcesses.delete(conversationId);
             }
@@ -1286,6 +1296,80 @@ async function startPlaceholderServer(
     const hbPath = join(cladeHome, 'agents', id, 'HEARTBEAT.md');
     writeFileSync(hbPath, content, 'utf-8');
     return { success: true };
+  });
+
+  // ── Get reflection status ───────────────────────────────────
+  fastify.get<{ Params: { id: string } }>('/api/agents/:id/reflection', async (req, reply) => {
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const { id } = req.params;
+    if (!agents[id]) {
+      reply.status(404);
+      return { error: `Agent "${id}" not found` };
+    }
+    try {
+      const { getReflectionStatus: getStatus } = await import('../../agents/reflection.js');
+      const status = getStatus(id);
+      return { agentId: id, ...status };
+    } catch {
+      return { agentId: id, sessionsSinceReflection: 0, lastReflection: new Date(0).toISOString(), reflectionInterval: 10, enabled: true };
+    }
+  });
+
+  // ── Trigger reflection manually ─────────────────────────────
+  fastify.post<{ Params: { id: string } }>('/api/agents/:id/reflection', async (req, reply) => {
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const { id } = req.params;
+    if (!agents[id]) {
+      reply.status(404);
+      return { error: `Agent "${id}" not found` };
+    }
+    try {
+      const result = await runReflectionCycle(id, true);
+      return { triggered: true, result };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Reflection cycle failed';
+      reply.status(500);
+      return { error: message };
+    }
+  });
+
+  // ── Get reflection history ──────────────────────────────────
+  fastify.get<{ Params: { id: string } }>('/api/agents/:id/reflection/history', async (req, reply) => {
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const { id } = req.params;
+    if (!agents[id]) {
+      reply.status(404);
+      return { error: `Agent "${id}" not found` };
+    }
+    try {
+      const { getReflectionHistory: getHistory } = await import('../../agents/reflection.js');
+      const entries = getHistory(id);
+      return { agentId: id, entries };
+    } catch {
+      return { agentId: id, entries: [] };
+    }
+  });
+
+  // ── Get specific reflection history entry ─────────────────
+  fastify.get<{ Params: { id: string; date: string } }>('/api/agents/:id/reflection/history/:date', async (req, reply) => {
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const { id, date } = req.params;
+    if (!agents[id]) {
+      reply.status(404);
+      return { error: `Agent "${id}" not found` };
+    }
+    try {
+      const { getReflectionHistoryEntry: getEntry } = await import('../../agents/reflection.js');
+      const content = getEntry(id, date);
+      if (content === null) {
+        reply.status(404);
+        return { error: `No history entry for date "${date}"` };
+      }
+      return { agentId: id, date, content };
+    } catch {
+      reply.status(500);
+      return { error: 'Failed to read history entry' };
+    }
   });
 
   // ── List agent memory files ─────────────────────────────────
@@ -1597,14 +1681,16 @@ async function startPlaceholderServer(
     const agentDir = join(cladeHome, 'agents', agentName);
     mkdirSync(join(agentDir, 'memory'), { recursive: true });
     mkdirSync(join(agentDir, 'soul-history'), { recursive: true });
+    mkdirSync(join(agentDir, 'tools-history'), { recursive: true });
 
-    // Write SOUL.md, MEMORY.md, HEARTBEAT.md
+    // Write SOUL.md, MEMORY.md, HEARTBEAT.md, TOOLS.md
     // Custom agents can provide their own content; templates use seeds; fallback to defaults
     const soulOut = (isCustom && body.soulContent) ? String(body.soulContent) : (template?.soulSeed ?? DEFAULT_SOUL);
     const hbOut = (isCustom && body.heartbeatContent) ? String(body.heartbeatContent) : (template?.heartbeatSeed ?? DEFAULT_HEARTBEAT);
     writeFileSync(join(agentDir, 'SOUL.md'), soulOut, 'utf-8');
     writeFileSync(join(agentDir, 'MEMORY.md'), '# Memory\n\n_Curated knowledge and observations._\n', 'utf-8');
     writeFileSync(join(agentDir, 'HEARTBEAT.md'), hbOut, 'utf-8');
+    writeFileSync(join(agentDir, 'TOOLS.md'), DEFAULT_TOOLS_MD, 'utf-8');
 
     // Update config.json
     agents[agentName] = agentConfig;
@@ -1633,10 +1719,231 @@ async function startPlaceholderServer(
     };
   });
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // USER.md Routes — /api/user (global)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const cladeBase = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+  const userMdPath = join(cladeBase, 'USER.md');
+  const userHistoryDir = join(cladeBase, 'user-history');
+
+  // ── Get USER.md content ─────────────────────────────────────────
+  fastify.get('/api/user', async () => {
+    try {
+      if (!existsSync(userMdPath)) {
+        return { content: DEFAULT_USER_MD };
+      }
+      const content = readFileSync(userMdPath, 'utf-8');
+      return { content };
+    } catch (err) {
+      return { error: 'Failed to read USER.md' };
+    }
+  });
+
+  // ── Update USER.md content ──────────────────────────────────────
+  fastify.put<{ Body: { content: string } }>('/api/user', async (req, reply) => {
+    const body = req.body as Record<string, unknown>;
+    const content = body.content;
+
+    if (typeof content !== 'string') {
+      reply.status(400);
+      return { error: 'content must be a string' };
+    }
+
+    try {
+      // Ensure history directory exists
+      mkdirSync(userHistoryDir, { recursive: true });
+
+      // Save version before updating
+      saveVersion(userMdPath, userHistoryDir);
+
+      // Write the new content
+      writeFileSync(userMdPath, content, 'utf-8');
+      // Broadcast to admin websockets
+      for (const ws of wsClients) {
+        try { ws.send(JSON.stringify({ type: 'user:updated', timestamp: new Date().toISOString() })); } catch {}
+      }
+      return { success: true };
+    } catch (err) {
+      reply.status(500);
+      return { error: 'Failed to update USER.md' };
+    }
+  });
+
+  // ── Get USER.md version history ─────────────────────────────────
+  fastify.get('/api/user/history', async () => {
+    try {
+      const entries = getVersionHistory(userHistoryDir);
+      return { entries };
+    } catch (err) {
+      return { error: 'Failed to get history', entries: [] };
+    }
+  });
+
+  // ── Get specific USER.md version ────────────────────────────────
+  fastify.get<{ Params: { date: string } }>('/api/user/history/:date', async (req, reply) => {
+    const { date } = req.params;
+
+    try {
+      const content = getVersionContent(userHistoryDir, date);
+      if (content === null) {
+        reply.status(404);
+        return { error: `No history entry for date "${date}"` };
+      }
+      return { date, content };
+    } catch (err) {
+      reply.status(500);
+      return { error: 'Failed to read history entry' };
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TOOLS.md Routes — /api/agents/:id/tools-md (per-agent)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // ── Get TOOLS.md content ────────────────────────────────────────
+  fastify.get<{ Params: { id: string } }>('/api/agents/:id/tools-md', async (req, reply) => {
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const { id } = req.params;
+    if (!agents[id]) {
+      reply.status(404);
+      return { error: `Agent "${id}" not found` };
+    }
+
+    const agentDir = join(cladeBase, 'agents', id);
+    const toolsMdPath = join(agentDir, 'TOOLS.md');
+
+    try {
+      if (!existsSync(toolsMdPath)) {
+        return { content: DEFAULT_TOOLS_MD };
+      }
+      const content = readFileSync(toolsMdPath, 'utf-8');
+      return { content };
+    } catch (err) {
+      return { error: 'Failed to read TOOLS.md' };
+    }
+  });
+
+  // ── Update TOOLS.md content ─────────────────────────────────────
+  fastify.put<{ Params: { id: string }; Body: { content: string } }>('/api/agents/:id/tools-md', async (req, reply) => {
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const { id } = req.params;
+    if (!agents[id]) {
+      reply.status(404);
+      return { error: `Agent "${id}" not found` };
+    }
+
+    const body = req.body as Record<string, unknown>;
+    const content = body.content;
+
+    if (typeof content !== 'string') {
+      reply.status(400);
+      return { error: 'content must be a string' };
+    }
+
+    const agentDir = join(cladeBase, 'agents', id);
+    const toolsMdPath = join(agentDir, 'TOOLS.md');
+    const toolsHistoryDir = join(agentDir, 'tools-history');
+
+    try {
+      // Ensure history directory exists
+      mkdirSync(toolsHistoryDir, { recursive: true });
+
+      // Save version before updating
+      saveVersion(toolsMdPath, toolsHistoryDir);
+
+      // Write the new content
+      writeFileSync(toolsMdPath, content, 'utf-8');
+      // Broadcast to admin websockets
+      for (const ws of wsClients) {
+        try { ws.send(JSON.stringify({ type: 'agent:tools-md:updated', agentId: id, timestamp: new Date().toISOString() })); } catch {}
+      }
+      return { success: true };
+    } catch (err) {
+      reply.status(500);
+      return { error: 'Failed to update TOOLS.md' };
+    }
+  });
+
+  // ── Get TOOLS.md version history ────────────────────────────────
+  fastify.get<{ Params: { id: string } }>('/api/agents/:id/tools-md/history', async (req, reply) => {
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const { id } = req.params;
+    if (!agents[id]) {
+      reply.status(404);
+      return { error: `Agent "${id}" not found` };
+    }
+
+    const agentDir = join(cladeBase, 'agents', id);
+    const toolsHistoryDir = join(agentDir, 'tools-history');
+
+    try {
+      const entries = getVersionHistory(toolsHistoryDir);
+      return { entries };
+    } catch (err) {
+      return { error: 'Failed to get history', entries: [] };
+    }
+  });
+
+  // ── Get specific TOOLS.md version ───────────────────────────────
+  fastify.get<{ Params: { id: string; date: string } }>('/api/agents/:id/tools-md/history/:date', async (req, reply) => {
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const { id, date } = req.params;
+    if (!agents[id]) {
+      reply.status(404);
+      return { error: `Agent "${id}" not found` };
+    }
+
+    const agentDir = join(cladeBase, 'agents', id);
+    const toolsHistoryDir = join(agentDir, 'tools-history');
+
+    try {
+      const content = getVersionContent(toolsHistoryDir, date);
+      if (content === null) {
+        reply.status(404);
+        return { error: `No history entry for date "${date}"` };
+      }
+      return { agentId: id, date, content };
+    } catch (err) {
+      reply.status(500);
+      return { error: 'Failed to read history entry' };
+    }
+  });
+
   // ── Admin dashboard ───────────────────────────────────────────
+  // Prefer built React UI from ui/dist/, fall back to legacy admin.html
+  let uiDistDir: string | null = null;
+  try {
+    const thisDir = dirname(fileURLToPath(import.meta.url));
+    const candidates = [
+      join(thisDir, '..', '..', 'ui', 'dist'),       // dist/bin/ → ui/dist/
+      join(thisDir, '..', '..', '..', 'ui', 'dist'),  // src/cli/commands/ → ui/dist/
+    ];
+    for (const c of candidates) {
+      if (existsSync(join(c, 'index.html'))) { uiDistDir = c; break; }
+    }
+  } catch { /* fallback */ }
+
+  if (uiDistDir) {
+    // Serve React UI static assets under /admin/
+    const fastifyStatic = await import('@fastify/static').then(m => m.default).catch(() => null);
+    if (fastifyStatic) {
+      await fastify.register(fastifyStatic, {
+        root: uiDistDir,
+        prefix: '/admin/',
+        decorateReply: false,
+      });
+    }
+  }
+
   const adminHtmlPath = findAdminHtml();
 
   fastify.get('/admin', async (_req, reply) => {
+    // Prefer React UI
+    if (uiDistDir && existsSync(join(uiDistDir, 'index.html'))) {
+      return reply.redirect('/admin/');
+    }
+    // Fall back to legacy admin.html
     if (adminHtmlPath) {
       const html = readFileSync(adminHtmlPath, 'utf-8');
       reply.type('text/html').send(html);
