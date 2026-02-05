@@ -9,6 +9,7 @@ export default defineConfig({
     'mcp/messaging-server': 'src/mcp/messaging/server.ts',
     'mcp/skills-server': 'src/mcp/skills/server.ts',
     'mcp/platform-server': 'src/mcp/platform/server.ts',
+    'mcp/admin-server': 'src/mcp/admin/server.ts',
   },
   format: ['esm'],
   target: 'node20',

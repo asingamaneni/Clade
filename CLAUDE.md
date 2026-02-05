@@ -39,7 +39,8 @@ agents evolving from a common AI foundation, specializing over time.
 - **Platform**: Native OS interaction (notifications, clipboard, screenshots) via platform MCP
 - **Routing**: @mention-based agent routing (`@jarvis do this` routes to jarvis agent)
 - **Chat**: Multi-conversation tabs per agent, auto-migrating from legacy flat format
-- **Tools**: Claude Code's native tools (Read/Edit/Bash/Glob/Grep) + 5 custom MCP servers
+- **Tools**: Claude Code's native tools (Read/Edit/Bash/Glob/Grep) + 6 custom MCP servers
+- **Admin**: Orchestrator agents can autonomously discover, install, and create skills/plugins
 
 ## Tech Stack
 
@@ -64,7 +65,7 @@ src/
 ├── gateway/       # Fastify HTTP + WS server, REST API routes, admin.html
 ├── router/        # Message routing (channel+user → agent session)
 ├── channels/      # Channel adapters (telegram, slack, discord, webchat)
-├── mcp/           # 5 custom MCP servers (memory, sessions, messaging, skills, platform)
+├── mcp/           # 6 custom MCP servers (memory, sessions, messaging, skills, platform, admin)
 ├── cron/          # Heartbeat + cron scheduler
 ├── config/        # Zod config schema, loader, defaults, migrations
 ├── store/         # SQLite persistence layer
@@ -116,6 +117,11 @@ src/
     stored in `~/.clade/data/chats/{agentId}.json` as an `AgentChatData` object containing
     a `conversations` map and `order` array. Old flat `ChatMessage[]` format is auto-migrated
     on first load. Sessions page derives real session data from active conversations.
+
+14. **Admin MCP for orchestrators**: Agents with `admin.enabled: true` get the admin MCP
+    server which provides autonomous skill management: search (local, GitHub, npm, web),
+    install (from any source), create (from scratch or templates), and manage MCP servers
+    and plugins. Orchestrators can discover and install capabilities on demand.
 
 ## Common Tasks
 

@@ -54,6 +54,41 @@ export const HeartbeatConfigSchema = z.object({
 export type HeartbeatConfig = z.infer<typeof HeartbeatConfigSchema>;
 
 // ---------------------------------------------------------------------------
+// Admin permissions configuration
+// ---------------------------------------------------------------------------
+
+export const AdminConfigSchema = z.object({
+  /**
+   * Whether this agent has admin privileges.
+   * Admin agents get the admin MCP server for full skill/plugin management.
+   */
+  enabled: z.boolean().default(false),
+
+  /** Auto-approve skill installations (bypass pending queue). */
+  autoApproveSkills: z.boolean().default(true),
+
+  /** Auto-approve MCP server installations. */
+  autoApproveMcp: z.boolean().default(true),
+
+  /** Auto-approve plugin installations. */
+  autoApprovePlugins: z.boolean().default(true),
+
+  /** Allow creating new skills from scratch. */
+  canCreateSkills: z.boolean().default(true),
+
+  /** Allow publishing skills to registries. */
+  canPublishSkills: z.boolean().default(false),
+
+  /** Allow managing other Clade agents. */
+  canManageAgents: z.boolean().default(true),
+
+  /** Allow modifying system configuration. */
+  canModifyConfig: z.boolean().default(false),
+});
+
+export type AdminConfig = z.infer<typeof AdminConfigSchema>;
+
+// ---------------------------------------------------------------------------
 // Agent configuration
 // ---------------------------------------------------------------------------
 
@@ -107,6 +142,12 @@ export const AgentConfigSchema = z.object({
     /** Digest interval in minutes. */
     digestIntervalMinutes: z.number().int().positive().default(30),
   }).default({}),
+
+  /**
+   * Admin privileges for this agent.
+   * When enabled, the agent gets full access to skill/plugin management.
+   */
+  admin: AdminConfigSchema.default({}),
 });
 
 export type AgentConfig = z.infer<typeof AgentConfigSchema>;

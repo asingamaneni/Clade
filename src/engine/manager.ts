@@ -30,17 +30,19 @@ const BUILTIN_MCP_SERVERS = [
   'sessions',
   'messaging',
   'skills',
+  'admin',
 ] as const;
 
 /**
  * Maps a tool preset to the set of built-in MCP servers that should be
  * attached. Server names here match the keys in the generated mcp-config JSON.
+ * Note: 'admin' is not included by default - it's injected based on agent config.
  */
 const MCP_SERVERS_BY_PRESET: Record<string, readonly string[]> = {
   potato: [],
   coding: ['memory', 'sessions', 'skills'],
   messaging: ['memory', 'sessions', 'messaging', 'skills'],
-  full: BUILTIN_MCP_SERVERS,
+  full: ['memory', 'sessions', 'messaging', 'skills'], // admin added separately if enabled
   custom: [],
 };
 
@@ -374,6 +376,7 @@ export class SessionManager {
       sessions: join(distDir, 'mcp', 'sessions-server.js'),
       messaging: join(distDir, 'mcp', 'messaging-server.js'),
       skills: join(distDir, 'mcp', 'skills-server.js'),
+      admin: join(distDir, 'mcp', 'admin-server.js'),
     };
 
     // Add built-in MCP servers
@@ -390,6 +393,26 @@ export class SessionManager {
           ...(process.env['CLADE_IPC_SOCKET'] ? { CLADE_IPC_SOCKET: process.env['CLADE_IPC_SOCKET'] } : {}),
         },
       };
+    }
+
+    // Inject admin MCP server if agent has admin privileges
+    const adminCfg = (agentCfg as Record<string, unknown>).admin as
+      | { enabled?: boolean }
+      | undefined;
+    if (adminCfg?.enabled) {
+      const adminScriptPath = serverScripts['admin'];
+      if (adminScriptPath) {
+        mcpConfig.mcpServers['admin'] = {
+          command: 'node',
+          args: [adminScriptPath],
+          env: {
+            CLADE_AGENT_ID: agentId,
+            CLADE_HOME: homeDir,
+            ...(process.env['CLADE_IPC_SOCKET'] ? { CLADE_IPC_SOCKET: process.env['CLADE_IPC_SOCKET'] } : {}),
+          },
+        };
+        log.info('Admin MCP server enabled for agent', { agentId });
+      }
     }
 
     // Add agent-specific third-party skills from ~/.clade/skills/active/
