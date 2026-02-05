@@ -6,6 +6,7 @@ import { homedir } from 'node:os';
 import {
   mkdirSync,
   readFileSync,
+  writeFileSync,
   readdirSync,
   statSync,
   existsSync,
@@ -17,6 +18,7 @@ import {
   appendToLongTermMemory,
   readMemoryFile,
 } from './daily-log.js';
+import { saveVersion } from '../../agents/versioning.js';
 
 // ---------------------------------------------------------------------------
 // Environment
@@ -343,6 +345,269 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+// ---------------------------------------------------------------------------
+// USER.md and TOOLS.md paths
+// ---------------------------------------------------------------------------
+
+const userMdPath = join(baseDir, 'USER.md');
+const userHistoryDir = join(baseDir, 'user-history');
+const toolsMdPath = join(agentDir, 'TOOLS.md');
+const toolsHistoryDir = join(agentDir, 'tools-history');
+
+// ---------------------------------------------------------------------------
+// Tool: user_get
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'user_get',
+  'Read the global USER.md file containing user preferences and identity info.',
+  {},
+  async () => {
+    try {
+      if (!existsSync(userMdPath)) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'USER.md does not exist yet. It will be created when the user updates it.',
+            },
+          ],
+        };
+      }
+      const content = readFileSync(userMdPath, 'utf-8');
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: content,
+          },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error reading USER.md: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Tool: user_store
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'user_store',
+  'Update the global USER.md file with user preferences. Use this when the user shares info about themselves (name, timezone, preferences, etc.).',
+  {
+    content: z.string().describe('The new content for USER.md'),
+    section: z
+      .string()
+      .optional()
+      .describe(
+        'Optional: specific section to update (e.g., "Preferences"). If omitted, replaces entire file.',
+      ),
+  },
+  async ({ content, section }) => {
+    try {
+      mkdirSync(userHistoryDir, { recursive: true });
+
+      // Save version before updating
+      saveVersion(userMdPath, userHistoryDir);
+
+      if (section) {
+        // Section-based update
+        let existing = '';
+        if (existsSync(userMdPath)) {
+          existing = readFileSync(userMdPath, 'utf-8');
+        }
+
+        // Find and replace section
+        const sectionRegex = new RegExp(
+          `(## ${section}\\s*\\n)([\\s\\S]*?)(?=\\n## |$)`,
+          'i',
+        );
+        const match = existing.match(sectionRegex);
+
+        if (match) {
+          // Replace existing section
+          const updated = existing.replace(
+            sectionRegex,
+            `$1${content}\n`,
+          );
+          writeFileSync(userMdPath, updated, 'utf-8');
+        } else {
+          // Append new section
+          const updated = existing.trim() + `\n\n## ${section}\n${content}\n`;
+          writeFileSync(userMdPath, updated, 'utf-8');
+        }
+
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Updated section "${section}" in USER.md.`,
+            },
+          ],
+        };
+      } else {
+        // Replace entire file
+        writeFileSync(userMdPath, content, 'utf-8');
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'Updated USER.md.',
+            },
+          ],
+        };
+      }
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error updating USER.md: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Tool: tools_get
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'tools_get',
+  "Read this agent's TOOLS.md workspace context file.",
+  {},
+  async () => {
+    try {
+      if (!existsSync(toolsMdPath)) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'TOOLS.md does not exist yet. It will be created when you update it.',
+            },
+          ],
+        };
+      }
+      const content = readFileSync(toolsMdPath, 'utf-8');
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: content,
+          },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error reading TOOLS.md: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Tool: tools_store
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'tools_store',
+  "Update this agent's TOOLS.md with workspace-specific notes and context.",
+  {
+    content: z.string().describe('The new content for TOOLS.md'),
+    section: z
+      .string()
+      .optional()
+      .describe(
+        'Optional: specific section to update (e.g., "Workspace"). If omitted, replaces entire file.',
+      ),
+  },
+  async ({ content, section }) => {
+    try {
+      mkdirSync(toolsHistoryDir, { recursive: true });
+
+      // Save version before updating
+      saveVersion(toolsMdPath, toolsHistoryDir);
+
+      if (section) {
+        // Section-based update
+        let existing = '';
+        if (existsSync(toolsMdPath)) {
+          existing = readFileSync(toolsMdPath, 'utf-8');
+        }
+
+        // Find and replace section
+        const sectionRegex = new RegExp(
+          `(## ${section}\\s*\\n)([\\s\\S]*?)(?=\\n## |$)`,
+          'i',
+        );
+        const match = existing.match(sectionRegex);
+
+        if (match) {
+          // Replace existing section
+          const updated = existing.replace(
+            sectionRegex,
+            `$1${content}\n`,
+          );
+          writeFileSync(toolsMdPath, updated, 'utf-8');
+        } else {
+          // Append new section
+          const updated = existing.trim() + `\n\n## ${section}\n${content}\n`;
+          writeFileSync(toolsMdPath, updated, 'utf-8');
+        }
+
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Updated section "${section}" in TOOLS.md.`,
+            },
+          ],
+        };
+      } else {
+        // Replace entire file
+        writeFileSync(toolsMdPath, content, 'utf-8');
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'Updated TOOLS.md.',
+            },
+          ],
+        };
+      }
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error updating TOOLS.md: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
 
 // ---------------------------------------------------------------------------
 // Start server

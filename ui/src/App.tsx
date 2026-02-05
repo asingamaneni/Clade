@@ -13,6 +13,7 @@ import { SkillsPage } from '@/pages/skills'
 import { ChannelsPage } from '@/pages/channels'
 import { CronPage } from '@/pages/cron'
 import { ConfigPage } from '@/pages/config'
+import { UserProfilePage } from '@/pages/user'
 import { WelcomePage, OnboardingPage } from '@/pages/welcome'
 
 // ── Types ──────────────────────────────────────────────────────
@@ -260,6 +261,8 @@ export default function App() {
             onAgentDeleted={() => { setSelectedAgentId(null); fetchAll() }}
           />
         )
+      case 'user':
+        return <UserProfilePage />
       case 'sessions':
         return <SessionsPage sessions={sessions} onRefresh={fetchSessions} />
       case 'skills':

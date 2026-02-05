@@ -67,3 +67,48 @@ _Review each item. Take action if needed. If nothing needs attention, respond wi
 export function generateDefaultConfig(): Config {
   return ConfigSchema.parse({});
 }
+
+// ---------------------------------------------------------------------------
+// Default USER.md — global file at ~/.clade/USER.md shared across all agents
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_USER_MD = `# USER.md — About You
+
+This file contains information about you that helps all your agents serve you better.
+
+## Identity
+- **Name:** (your preferred name)
+- **Timezone:** (e.g., America/Los_Angeles)
+- **Work Schedule:** (e.g., 9am-6pm weekdays)
+
+## Preferences
+- **Communication Style:** (brief/detailed, formal/casual)
+- **Notification Preferences:** (urgent only, all updates, etc.)
+
+## Credentials & Access
+<!-- Reference credential locations, never store actual secrets -->
+- API keys location: (e.g., environment variables)
+- Configured services: (list services you've set up)
+
+## Notes
+_Add any context your agents should know about you._
+`;
+
+// ---------------------------------------------------------------------------
+// Default TOOLS.md — per-agent file at ~/.clade/agents/<id>/TOOLS.md
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_TOOLS_MD = `# TOOLS.md — Workspace Context
+
+Local notes and context specific to this agent's workspace.
+
+## Workspace
+- **Primary Directory:** (where this agent works)
+- **Project Type:** (web app, CLI tool, etc.)
+
+## Credentials Needed
+_List which credentials/API keys this agent needs access to._
+
+## Local Notes
+_Workspace-specific context that helps this agent work effectively._
+`;

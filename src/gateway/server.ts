@@ -16,6 +16,13 @@ import {
   getReflectionHistoryEntry,
   runReflectionCycle,
 } from '../agents/reflection.js';
+import {
+  saveVersion,
+  getVersionHistory,
+  getVersionContent,
+} from '../agents/versioning.js';
+import { getUserMdPath, getUserHistoryDir, getAgentsDir } from '../config/index.js';
+import { DEFAULT_USER_MD, DEFAULT_TOOLS_MD } from '../config/defaults.js';
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import type { Config } from '../config/schema.js';
@@ -269,6 +276,8 @@ export async function createGateway(deps: GatewayDeps) {
   registerCronRoutes(app, deps);
   registerConfigRoutes(app, deps);
   registerChatRoutes(app, deps);
+  registerUserRoutes(app, deps);
+  registerToolsMdRoutes(app, deps);
 
   // ── WebSocket: WebChat ─────────────────────────────────────────
   app.register(async (fastify) => {
@@ -1368,6 +1377,241 @@ function registerChatRoutes(app: FastifyInstance, deps: GatewayDeps): void {
       const data = emptyAgentChatData();
       saveAgentChatData(cladeHome, agentId, data);
       return { success: true };
+    },
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// User Routes — /api/user (global USER.md)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function registerUserRoutes(app: FastifyInstance, deps: GatewayDeps): void {
+  const userMdPath = getUserMdPath();
+  const userHistoryDir = getUserHistoryDir();
+
+  // ── Get USER.md content ─────────────────────────────────────────
+  app.get('/api/user', async () => {
+    try {
+      if (!existsSync(userMdPath)) {
+        return { content: DEFAULT_USER_MD };
+      }
+      const content = readFileSync(userMdPath, 'utf-8');
+      return { content };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to read USER.md';
+      return { error: message };
+    }
+  });
+
+  // ── Update USER.md content ──────────────────────────────────────
+  app.put<{ Body: { content: string } }>('/api/user', async (req, reply) => {
+    const body = req.body as Record<string, unknown>;
+    const content = body.content;
+
+    if (typeof content !== 'string') {
+      return reply.code(400).send({ error: 'content must be a string' });
+    }
+
+    try {
+      // Ensure history directory exists
+      mkdirSync(userHistoryDir, { recursive: true });
+
+      // Save version before updating
+      saveVersion(userMdPath, userHistoryDir);
+
+      // Write the new content
+      writeFileSync(userMdPath, content, 'utf-8');
+      broadcastAdmin({
+        type: 'user:updated',
+        timestamp: new Date().toISOString(),
+      });
+      return { success: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to update USER.md';
+      return reply.code(500).send({ error: message });
+    }
+  });
+
+  // ── Get USER.md version history ─────────────────────────────────
+  app.get('/api/user/history', async () => {
+    try {
+      const entries = getVersionHistory(userHistoryDir);
+      return { entries };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to get history';
+      return { error: message, entries: [] };
+    }
+  });
+
+  // ── Get specific USER.md version ────────────────────────────────
+  app.get<{ Params: { date: string } }>('/api/user/history/:date', async (req, reply) => {
+    const { date } = req.params;
+
+    try {
+      const content = getVersionContent(userHistoryDir, date);
+      if (content === null) {
+        return reply.code(404).send({ error: `No history entry for date "${date}"` });
+      }
+      return { date, content };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to read history entry';
+      return reply.code(500).send({ error: message });
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TOOLS.md Routes — /api/agents/:id/tools-md (per-agent)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function registerToolsMdRoutes(app: FastifyInstance, deps: GatewayDeps): void {
+  const { agentRegistry: reg } = deps;
+
+  // ── Get TOOLS.md content ────────────────────────────────────────
+  app.get<{ Params: { id: string } }>('/api/agents/:id/tools-md', async (req, reply) => {
+    const { id } = req.params;
+    const agent = reg.tryGet(id);
+    if (!agent) {
+      return reply.code(404).send({ error: `Agent "${id}" not found` });
+    }
+
+    const toolsMdPath = join(agent.baseDir, 'TOOLS.md');
+    try {
+      if (!existsSync(toolsMdPath)) {
+        return { agentId: id, content: DEFAULT_TOOLS_MD };
+      }
+      const content = readFileSync(toolsMdPath, 'utf-8');
+      return { agentId: id, content };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to read TOOLS.md';
+      return reply.code(500).send({ error: message });
+    }
+  });
+
+  // ── Update TOOLS.md content ─────────────────────────────────────
+  app.put<{ Params: { id: string }; Body: { content: string } }>(
+    '/api/agents/:id/tools-md',
+    async (req, reply) => {
+      const { id } = req.params;
+      const body = req.body as Record<string, unknown>;
+      const content = body.content;
+
+      if (typeof content !== 'string') {
+        return reply.code(400).send({ error: 'content must be a string' });
+      }
+
+      const agent = reg.tryGet(id);
+      if (!agent) {
+        return reply.code(404).send({ error: `Agent "${id}" not found` });
+      }
+
+      const toolsMdPath = join(agent.baseDir, 'TOOLS.md');
+      const toolsHistoryDir = join(agent.baseDir, 'tools-history');
+
+      try {
+        // Ensure history directory exists
+        mkdirSync(toolsHistoryDir, { recursive: true });
+
+        // Save version before updating
+        saveVersion(toolsMdPath, toolsHistoryDir);
+
+        // Write the new content
+        writeFileSync(toolsMdPath, content, 'utf-8');
+        broadcastAdmin({
+          type: 'agent:tools-md-updated',
+          agentId: id,
+          timestamp: new Date().toISOString(),
+        });
+        return { success: true };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to update TOOLS.md';
+        return reply.code(500).send({ error: message });
+      }
+    },
+  );
+
+  // ── Get TOOLS.md version history ────────────────────────────────
+  app.get<{ Params: { id: string } }>('/api/agents/:id/tools-md/history', async (req, reply) => {
+    const { id } = req.params;
+    const agent = reg.tryGet(id);
+    if (!agent) {
+      return reply.code(404).send({ error: `Agent "${id}" not found` });
+    }
+
+    const toolsHistoryDir = join(agent.baseDir, 'tools-history');
+    try {
+      const entries = getVersionHistory(toolsHistoryDir);
+      return { agentId: id, entries };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to get history';
+      return reply.code(500).send({ error: message });
+    }
+  });
+
+  // ── Get specific TOOLS.md version ───────────────────────────────
+  app.get<{ Params: { id: string; date: string } }>(
+    '/api/agents/:id/tools-md/history/:date',
+    async (req, reply) => {
+      const { id, date } = req.params;
+      const agent = reg.tryGet(id);
+      if (!agent) {
+        return reply.code(404).send({ error: `Agent "${id}" not found` });
+      }
+
+      const toolsHistoryDir = join(agent.baseDir, 'tools-history');
+      try {
+        const content = getVersionContent(toolsHistoryDir, date);
+        if (content === null) {
+          return reply.code(404).send({ error: `No history entry for date "${date}"` });
+        }
+        return { agentId: id, date, content };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to read history entry';
+        return reply.code(500).send({ error: message });
+      }
+    },
+  );
+
+  // ── Get SOUL.md version history ─────────────────────────────────
+  // (Adding here since it completes the soul-history feature)
+  app.get<{ Params: { id: string } }>('/api/agents/:id/soul/history', async (req, reply) => {
+    const { id } = req.params;
+    const agent = reg.tryGet(id);
+    if (!agent) {
+      return reply.code(404).send({ error: `Agent "${id}" not found` });
+    }
+
+    const soulHistoryDir = join(agent.baseDir, 'soul-history');
+    try {
+      const entries = getVersionHistory(soulHistoryDir);
+      return { agentId: id, entries };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to get history';
+      return reply.code(500).send({ error: message });
+    }
+  });
+
+  // ── Get specific SOUL.md version ────────────────────────────────
+  app.get<{ Params: { id: string; date: string } }>(
+    '/api/agents/:id/soul/history/:date',
+    async (req, reply) => {
+      const { id, date } = req.params;
+      const agent = reg.tryGet(id);
+      if (!agent) {
+        return reply.code(404).send({ error: `Agent "${id}" not found` });
+      }
+
+      const soulHistoryDir = join(agent.baseDir, 'soul-history');
+      try {
+        const content = getVersionContent(soulHistoryDir, date);
+        if (content === null) {
+          return reply.code(404).send({ error: `No history entry for date "${date}"` });
+        }
+        return { agentId: id, date, content };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to read history entry';
+        return reply.code(500).send({ error: message });
+      }
     },
   );
 }

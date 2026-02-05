@@ -873,6 +873,190 @@ function HeartbeatTab({ agentId }: { agentId: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// Sub: TOOLS.md Tab
+// ---------------------------------------------------------------------------
+
+interface ToolsMdVersionEntry {
+  date: string
+  summary: string
+}
+
+function ToolsMdTab({ agentId }: { agentId: string }) {
+  const [content, setContent] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [history, setHistory] = useState<ToolsMdVersionEntry[]>([])
+  const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  const [selectedContent, setSelectedContent] = useState<string | null>(null)
+  const [loadingEntry, setLoadingEntry] = useState(false)
+
+  const loadData = async () => {
+    setLoading(true)
+    try {
+      const [toolsRes, historyRes] = await Promise.all([
+        api<{ content: string }>('/agents/' + agentId + '/tools-md'),
+        api<{ entries: ToolsMdVersionEntry[] }>('/agents/' + agentId + '/tools-md/history'),
+      ])
+      setContent(toolsRes.content || '')
+      setHistory(historyRes.entries || [])
+    } catch (e: any) {
+      console.error('Failed to load TOOLS.md:', e.message)
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    loadData()
+  }, [agentId])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await api('/agents/' + agentId + '/tools-md', {
+        method: 'PUT',
+        body: { content },
+      })
+      console.log('TOOLS.md saved successfully')
+      // Reload history after save
+      const historyRes = await api<{ entries: ToolsMdVersionEntry[] }>(
+        '/agents/' + agentId + '/tools-md/history'
+      )
+      setHistory(historyRes.entries || [])
+    } catch (e: any) {
+      console.error('Save failed:', e.message)
+    }
+    setSaving(false)
+  }
+
+  const viewHistoryEntry = async (date: string) => {
+    setSelectedDate(date)
+    setSelectedContent(null)
+    setLoadingEntry(true)
+    try {
+      const res = await api<{ content: string }>(
+        '/agents/' + agentId + '/tools-md/history/' + date
+      )
+      setSelectedContent(res.content)
+    } catch (e: any) {
+      setSelectedContent('Error loading entry: ' + e.message)
+    }
+    setLoadingEntry(false)
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        <span className="text-sm">Loading TOOLS.md...</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Editor */}
+      <div className="lg:col-span-2 space-y-3">
+        <Textarea
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          placeholder="# TOOLS.md — Workspace Context..."
+          spellCheck={false}
+          className="font-mono text-[13px] leading-relaxed min-h-[420px] max-h-[70vh] resize-y"
+        />
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground/60">
+            {content.length} characters
+          </span>
+          <Button size="sm" onClick={save} disabled={saving}>
+            {saving ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              <>
+                <Save className="h-3.5 w-3.5 mr-1.5" />
+                Save TOOLS.md
+              </>
+            )}
+          </Button>
+        </div>
+      </div>
+
+      {/* Version History */}
+      <div>
+        <h4 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+          <Clock className="h-4 w-4" />
+          Version History
+          {history.length > 0 && (
+            <span className="text-xs font-normal text-muted-foreground">
+              ({history.length} snapshot{history.length !== 1 ? 's' : ''})
+            </span>
+          )}
+        </h4>
+        {history.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-4">
+            No version history yet. Versions are saved when TOOLS.md is updated.
+          </p>
+        ) : (
+          <ScrollArea className="max-h-[360px]">
+            <div className="space-y-1.5 pr-3">
+              {history.map((entry) => (
+                <button
+                  key={entry.date}
+                  onClick={() => viewHistoryEntry(entry.date)}
+                  className="w-full text-left group"
+                >
+                  <Card className="transition-colors hover:bg-accent/50 cursor-pointer">
+                    <CardContent className="p-3 flex items-center gap-3">
+                      <Eye className="h-3.5 w-3.5 text-muted-foreground group-hover:text-primary shrink-0" />
+                      <div className="text-xs font-mono text-primary whitespace-nowrap">
+                        {entry.date}
+                      </div>
+                      <div className="text-sm text-muted-foreground truncate flex-1">
+                        {entry.summary || '(snapshot)'}
+                      </div>
+                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-foreground shrink-0" />
+                    </CardContent>
+                  </Card>
+                </button>
+              ))}
+            </div>
+          </ScrollArea>
+        )}
+      </div>
+
+      {/* History entry viewer dialog */}
+      <Dialog open={selectedDate !== null} onOpenChange={(open) => { if (!open) setSelectedDate(null) }}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Clock className="h-4 w-4" />
+              TOOLS.md snapshot — {selectedDate}
+            </DialogTitle>
+            <DialogDescription>
+              This is a snapshot of this agent's TOOLS.md from {selectedDate}.
+            </DialogDescription>
+          </DialogHeader>
+          {loadingEntry ? (
+            <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-sm">Loading snapshot...</span>
+            </div>
+          ) : (
+            <div className="overflow-y-auto min-h-0 flex-1">
+              <pre className="text-sm font-mono whitespace-pre-wrap text-foreground p-4 bg-muted/30 rounded-md">
+                {selectedContent}
+              </pre>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Sub: Reflection Tab
 // ---------------------------------------------------------------------------
 
@@ -1246,6 +1430,7 @@ function AgentDetail({
           <TabsTrigger value="soul">Soul</TabsTrigger>
           <TabsTrigger value="identity">Identity</TabsTrigger>
           <TabsTrigger value="tools">Tools</TabsTrigger>
+          <TabsTrigger value="tools-md">TOOLS.md</TabsTrigger>
           <TabsTrigger value="memory">Memory</TabsTrigger>
           <TabsTrigger value="heartbeat">Heartbeat</TabsTrigger>
           <TabsTrigger value="reflection">Reflection</TabsTrigger>
@@ -1258,6 +1443,9 @@ function AgentDetail({
         </TabsContent>
         <TabsContent value="tools">
           <ToolsTab agent={agent} onRefresh={onRefresh} />
+        </TabsContent>
+        <TabsContent value="tools-md">
+          <ToolsMdTab agentId={agent.id} />
         </TabsContent>
         <TabsContent value="memory">
           <MemoryTab agentId={agent.id} />

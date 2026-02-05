@@ -11,7 +11,8 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { getAgentsDir } from '../config/index.js';
+import { getAgentsDir, getUserMdPath, getUserHistoryDir } from '../config/index.js';
+import { DEFAULT_USER_MD, DEFAULT_TOOLS_MD } from '../config/defaults.js';
 
 export interface AgentIdentity {
   name: string;
@@ -83,6 +84,34 @@ export const DEFAULT_HEARTBEAT_MD = `# HEARTBEAT.md — What To Check
 Add items here by telling me in chat: "Add X to your heartbeat checklist."
 `;
 
+// ---------------------------------------------------------------------------
+// Content Routing Protocol — guides agents on what goes where
+// ---------------------------------------------------------------------------
+
+export const CONTENT_ROUTING_PROTOCOL = `
+## Content Routing Protocol
+
+When storing information, route it to the appropriate file:
+
+| Content Type | Destination | Examples |
+|--------------|-------------|----------|
+| User identity/preferences | USER.md | Name, timezone, work schedule, communication style |
+| Workspace/tool context | TOOLS.md | API endpoints, local paths, project configs |
+| Facts and decisions | MEMORY.md | Things learned, decisions made, project state |
+| Personality evolution | SOUL.md | Managed by reflection cycle only |
+
+**MCP Tools:**
+- \`user_get\` / \`user_store\` — for USER.md (global, about the human)
+- \`tools_get\` / \`tools_store\` — for TOOLS.md (this agent's workspace)
+- \`memory_store\` / \`memory_search\` — for MEMORY.md (facts and history)
+
+**Guidelines:**
+- When user expresses preferences about themselves → USER.md
+- When you discover workspace-specific info → TOOLS.md
+- When you learn facts or make decisions → MEMORY.md
+- Never modify SOUL.md directly — it evolves through reflection
+`;
+
 /**
  * Parse IDENTITY.md content into structured data.
  * Returns initialized: false if fields are still placeholder text.
@@ -132,18 +161,22 @@ This isn't just metadata. It's the start of figuring out who you are.
 
 /**
  * Ensure an agent directory exists with all required files.
- * Creates IDENTITY.md, SOUL.md, HEARTBEAT.md, MEMORY.md, and memory/ dir.
+ * Creates IDENTITY.md, SOUL.md, HEARTBEAT.md, MEMORY.md, TOOLS.md and
+ * memory/, soul-history/, tools-history/ directories.
  */
 export function ensureAgentFiles(agentId: string, customSoul?: string): void {
   const agentDir = join(getAgentsDir(), agentId);
   mkdirSync(agentDir, { recursive: true });
   mkdirSync(join(agentDir, 'memory'), { recursive: true });
+  mkdirSync(join(agentDir, 'soul-history'), { recursive: true });
+  mkdirSync(join(agentDir, 'tools-history'), { recursive: true });
 
   const files: Record<string, string> = {
     'IDENTITY.md': DEFAULT_IDENTITY_MD,
     'SOUL.md': customSoul || DEFAULT_SOUL_MD,
     'HEARTBEAT.md': DEFAULT_HEARTBEAT_MD,
     'MEMORY.md': '# Long-Term Memory\n\nDurable facts, preferences, and decisions.\n',
+    'TOOLS.md': DEFAULT_TOOLS_MD,
   };
 
   for (const [filename, defaultContent] of Object.entries(files)) {
@@ -152,6 +185,35 @@ export function ensureAgentFiles(agentId: string, customSoul?: string): void {
       writeFileSync(filepath, defaultContent, 'utf-8');
     }
   }
+}
+
+/**
+ * Ensure the global USER.md file exists.
+ * Called once at startup to create ~/.clade/USER.md if missing.
+ */
+export function ensureUserMd(): void {
+  const userMdPath = getUserMdPath();
+  if (!existsSync(userMdPath)) {
+    writeFileSync(userMdPath, DEFAULT_USER_MD, 'utf-8');
+  }
+}
+
+/**
+ * Load the global USER.md content.
+ */
+export function loadUserMd(): string {
+  const userMdPath = getUserMdPath();
+  if (!existsSync(userMdPath)) return '';
+  return readFileSync(userMdPath, 'utf-8');
+}
+
+/**
+ * Load TOOLS.md content for an agent.
+ */
+export function loadToolsMd(agentId: string): string {
+  const filepath = join(getAgentsDir(), agentId, 'TOOLS.md');
+  if (!existsSync(filepath)) return '';
+  return readFileSync(filepath, 'utf-8');
 }
 
 /**
@@ -183,7 +245,8 @@ export function loadSoul(agentId: string): string {
 
 /**
  * Build the combined system prompt for an agent.
- * Includes IDENTITY.md + SOUL.md + any initialization instructions.
+ * Includes IDENTITY.md + SOUL.md + USER.md + TOOLS.md + content routing protocol
+ * and any initialization instructions.
  */
 export function buildAgentPrompt(agentId: string): string {
   const identity = loadIdentity(agentId);
@@ -213,6 +276,23 @@ export function buildAgentPrompt(agentId: string): string {
       parts.push(`Be genuine about it — this is the start of your identity.\n`);
     }
   }
+
+  // Inject USER.md (global)
+  const userMd = loadUserMd();
+  if (userMd && userMd.trim()) {
+    parts.push(`\n## About Your Human\n`);
+    parts.push(userMd);
+  }
+
+  // Inject TOOLS.md (per-agent)
+  const toolsMd = loadToolsMd(agentId);
+  if (toolsMd && toolsMd.trim()) {
+    parts.push(`\n## Workspace Context\n`);
+    parts.push(toolsMd);
+  }
+
+  // Inject content routing protocol
+  parts.push(CONTENT_ROUTING_PROTOCOL);
 
   return parts.join('\n');
 }

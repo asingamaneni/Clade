@@ -707,6 +707,7 @@
       { id: 'dashboard', label: 'Dashboard',  icon: '\u{1F4CA}' },
       { id: 'chat',      label: 'Chat',       icon: '\u{1F4AC}' },
       { id: 'agents',    label: 'Agents',     icon: '\u{1F916}' },
+      { id: 'user',      label: 'User Profile', icon: '\u{1F464}' },
       { id: 'sessions',  label: 'Sessions',   icon: '\u{1F5C2}' },
       { id: 'skills',    label: 'Skills',     icon: '\u{1F9E9}' },
       { id: 'channels',  label: 'Channels',   icon: '\u{1F4E1}' },
@@ -2350,6 +2351,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
         { id: 'soul',      label: 'Soul' },
         { id: 'identity',  label: 'Identity' },
         { id: 'tools',     label: 'Tools' },
+        { id: 'tools-md',  label: 'TOOLS.md' },
         { id: 'memory',    label: 'Memory' },
         { id: 'heartbeat', label: 'Heartbeat' },
       ];
@@ -2412,6 +2414,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
             ${tab === 'soul'      && html`<${SoulTab} agentId=${agent.id} refreshTick=${refreshTick} />`}
             ${tab === 'identity'  && html`<${IdentityTab} agentId=${agent.id} />`}
             ${tab === 'tools'     && html`<${ToolsTab} agent=${agent} onRefresh=${onRefresh} />`}
+            ${tab === 'tools-md'  && html`<${ToolsMdTab} agentId=${agent.id} refreshTick=${refreshTick} />`}
             ${tab === 'memory'    && html`<${MemoryTab} agentId=${agent.id} refreshTick=${refreshTick} />`}
             ${tab === 'heartbeat' && html`<${HeartbeatTab} agentId=${agent.id} refreshTick=${refreshTick} />`}
           </div>
@@ -2419,47 +2422,229 @@ If nothing needs attention, respond with: HEARTBEAT_OK
       `;
     }
 
-    // ── Soul Tab ─────────────────────────────────────────────────────
+    // ── Soul Tab (with version history) ─────────────────────────────
 
     function SoulTab({ agentId, refreshTick }) {
       const [content, setContent] = useState('');
       const [loading, setLoading] = useState(true);
       const [saving, setSaving] = useState(false);
+      const [history, setHistory] = useState([]);
+      const [selectedDate, setSelectedDate] = useState(null);
+      const [viewingVersion, setViewingVersion] = useState(null);
 
-      useEffect(() => {
+      const loadSoul = () => {
         setLoading(true);
-        api('/agents/' + agentId + '/soul')
-          .then(d => setContent(d.content || ''))
-          .catch(e => showToast('Failed to load SOUL.md: ' + e.message, 'error'))
-          .finally(() => setLoading(false));
-      }, [agentId, refreshTick]);
+        Promise.all([
+          api('/agents/' + agentId + '/soul').catch(() => ({ content: '' })),
+          api('/agents/' + agentId + '/soul/history').catch(() => ({ entries: [] })),
+        ]).then(([soulData, historyData]) => {
+          setContent(soulData.content || '');
+          setHistory(historyData.entries || []);
+        }).finally(() => setLoading(false));
+      };
+
+      useEffect(() => { loadSoul(); }, [agentId, refreshTick]);
 
       const save = async () => {
         setSaving(true);
         try {
           await api('/agents/' + agentId + '/soul', { method: 'PUT', body: { content } });
           showToast('SOUL.md saved successfully', 'success');
+          // Refresh history after save
+          api('/agents/' + agentId + '/soul/history').then(d => setHistory(d.entries || [])).catch(() => {});
         } catch (e) { showToast('Save failed: ' + e.message, 'error'); }
         setSaving(false);
+      };
+
+      const viewVersion = async (date) => {
+        try {
+          const d = await api('/agents/' + agentId + '/soul/history/' + date);
+          setViewingVersion({ date, content: d.content });
+        } catch (e) {
+          showToast('Failed to load version: ' + e.message, 'error');
+        }
+      };
+
+      const restoreVersion = () => {
+        if (viewingVersion) {
+          setContent(viewingVersion.content);
+          setViewingVersion(null);
+          setSelectedDate(null);
+          showToast('Version restored (not saved yet)', 'info');
+        }
       };
 
       if (loading) return html`<${LoadingState} text="Loading SOUL.md..." />`;
 
       return html`
         <div>
-          <textarea
-            class="mono-editor w-full"
-            style="min-height:420px;max-height:70vh"
-            value=${content}
-            onInput=${e => setContent(e.target.value)}
-            placeholder="# SOUL.md - Who You Are..."
-            spellcheck="false"
-          />
-          <div class="flex items-center justify-between mt-3">
-            <span class="text-xs" style="color:#484f58">${content.length} characters</span>
-            <button class="btn btn-primary" onClick=${save} disabled=${saving}>
-              ${saving ? 'Saving...' : 'Save SOUL.md'}
-            </button>
+          ${viewingVersion && html`
+            <div class="mb-4 p-4 rounded-lg" style="background:rgba(88,166,255,0.1);border:1px solid rgba(88,166,255,0.3)">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-sm font-medium" style="color:#58a6ff">Viewing version: ${viewingVersion.date}</span>
+                <div class="flex gap-2">
+                  <button
+                    class="text-xs px-3 py-1 rounded"
+                    style="background:#238636;color:#fff;border:none;cursor:pointer"
+                    onClick=${restoreVersion}
+                  >Restore this version</button>
+                  <button
+                    class="text-xs px-3 py-1 rounded"
+                    style="background:#21262d;color:#8b949e;border:1px solid #30363d;cursor:pointer"
+                    onClick=${() => { setViewingVersion(null); setSelectedDate(null); }}
+                  >Cancel</button>
+                </div>
+              </div>
+              <pre
+                class="p-3 rounded text-sm overflow-auto"
+                style="background:#0f1117;border:1px solid #30363d;color:#e6edf3;max-height:200px;white-space:pre-wrap;margin:0"
+              >${viewingVersion.content}</pre>
+            </div>
+          `}
+
+          <div class="flex gap-6">
+            <div class="flex-1">
+              <textarea
+                class="mono-editor w-full"
+                style="min-height:420px;max-height:70vh"
+                value=${content}
+                onInput=${e => setContent(e.target.value)}
+                placeholder="# SOUL.md - Who You Are..."
+                spellcheck="false"
+              />
+              <div class="flex items-center justify-between mt-3">
+                <span class="text-xs" style="color:#484f58">${content.length} characters</span>
+                <button class="btn btn-primary" onClick=${save} disabled=${saving}>
+                  ${saving ? 'Saving...' : 'Save SOUL.md'}
+                </button>
+              </div>
+            </div>
+
+            <div style="min-width:160px">
+              <${VersionHistoryViewer}
+                entries=${history}
+                selectedDate=${selectedDate}
+                onSelect=${setSelectedDate}
+                onViewContent=${viewVersion}
+              />
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // ── TOOLS.md Tab (workspace context with version history) ─────────
+
+    function ToolsMdTab({ agentId, refreshTick }) {
+      const [content, setContent] = useState('');
+      const [loading, setLoading] = useState(true);
+      const [saving, setSaving] = useState(false);
+      const [history, setHistory] = useState([]);
+      const [selectedDate, setSelectedDate] = useState(null);
+      const [viewingVersion, setViewingVersion] = useState(null);
+
+      const loadToolsMd = () => {
+        setLoading(true);
+        Promise.all([
+          api('/agents/' + agentId + '/tools-md').catch(() => ({ content: '' })),
+          api('/agents/' + agentId + '/tools-md/history').catch(() => ({ entries: [] })),
+        ]).then(([toolsData, historyData]) => {
+          setContent(toolsData.content || '');
+          setHistory(historyData.entries || []);
+        }).finally(() => setLoading(false));
+      };
+
+      useEffect(() => { loadToolsMd(); }, [agentId, refreshTick]);
+
+      const save = async () => {
+        setSaving(true);
+        try {
+          await api('/agents/' + agentId + '/tools-md', { method: 'PUT', body: { content } });
+          showToast('TOOLS.md saved successfully', 'success');
+          // Refresh history after save
+          api('/agents/' + agentId + '/tools-md/history').then(d => setHistory(d.entries || [])).catch(() => {});
+        } catch (e) { showToast('Save failed: ' + e.message, 'error'); }
+        setSaving(false);
+      };
+
+      const viewVersion = async (date) => {
+        try {
+          const d = await api('/agents/' + agentId + '/tools-md/history/' + date);
+          setViewingVersion({ date, content: d.content });
+        } catch (e) {
+          showToast('Failed to load version: ' + e.message, 'error');
+        }
+      };
+
+      const restoreVersion = () => {
+        if (viewingVersion) {
+          setContent(viewingVersion.content);
+          setViewingVersion(null);
+          setSelectedDate(null);
+          showToast('Version restored (not saved yet)', 'info');
+        }
+      };
+
+      if (loading) return html`<${LoadingState} text="Loading TOOLS.md..." />`;
+
+      return html`
+        <div>
+          <div class="mb-4 p-3 rounded-lg" style="background:rgba(139,148,158,0.08);border:1px solid #30363d">
+            <div class="text-xs" style="color:#8b949e">
+              Workspace-specific context for this agent. Store API endpoints, project paths, local configurations here.
+            </div>
+          </div>
+
+          ${viewingVersion && html`
+            <div class="mb-4 p-4 rounded-lg" style="background:rgba(88,166,255,0.1);border:1px solid rgba(88,166,255,0.3)">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-sm font-medium" style="color:#58a6ff">Viewing version: ${viewingVersion.date}</span>
+                <div class="flex gap-2">
+                  <button
+                    class="text-xs px-3 py-1 rounded"
+                    style="background:#238636;color:#fff;border:none;cursor:pointer"
+                    onClick=${restoreVersion}
+                  >Restore this version</button>
+                  <button
+                    class="text-xs px-3 py-1 rounded"
+                    style="background:#21262d;color:#8b949e;border:1px solid #30363d;cursor:pointer"
+                    onClick=${() => { setViewingVersion(null); setSelectedDate(null); }}
+                  >Cancel</button>
+                </div>
+              </div>
+              <pre
+                class="p-3 rounded text-sm overflow-auto"
+                style="background:#0f1117;border:1px solid #30363d;color:#e6edf3;max-height:200px;white-space:pre-wrap;margin:0"
+              >${viewingVersion.content}</pre>
+            </div>
+          `}
+
+          <div class="flex gap-6">
+            <div class="flex-1">
+              <textarea
+                class="mono-editor w-full"
+                style="min-height:380px;max-height:70vh"
+                value=${content}
+                onInput=${e => setContent(e.target.value)}
+                placeholder="# TOOLS.md - Workspace Context..."
+                spellcheck="false"
+              />
+              <div class="flex items-center justify-between mt-3">
+                <span class="text-xs" style="color:#484f58">${content.length} characters</span>
+                <button class="btn btn-primary" onClick=${save} disabled=${saving}>
+                  ${saving ? 'Saving...' : 'Save TOOLS.md'}
+                </button>
+              </div>
+            </div>
+
+            <div style="min-width:160px">
+              <${VersionHistoryViewer}
+                entries=${history}
+                selectedDate=${selectedDate}
+                onSelect=${setSelectedDate}
+                onViewContent=${viewVersion}
+              />
+            </div>
           </div>
         </div>
       `;
@@ -3337,6 +3522,172 @@ If nothing needs attention, respond with: HEARTBEAT_OK
     //  PAGE 7: Config
     // ═══════════════════════════════════════════════════════════════════
 
+    // ═══════════════════════════════════════════════════════════════════
+    //  VERSION HISTORY VIEWER COMPONENT
+    // ═══════════════════════════════════════════════════════════════════
+
+    function VersionHistoryViewer({ entries, selectedDate, onSelect, onViewContent }) {
+      if (!entries || entries.length === 0) {
+        return html`
+          <div class="text-xs" style="color:#484f58">No version history yet.</div>
+        `;
+      }
+      return html`
+        <div style="border-left:1px solid #30363d;padding-left:12px">
+          <div class="text-xs font-medium mb-2" style="color:#8b949e">Version History</div>
+          <div class="space-y-1" style="max-height:300px;overflow-y:auto">
+            ${entries.map(e => html`
+              <button
+                key=${e.date}
+                class="w-full text-left px-2 py-1 rounded text-xs transition-colors"
+                style="background:${selectedDate === e.date ? 'rgba(88,166,255,0.15)' : 'transparent'};color:${selectedDate === e.date ? '#58a6ff' : '#8b949e'};border:none;cursor:pointer"
+                onClick=${() => onSelect(e.date)}
+                onMouseEnter=${(ev) => { if (selectedDate !== e.date) ev.target.style.background = 'rgba(139,148,158,0.1)'; }}
+                onMouseLeave=${(ev) => { if (selectedDate !== e.date) ev.target.style.background = 'transparent'; }}
+              >
+                ${e.date}
+              </button>
+            `)}
+          </div>
+          ${selectedDate && onViewContent && html`
+            <button
+              class="mt-2 text-xs px-2 py-1 rounded transition-colors"
+              style="color:#58a6ff;background:transparent;border:1px solid rgba(88,166,255,0.3);cursor:pointer"
+              onClick=${() => onViewContent(selectedDate)}
+            >
+              View this version
+            </button>
+          `}
+        </div>
+      `;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  USER PROFILE PAGE
+    // ═══════════════════════════════════════════════════════════════════
+
+    function UserProfilePage() {
+      const [content, setContent] = useState('');
+      const [loading, setLoading] = useState(true);
+      const [saving, setSaving] = useState(false);
+      const [history, setHistory] = useState([]);
+      const [selectedDate, setSelectedDate] = useState(null);
+      const [viewingVersion, setViewingVersion] = useState(null);
+
+      const loadUser = () => {
+        setLoading(true);
+        Promise.all([
+          api('/user').catch(() => ({ content: '' })),
+          api('/user/history').catch(() => ({ entries: [] })),
+        ]).then(([userData, historyData]) => {
+          setContent(userData.content || '');
+          setHistory(historyData.entries || []);
+        }).finally(() => setLoading(false));
+      };
+
+      useEffect(() => { loadUser(); }, []);
+
+      const save = async () => {
+        setSaving(true);
+        try {
+          await api('/user', { method: 'PUT', body: { content } });
+          showToast('USER.md saved successfully', 'success');
+          // Refresh history after save
+          api('/user/history').then(d => setHistory(d.entries || [])).catch(() => {});
+        } catch (e) {
+          showToast('Save failed: ' + e.message, 'error');
+        }
+        setSaving(false);
+      };
+
+      const viewVersion = async (date) => {
+        try {
+          const d = await api('/user/history/' + date);
+          setViewingVersion({ date, content: d.content });
+        } catch (e) {
+          showToast('Failed to load version: ' + e.message, 'error');
+        }
+      };
+
+      const restoreVersion = () => {
+        if (viewingVersion) {
+          setContent(viewingVersion.content);
+          setViewingVersion(null);
+          setSelectedDate(null);
+          showToast('Version restored (not saved yet)', 'info');
+        }
+      };
+
+      if (loading) return html`<div class="page-enter p-6"><${LoadingState} text="Loading USER.md..." /></div>`;
+
+      return html`
+        <div class="page-enter p-6">
+          <div class="flex items-center justify-between mb-5">
+            <div>
+              <h2 class="text-xl font-semibold" style="color:#e6edf3">User Profile</h2>
+              <p class="text-xs mt-1" style="color:#484f58">Global preferences shared across all agents (~/.clade/USER.md)</p>
+            </div>
+            <button class="btn btn-primary" onClick=${save} disabled=${saving}>
+              ${saving ? 'Saving...' : 'Save USER.md'}
+            </button>
+          </div>
+
+          ${viewingVersion && html`
+            <div class="mb-4 p-4 rounded-lg" style="background:rgba(88,166,255,0.1);border:1px solid rgba(88,166,255,0.3)">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-sm font-medium" style="color:#58a6ff">Viewing version: ${viewingVersion.date}</span>
+                <div class="flex gap-2">
+                  <button
+                    class="text-xs px-3 py-1 rounded"
+                    style="background:#238636;color:#fff;border:none;cursor:pointer"
+                    onClick=${restoreVersion}
+                  >Restore this version</button>
+                  <button
+                    class="text-xs px-3 py-1 rounded"
+                    style="background:#21262d;color:#8b949e;border:1px solid #30363d;cursor:pointer"
+                    onClick=${() => { setViewingVersion(null); setSelectedDate(null); }}
+                  >Cancel</button>
+                </div>
+              </div>
+              <pre
+                class="p-3 rounded text-sm overflow-auto"
+                style="background:#0f1117;border:1px solid #30363d;color:#e6edf3;max-height:200px;white-space:pre-wrap;margin:0"
+              >${viewingVersion.content}</pre>
+            </div>
+          `}
+
+          <div class="flex gap-6">
+            <div class="flex-1">
+              <textarea
+                class="mono-editor w-full"
+                style="min-height:480px;max-height:70vh"
+                value=${content}
+                onInput=${e => setContent(e.target.value)}
+                placeholder="# USER.md - About You..."
+                spellcheck="false"
+              />
+              <div class="flex items-center justify-between mt-3">
+                <span class="text-xs" style="color:#484f58">${content.length} characters</span>
+              </div>
+            </div>
+
+            <div style="min-width:160px">
+              <${VersionHistoryViewer}
+                entries=${history}
+                selectedDate=${selectedDate}
+                onSelect=${setSelectedDate}
+                onViewContent=${viewVersion}
+              />
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  PAGE 9: Config
+    // ═══════════════════════════════════════════════════════════════════
+
     function ConfigPage() {
       const [text, setText] = useState('');
       const [loading, setLoading] = useState(true);
@@ -3517,6 +3868,8 @@ If nothing needs attention, respond with: HEARTBEAT_OK
             return html`<${ChatPage} agents=${agents} />`;
           case 'agents':
             return html`<${AgentsPage} agents=${agents} onRefresh=${fetchAgents} onNavigate=${setPage} initialSelectedId=${selectedAgentId} onAgentDeleted=${() => { setSelectedAgentId(null); fetchAll(); }} refreshTick=${agentFilesTick} />`;
+          case 'user':
+            return html`<${UserProfilePage} />`;
           case 'sessions':
             return html`<${SessionsPage} sessions=${sessions} onRefresh=${fetchSessions} />`;
           case 'skills':
