@@ -75,6 +75,30 @@ const migrations: Migration[] = [
       return result;
     },
   },
+  {
+    fromVersion: 3,
+    toVersion: 4,
+    description: 'Add skills (SKILL.md instruction files) alongside MCP servers',
+    up: (config) => {
+      const result: Record<string, unknown> = { ...config, version: 4 };
+
+      // Add root-level skills config if missing
+      if (!result.skills) {
+        result.skills = { autoApprove: [] };
+      }
+
+      // Add skills array to each agent config if missing
+      const agents = (result.agents ?? {}) as Record<string, Record<string, unknown>>;
+      for (const agentConfig of Object.values(agents)) {
+        if (!agentConfig.skills) {
+          agentConfig.skills = [];
+        }
+      }
+      result.agents = agents;
+
+      return result;
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------

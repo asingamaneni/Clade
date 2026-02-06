@@ -132,3 +132,48 @@ export interface SessionRecord {
 
 /** Possible states for an installed MCP server. */
 export type McpServerStatus = 'pending' | 'active' | 'disabled';
+
+// ---------------------------------------------------------------------------
+// Skill status
+// ---------------------------------------------------------------------------
+
+/** Possible states for an installed skill (SKILL.md instruction file). */
+export type SkillStatus = 'pending' | 'active' | 'disabled';
+
+// ---------------------------------------------------------------------------
+// Skill — a SKILL.md instruction file
+// ---------------------------------------------------------------------------
+
+/**
+ * Represents an installed skill (SKILL.md instruction file).
+ * Skills provide knowledge, slash commands, and project-specific instructions
+ * that are injected into agent system prompts.
+ */
+export interface Skill {
+  /** Unique skill name (directory name under ~/.clade/skills/). */
+  name: string;
+
+  /** Unique identifier (typically same as name). */
+  id: string;
+
+  /** Human-readable description of the skill. */
+  description: string;
+
+  /** Skill version string. */
+  version: string;
+
+  /** Absolute path to the skill directory. */
+  path: string;
+
+  /** Current lifecycle status. */
+  status: SkillStatus;
+
+  /** Agent or user that requested installation (if any). */
+  requestedBy: string | null;
+
+  /** ISO-8601 timestamp of when the skill was installed. */
+  installedAt: string;
+
+  /** ISO-8601 timestamp of when the skill was approved (null if pending). */
+  approvedAt: string | null;
+}

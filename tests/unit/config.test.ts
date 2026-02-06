@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { ConfigSchema } from '../../src/config/schema.js';
+import { ConfigSchema, SkillsConfigSchema, AgentConfigSchema } from '../../src/config/schema.js';
 import {
   loadConfig,
   saveConfig,
@@ -12,6 +12,7 @@ import {
   getConfigPath,
 } from '../../src/config/index.js';
 import { generateDefaultConfig, DEFAULT_SOUL, DEFAULT_HEARTBEAT } from '../../src/config/defaults.js';
+import { migrateConfig, currentSchemaVersion } from '../../src/config/migrations.js';
 import type { Config } from '../../src/config/schema.js';
 import { mkdirSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -31,7 +32,7 @@ describe('Config Schema', () => {
     expect(config.gateway.port).toBe(7890);
     expect(config.gateway.host).toBe('127.0.0.1');
     expect(config.routing.defaultAgent).toBe('');
-    expect(config.version).toBe(3);
+    expect(config.version).toBe(4);
   });
 
   it('should validate a fully specified config', () => {
@@ -259,6 +260,146 @@ describe('Browser Config', () => {
   });
 });
 
+describe('Skills Config', () => {
+  it('should default skills to empty object with autoApprove array', () => {
+    const config = ConfigSchema.parse({});
+    expect(config.skills).toBeDefined();
+    expect(config.skills.autoApprove).toEqual([]);
+  });
+
+  it('should accept skills config with autoApprove list', () => {
+    const config = ConfigSchema.parse({
+      skills: { autoApprove: ['git-workflow', 'docker-helper'] },
+    });
+    expect(config.skills.autoApprove).toEqual(['git-workflow', 'docker-helper']);
+  });
+
+  it('should parse SkillsConfigSchema independently', () => {
+    const result = SkillsConfigSchema.parse({});
+    expect(result.autoApprove).toEqual([]);
+
+    const withApprove = SkillsConfigSchema.parse({ autoApprove: ['test-skill'] });
+    expect(withApprove.autoApprove).toEqual(['test-skill']);
+  });
+
+  it('should default agent skills to empty array', () => {
+    const config = ConfigSchema.parse({
+      agents: {
+        test: { name: 'Test Agent' },
+      },
+    });
+    expect(config.agents['test']!.skills).toEqual([]);
+  });
+
+  it('should accept agent with explicit skills list', () => {
+    const config = ConfigSchema.parse({
+      agents: {
+        test: {
+          name: 'Test Agent',
+          skills: ['git-workflow', 'code-review'],
+        },
+      },
+    });
+    expect(config.agents['test']!.skills).toEqual(['git-workflow', 'code-review']);
+  });
+
+  it('should validate agent config with skills via AgentConfigSchema', () => {
+    const agent = AgentConfigSchema.parse({
+      name: 'Skill Agent',
+      skills: ['debugging', 'testing'],
+    });
+    expect(agent.skills).toEqual(['debugging', 'testing']);
+    expect(agent.mcp).toEqual([]); // mcp remains separate
+  });
+
+  it('should coexist skills and mcp in agent config', () => {
+    const config = ConfigSchema.parse({
+      agents: {
+        hybrid: {
+          name: 'Hybrid Agent',
+          skills: ['git-workflow'],
+          mcp: ['memory', 'sessions'],
+        },
+      },
+    });
+    expect(config.agents['hybrid']!.skills).toEqual(['git-workflow']);
+    expect(config.agents['hybrid']!.mcp).toEqual(['memory', 'sessions']);
+  });
+
+  it('should coexist skills and mcp at root config level', () => {
+    const config = ConfigSchema.parse({
+      skills: { autoApprove: ['my-skill'] },
+      mcp: { autoApprove: ['my-mcp'] },
+    });
+    expect(config.skills.autoApprove).toEqual(['my-skill']);
+    expect(config.mcp.autoApprove).toEqual(['my-mcp']);
+  });
+});
+
+describe('Config Migrations', () => {
+  it('should report current schema version as 4', () => {
+    expect(currentSchemaVersion()).toBe(4);
+  });
+
+  it('should migrate v3 config to v4 by adding skills', () => {
+    const v3Config = {
+      version: 3,
+      agents: {
+        main: { name: 'Main', mcp: ['memory'] },
+      },
+      mcp: { autoApprove: [] },
+    };
+
+    const { config, applied } = migrateConfig(v3Config);
+    expect(config.version).toBe(4);
+    expect(applied).toHaveLength(1);
+    expect(applied[0]).toContain('skills');
+
+    // Root-level skills config should be added
+    expect(config.skills).toEqual({ autoApprove: [] });
+
+    // Each agent should get an empty skills array
+    const agents = config.agents as Record<string, Record<string, unknown>>;
+    expect(agents['main']!.skills).toEqual([]);
+    // mcp should be preserved
+    expect(agents['main']!.mcp).toEqual(['memory']);
+  });
+
+  it('should not re-migrate already v4 config', () => {
+    const v4Config = {
+      version: 4,
+      agents: {
+        main: { name: 'Main', skills: ['my-skill'], mcp: ['memory'] },
+      },
+      skills: { autoApprove: ['my-skill'] },
+      mcp: { autoApprove: [] },
+    };
+
+    const { config, applied } = migrateConfig(v4Config);
+    expect(applied).toHaveLength(0);
+    expect(config.version).toBe(4);
+  });
+
+  it('should migrate from v1 through v4', () => {
+    const v1Config = {
+      agents: {
+        old: { name: 'Old Agent' },
+      },
+    };
+
+    const { config, applied } = migrateConfig(v1Config);
+    expect(config.version).toBe(4);
+    expect(applied.length).toBeGreaterThanOrEqual(3);
+
+    // Should have skills at root level
+    expect(config.skills).toEqual({ autoApprove: [] });
+
+    // Agent should have skills array
+    const agents = config.agents as Record<string, Record<string, unknown>>;
+    expect(agents['old']!.skills).toEqual([]);
+  });
+});
+
 describe('Default Config Generation', () => {
   it('should generate a complete default config', () => {
     const config = generateDefaultConfig();
@@ -267,7 +408,14 @@ describe('Default Config Generation', () => {
     expect(config.gateway).toBeDefined();
     expect(config.routing).toBeDefined();
     expect(config.mcp).toBeDefined();
+    expect(config.skills).toBeDefined();
     expect(config.browser).toBeDefined();
+  });
+
+  it('should include skills in default config', () => {
+    const config = generateDefaultConfig();
+    expect(config.skills).toBeDefined();
+    expect(config.skills.autoApprove).toEqual([]);
   });
 
   it('should have a default SOUL template', () => {

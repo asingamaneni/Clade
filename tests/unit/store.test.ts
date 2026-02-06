@@ -33,6 +33,7 @@ describe('Store', () => {
       expect(tableNames).toContain('sessions');
       expect(tableNames).toContain('users');
       expect(tableNames).toContain('mcp_servers');
+      expect(tableNames).toContain('skills');
       expect(tableNames).toContain('cron_jobs');
       expect(tableNames).toContain('memory_index');
     });
@@ -53,6 +54,7 @@ describe('Store', () => {
       expect(stats['sessions']).toBe(0);
       expect(stats['users']).toBe(0);
       expect(stats['mcp_servers']).toBe(0);
+      expect(stats['skills']).toBe(0);
       expect(stats['cron_jobs']).toBe(0);
       expect(stats['memory_index']).toBe(0);
     });
@@ -289,6 +291,124 @@ describe('Store', () => {
       const server = store.getMcpServer('config-skill')!;
       const parsed = store.parseMcpServerConfig(server);
       expect(parsed).toEqual(config);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Skills CRUD
+  // -----------------------------------------------------------------------
+
+  describe('skills', () => {
+    it('should create and retrieve a skill', () => {
+      const skill = store.createSkill({
+        name: 'git-workflow',
+        description: 'Git workflow instructions',
+        requestedBy: 'main',
+      });
+
+      expect(skill.name).toBe('git-workflow');
+      expect(skill.status).toBe('pending');
+      expect(skill.description).toBe('Git workflow instructions');
+      expect(skill.requested_by).toBe('main');
+      expect(skill.created_at).toBeTruthy();
+    });
+
+    it('should get a skill by name', () => {
+      store.createSkill({ name: 'test-skill' });
+      const found = store.getSkill('test-skill');
+      expect(found).toBeDefined();
+      expect(found!.name).toBe('test-skill');
+    });
+
+    it('should return undefined for nonexistent skill', () => {
+      const found = store.getSkill('nonexistent');
+      expect(found).toBeUndefined();
+    });
+
+    it('should create skill with path', () => {
+      const skill = store.createSkill({
+        name: 'docker-helper',
+        path: '/home/user/.clade/skills/docker-helper',
+      });
+
+      expect(skill.path).toBe('/home/user/.clade/skills/docker-helper');
+    });
+
+    it('should approve a skill', () => {
+      store.createSkill({ name: 'approve-me' });
+      store.approveSkill('approve-me');
+
+      const skill = store.getSkill('approve-me');
+      expect(skill!.status).toBe('active');
+      expect(skill!.approved_at).toBeTruthy();
+    });
+
+    it('should disable a skill', () => {
+      store.createSkill({ name: 'disable-me' });
+      store.approveSkill('disable-me');
+      store.disableSkill('disable-me');
+
+      const skill = store.getSkill('disable-me');
+      expect(skill!.status).toBe('disabled');
+    });
+
+    it('should list skills by status', () => {
+      store.createSkill({ name: 'sk1' });
+      store.createSkill({ name: 'sk2' });
+      store.createSkill({ name: 'sk3' });
+      store.approveSkill('sk2');
+
+      const pending = store.listSkills('pending');
+      expect(pending).toHaveLength(2);
+
+      const active = store.listSkills('active');
+      expect(active).toHaveLength(1);
+      expect(active[0]!.name).toBe('sk2');
+    });
+
+    it('should list all skills when no status filter', () => {
+      store.createSkill({ name: 'a1' });
+      store.createSkill({ name: 'a2' });
+      store.approveSkill('a2');
+
+      const all = store.listSkills();
+      expect(all).toHaveLength(2);
+    });
+
+    it('should delete a skill', () => {
+      store.createSkill({ name: 'to-delete' });
+      const deleted = store.deleteSkill('to-delete');
+      expect(deleted).toBe(true);
+      expect(store.getSkill('to-delete')).toBeUndefined();
+    });
+
+    it('should return false when deleting nonexistent skill', () => {
+      const deleted = store.deleteSkill('ghost');
+      expect(deleted).toBe(false);
+    });
+
+    it('should create skill with explicit active status', () => {
+      const skill = store.createSkill({
+        name: 'pre-approved',
+        status: 'active',
+      });
+      expect(skill.status).toBe('active');
+    });
+
+    it('should handle skill without optional fields', () => {
+      const skill = store.createSkill({ name: 'minimal' });
+      expect(skill.name).toBe('minimal');
+      expect(skill.status).toBe('pending');
+      expect(skill.description).toBeNull();
+      expect(skill.path).toBeNull();
+      expect(skill.requested_by).toBeNull();
+      expect(skill.approved_at).toBeNull();
+    });
+
+    it('should include skills in stats', () => {
+      store.createSkill({ name: 'stat-skill' });
+      const stats = store.stats();
+      expect(stats['skills']).toBe(1);
     });
   });
 

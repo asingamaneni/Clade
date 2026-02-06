@@ -124,7 +124,7 @@ export class SessionManager {
 
       // 3. Build ClaudeOptions
       const soulContent = this.registry.readSoul(agentId);
-      const systemPrompt = this.buildSystemPrompt(agentId, soulContent);
+      const systemPrompt = this.buildSystemPrompt(agentId, soulContent, prompt);
       const mcpConfigPath = this.buildMcpConfig(agentId, agent.config);
       const allowedTools = resolveAllowedTools(
         agent.config.toolPreset,
@@ -198,7 +198,7 @@ export class SessionManager {
       }
 
       const soulContent = this.registry.readSoul(session.agent_id);
-      const systemPrompt = this.buildSystemPrompt(session.agent_id, soulContent);
+      const systemPrompt = this.buildSystemPrompt(session.agent_id, soulContent, prompt);
       const mcpConfigPath = this.buildMcpConfig(
         session.agent_id,
         agent.config,
@@ -271,11 +271,14 @@ export class SessionManager {
 
   /**
    * Build a combined system prompt: SOUL.md content + MEMORY.md + today's
-   * daily log.  This ensures agents always start with their persistent
-   * context regardless of which code path invokes the CLI (full gateway,
-   * channel adapters, webhooks, etc.).
+   * daily log + active skills.  This ensures agents always start with their
+   * persistent context regardless of which code path invokes the CLI (full
+   * gateway, channel adapters, webhooks, etc.).
+   *
+   * Skills (SKILL.md instruction files) are injected here as knowledge/instructions.
+   * MCP servers (tools/capabilities) are injected separately via --mcp-config.
    */
-  private buildSystemPrompt(agentId: string, soulContent: string): string {
+  private buildSystemPrompt(agentId: string, soulContent: string, prompt?: string): string {
     const parts: string[] = [];
 
     if (soulContent.trim()) {
@@ -312,6 +315,65 @@ export class SessionManager {
             ? '...\n' + dailyLog.slice(-2000)
             : dailyLog;
         parts.push("## Today's Activity Log\n\n" + truncated);
+      }
+    }
+
+    // Inject skill availability and on-demand skill content.
+    // Skills are SKILL.md instruction files that act as slash commands.
+    // We list available skills so the agent knows what's available, but only
+    // inject full content when the prompt explicitly invokes a skill (e.g. /skill-name).
+    const agent = this.registry.tryGet(agentId);
+    const skillNames = agent?.config.skills ?? [];
+    if (skillNames.length > 0) {
+      const skillsDir = join(homeDir, 'skills', 'active');
+      const availableSkills: string[] = [];
+      for (const skillName of skillNames) {
+        const skillMdPath = join(skillsDir, skillName, 'SKILL.md');
+        if (existsSync(skillMdPath)) {
+          availableSkills.push(skillName);
+        }
+      }
+
+      if (availableSkills.length > 0) {
+        // Check if any skills are invoked in the prompt (e.g., /code-review or /deploy-helper)
+        const invokedSkills: string[] = [];
+        if (prompt) {
+          for (const skillName of availableSkills) {
+            if (prompt.includes(`/${skillName}`)) {
+              invokedSkills.push(skillName);
+            }
+          }
+        }
+
+        // Inject full content for invoked skills
+        if (invokedSkills.length > 0) {
+          for (const skillName of invokedSkills) {
+            const skillMdPath = join(skillsDir, skillName, 'SKILL.md');
+            try {
+              const skillContent = readFileSync(skillMdPath, 'utf-8').trim();
+              if (skillContent) {
+                parts.push(`## Skill: ${skillName}\n\n${skillContent}`);
+              }
+            } catch (err: unknown) {
+              log.warn('Failed to read invoked skill file', {
+                skill: skillName,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          }
+        }
+
+        // List remaining available skills
+        const uninvoked = availableSkills.filter(s => !invokedSkills.includes(s));
+        const allSkillsList = availableSkills.map(s => `/${s}`).join(', ');
+        parts.push(
+          '## Available Skills\n\n' +
+          'You have the following skills available as slash commands: ' +
+          allSkillsList + '.\n' +
+          (uninvoked.length > 0 && invokedSkills.length > 0
+            ? 'Other skills can be invoked when needed.'
+            : 'When a skill is invoked, its instructions will be provided.')
+        );
       }
     }
 

@@ -272,6 +272,7 @@ export async function createGateway(deps: GatewayDeps) {
   registerSessionRoutes(app, deps);
   registerMemoryRoutes(app, deps);
   registerMcpRoutes(app, deps);
+  registerSkillRoutes(app, deps);
   registerChannelRoutes(app, deps);
   registerCronRoutes(app, deps);
   registerConfigRoutes(app, deps);
@@ -996,6 +997,298 @@ function registerMcpRoutes(app: FastifyInstance, deps: GatewayDeps): void {
       return reply.code(500).send({ error: message });
     }
   });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Skill Routes — /api/skills
+// ═══════════════════════════════════════════════════════════════════════════
+
+function registerSkillRoutes(app: FastifyInstance, deps: GatewayDeps): void {
+  const { store, agentRegistry: reg } = deps;
+  const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+  const skillsDir = join(cladeHome, 'skills');
+
+  // ── List all skills ───────────────────────────────────────────
+  app.get('/api/skills', async () => {
+    const skills = store.listSkills();
+    return { skills };
+  });
+
+  // ── Install / create a new skill ─────────────────────────────
+  app.post<{
+    Body: { name: string; description?: string; content?: string };
+  }>('/api/skills/install', async (req, reply) => {
+    const body = req.body as Record<string, unknown>;
+    const name = body.name as string | undefined;
+    const description = (body.description as string) ?? '';
+    const content = (body.content as string) ?? `# ${name}\n\n${description}\n`;
+
+    if (!name || typeof name !== 'string') {
+      return reply.code(400).send({ error: 'name is required' });
+    }
+
+    if (!/^[a-z0-9_-]+$/.test(name)) {
+      return reply.code(400).send({
+        error: 'Skill name must contain only lowercase letters, numbers, hyphens, and underscores.',
+      });
+    }
+
+    if (store.getSkill(name)) {
+      return reply.code(409).send({ error: `Skill "${name}" already exists` });
+    }
+
+    try {
+      // Create skill directory on disk
+      const skillDir = join(skillsDir, 'pending', name);
+      mkdirSync(skillDir, { recursive: true });
+      writeFileSync(join(skillDir, 'SKILL.md'), content, 'utf-8');
+
+      // Create in store
+      const skill = store.createSkill({
+        name,
+        description,
+        path: skillDir,
+        status: 'pending',
+      });
+
+      broadcastAdmin({ type: 'skill:installed', name, timestamp: new Date().toISOString() });
+      return reply.code(201).send({ success: true, skill });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to install skill';
+      return reply.code(500).send({ error: message });
+    }
+  });
+
+  // ── Approve pending skill ────────────────────────────────────
+  app.post<{ Params: { name: string } }>('/api/skills/:name/approve', async (req, reply) => {
+    const { name } = req.params;
+    const skill = store.getSkill(name);
+    if (!skill) {
+      return reply.code(404).send({ error: `Skill "${name}" not found` });
+    }
+    if (skill.status !== 'pending') {
+      return reply.code(400).send({
+        error: `Skill "${name}" is not pending (current status: ${skill.status})`,
+      });
+    }
+
+    try {
+      // Move directory from pending to active
+      const pendingDir = join(skillsDir, 'pending', name);
+      const activeDir = join(skillsDir, 'active', name);
+      mkdirSync(join(skillsDir, 'active'), { recursive: true });
+
+      if (existsSync(pendingDir)) {
+        const files = readdirSync(pendingDir);
+        mkdirSync(activeDir, { recursive: true });
+        for (const file of files) {
+          const content = readFileSync(join(pendingDir, file), 'utf-8');
+          writeFileSync(join(activeDir, file), content, 'utf-8');
+        }
+        const { rmSync } = await import('node:fs');
+        rmSync(pendingDir, { recursive: true });
+      }
+
+      // Update store
+      store.approveSkill(name);
+
+      // Update path in store via raw db
+      store.raw.prepare('UPDATE skills SET path = ? WHERE name = ?').run(activeDir, name);
+
+      broadcastAdmin({ type: 'skill:approved', name, timestamp: new Date().toISOString() });
+      const updated = store.getSkill(name);
+      return { success: true, skill: updated };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to approve skill';
+      return reply.code(500).send({ error: message });
+    }
+  });
+
+  // ── Reject pending skill ─────────────────────────────────────
+  app.post<{ Params: { name: string } }>('/api/skills/:name/reject', async (req, reply) => {
+    const { name } = req.params;
+    const skill = store.getSkill(name);
+    if (!skill) {
+      return reply.code(404).send({ error: `Skill "${name}" not found` });
+    }
+    if (skill.status !== 'pending') {
+      return reply.code(400).send({
+        error: `Skill "${name}" is not pending (current status: ${skill.status})`,
+      });
+    }
+
+    try {
+      // Move directory from pending to disabled
+      const pendingDir = join(skillsDir, 'pending', name);
+      const disabledDir = join(skillsDir, 'disabled', name);
+      mkdirSync(join(skillsDir, 'disabled'), { recursive: true });
+
+      if (existsSync(pendingDir)) {
+        const files = readdirSync(pendingDir);
+        mkdirSync(disabledDir, { recursive: true });
+        for (const file of files) {
+          const content = readFileSync(join(pendingDir, file), 'utf-8');
+          writeFileSync(join(disabledDir, file), content, 'utf-8');
+        }
+        const { rmSync } = await import('node:fs');
+        rmSync(pendingDir, { recursive: true });
+      }
+
+      store.disableSkill(name);
+
+      // Update path in store
+      store.raw.prepare('UPDATE skills SET path = ? WHERE name = ?').run(disabledDir, name);
+
+      broadcastAdmin({ type: 'skill:rejected', name, timestamp: new Date().toISOString() });
+      return { success: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to reject skill';
+      return reply.code(500).send({ error: message });
+    }
+  });
+
+  // ── Delete skill permanently ─────────────────────────────────
+  app.delete<{ Params: { name: string } }>('/api/skills/:name', async (req, reply) => {
+    const { name } = req.params;
+    const skill = store.getSkill(name);
+    if (!skill) {
+      return reply.code(404).send({ error: `Skill "${name}" not found` });
+    }
+
+    try {
+      // Remove directory from disk
+      for (const subdir of ['active', 'pending', 'disabled']) {
+        const dirPath = join(skillsDir, subdir, name);
+        if (existsSync(dirPath)) {
+          const { rmSync } = await import('node:fs');
+          rmSync(dirPath, { recursive: true });
+        }
+      }
+
+      // Remove from agent configs
+      for (const agent of reg.list()) {
+        if (agent.config.skills?.includes(name)) {
+          const updatedSkills = agent.config.skills.filter((s) => s !== name);
+          reg.register(agent.id, { ...agent.config, skills: updatedSkills });
+        }
+      }
+
+      store.deleteSkill(name);
+      broadcastAdmin({ type: 'skill:deleted', name, timestamp: new Date().toISOString() });
+      return { success: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to delete skill';
+      return reply.code(500).send({ error: message });
+    }
+  });
+
+  // ── Get skill detail (SKILL.md content) ──────────────────────
+  app.get<{ Params: { status: string; name: string } }>(
+    '/api/skills/:status/:name',
+    async (req, reply) => {
+      const { status, name } = req.params;
+      const dirPath = join(skillsDir, status, name);
+
+      if (!existsSync(dirPath)) {
+        return reply.code(404).send({ error: `Skill "${name}" not found in ${status}` });
+      }
+
+      try {
+        const files = readdirSync(dirPath);
+        const contents: Record<string, string> = {};
+        for (const file of files) {
+          contents[file] = readFileSync(join(dirPath, file), 'utf-8');
+        }
+        return { name, status, path: dirPath, files, contents };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to read skill';
+        return reply.code(500).send({ error: message });
+      }
+    },
+  );
+
+  // ── Assign skill to agent ────────────────────────────────────
+  app.post<{ Params: { name: string }; Body: { agentId: string } }>(
+    '/api/skills/:name/assign',
+    async (req, reply) => {
+      const { name } = req.params;
+      const body = req.body as Record<string, unknown>;
+      const agentId = body.agentId as string | undefined;
+
+      if (!agentId) {
+        return reply.code(400).send({ error: 'agentId is required' });
+      }
+
+      const skill = store.getSkill(name);
+      if (!skill) {
+        return reply.code(404).send({ error: `Skill "${name}" not found` });
+      }
+
+      const agent = reg.tryGet(agentId);
+      if (!agent) {
+        return reply.code(404).send({ error: `Agent "${agentId}" not found` });
+      }
+
+      try {
+        const currentSkills = agent.config.skills ?? [];
+        if (!currentSkills.includes(name)) {
+          reg.register(agentId, {
+            ...agent.config,
+            skills: [...currentSkills, name],
+          });
+        }
+
+        broadcastAdmin({
+          type: 'skill:assigned',
+          name,
+          agentId,
+          timestamp: new Date().toISOString(),
+        });
+        return { success: true };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to assign skill';
+        return reply.code(500).send({ error: message });
+      }
+    },
+  );
+
+  // ── Unassign skill from agent ────────────────────────────────
+  app.post<{ Params: { name: string }; Body: { agentId: string } }>(
+    '/api/skills/:name/unassign',
+    async (req, reply) => {
+      const { name } = req.params;
+      const body = req.body as Record<string, unknown>;
+      const agentId = body.agentId as string | undefined;
+
+      if (!agentId) {
+        return reply.code(400).send({ error: 'agentId is required' });
+      }
+
+      const agent = reg.tryGet(agentId);
+      if (!agent) {
+        return reply.code(404).send({ error: `Agent "${agentId}" not found` });
+      }
+
+      try {
+        const currentSkills = agent.config.skills ?? [];
+        reg.register(agentId, {
+          ...agent.config,
+          skills: currentSkills.filter((s) => s !== name),
+        });
+
+        broadcastAdmin({
+          type: 'skill:unassigned',
+          name,
+          agentId,
+          timestamp: new Date().toISOString(),
+        });
+        return { success: true };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to unassign skill';
+        return reply.code(500).send({ error: message });
+      }
+    },
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

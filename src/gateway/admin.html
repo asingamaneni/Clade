@@ -718,6 +718,7 @@
       { id: 'user',      label: 'User Profile', icon: '\u{1F464}' },
       { id: 'sessions',  label: 'Sessions',   icon: '\u{1F5C2}' },
       { id: 'mcp',       label: 'MCP Servers', icon: '\u{1F9E9}' },
+      { id: 'skills',    label: 'Skills',      icon: '\u{1F4DA}' },
       { id: 'channels',  label: 'Channels',   icon: '\u{1F4E1}' },
       { id: 'cron',      label: 'Cron',       icon: '\u{23F0}'  },
       { id: 'config',    label: 'Config',     icon: '\u{2699}\u{FE0F}' },
@@ -3332,6 +3333,291 @@ If nothing needs attention, respond with: HEARTBEAT_OK
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    //  PAGE 4b: Skills
+    // ═══════════════════════════════════════════════════════════════════
+
+    function SkillsPage({ skills, agents, onRefresh }) {
+      const [skillName, setSkillName] = useState('');
+      const [skillDesc, setSkillDesc] = useState('');
+      const [skillContent, setSkillContent] = useState('');
+      const [installing, setInstalling] = useState(false);
+      const [selectedSkill, setSelectedSkill] = useState(null);
+      const [skillDetail, setSkillDetail] = useState(null);
+      const [loadingDetail, setLoadingDetail] = useState(false);
+      const [assigningSkill, setAssigningSkill] = useState(null);
+      const [selectedAgentId, setSelectedAgentId] = useState('');
+
+      const active   = skills.filter(s => s.status === 'active');
+      const pending  = skills.filter(s => s.status === 'pending');
+      const disabled = skills.filter(s => s.status === 'disabled');
+
+      const approve = async (name) => {
+        try {
+          await api('/skills/' + encodeURIComponent(name) + '/approve', { method: 'POST' });
+          showToast('Skill "' + name + '" approved', 'success');
+          onRefresh && onRefresh();
+        } catch (e) { showToast('Approve failed: ' + e.message, 'error'); }
+      };
+
+      const reject = async (name) => {
+        try {
+          await api('/skills/' + encodeURIComponent(name) + '/reject', { method: 'POST' });
+          showToast('Skill "' + name + '" rejected', 'success');
+          onRefresh && onRefresh();
+        } catch (e) { showToast('Reject failed: ' + e.message, 'error'); }
+      };
+
+      const remove = async (name) => {
+        try {
+          await api('/skills/' + encodeURIComponent(name), { method: 'DELETE' });
+          showToast('Skill removed', 'success');
+          onRefresh && onRefresh();
+        } catch (e) { showToast('Remove failed: ' + e.message, 'error'); }
+      };
+
+      const install = async () => {
+        if (!skillName.trim()) return;
+        setInstalling(true);
+        try {
+          const result = await api('/skills/install', {
+            method: 'POST',
+            body: JSON.stringify({ name: skillName.trim(), description: skillDesc.trim() || undefined, content: skillContent.trim() || undefined }),
+            headers: { 'Content-Type': 'application/json' },
+          });
+          if (result.success) {
+            showToast('Skill "' + skillName + '" created', 'success');
+            setSkillName(''); setSkillDesc(''); setSkillContent('');
+            onRefresh && onRefresh();
+          } else {
+            showToast(result.error || 'Creation failed', 'error');
+          }
+        } catch (e) { showToast('Creation failed: ' + e.message, 'error'); }
+        setInstalling(false);
+      };
+
+      const openDetail = async (name, status) => {
+        setSelectedSkill({ name, status });
+        setLoadingDetail(true);
+        try {
+          const detail = await api('/skills/' + status + '/' + encodeURIComponent(name));
+          setSkillDetail(detail);
+        } catch (e) {
+          console.error('Failed to load skill detail:', e.message);
+          setSkillDetail(null);
+        }
+        setLoadingDetail(false);
+      };
+
+      const closeDetail = () => { setSelectedSkill(null); setSkillDetail(null); };
+
+      const assignToAgent = async (sName, agentId) => {
+        try {
+          await api('/skills/' + encodeURIComponent(sName) + '/assign', {
+            method: 'POST',
+            body: JSON.stringify({ agentId }),
+            headers: { 'Content-Type': 'application/json' },
+          });
+          showToast('Skill assigned to agent', 'success');
+          setAssigningSkill(null); setSelectedAgentId('');
+          onRefresh && onRefresh();
+        } catch (e) { showToast('Assign failed: ' + e.message, 'error'); }
+      };
+
+      const unassignFromAgent = async (sName, agentId) => {
+        try {
+          await api('/skills/' + encodeURIComponent(sName) + '/unassign', {
+            method: 'POST',
+            body: JSON.stringify({ agentId }),
+            headers: { 'Content-Type': 'application/json' },
+          });
+          showToast('Skill unassigned from agent', 'success');
+          onRefresh && onRefresh();
+        } catch (e) { showToast('Unassign failed: ' + e.message, 'error'); }
+      };
+
+      const getAssigned = (s) => s.assignedAgents || s.assigned_agents || [];
+
+      return html`
+        <div class="page-enter p-6">
+          <div class="flex items-center justify-between mb-5">
+            <h2 class="text-xl font-semibold" style="color:#e6edf3">Skills</h2>
+            <button class="btn btn-secondary" onClick=${onRefresh}>Refresh</button>
+          </div>
+
+          <!-- Pending approval section -->
+          ${pending.length > 0 && html`
+            <div class="mb-6">
+              <h3 class="text-sm font-semibold mb-3 flex items-center gap-2" style="color:#d29922">
+                \u{23F3} Pending Approval (${pending.length})
+              </h3>
+              <div class="space-y-2">
+                ${pending.map(s => html`
+                  <div key=${s.name} class="flex items-center justify-between p-4 rounded-lg" style="background:#1c2128;border:1px solid rgba(210,153,34,0.3)">
+                    <div class="min-w-0">
+                      <button onClick=${() => openDetail(s.name, 'pending')} class="text-sm font-medium hover:underline text-left" style="color:#e6edf3;background:none;border:none;cursor:pointer;padding:0">${s.name}</button>
+                      ${s.description && html`<div class="text-xs mt-0.5 truncate" style="color:#8b949e">${s.description}</div>`}
+                      ${(s.requestedBy || s.requested_by) && html`<div class="text-xs mt-0.5" style="color:#484f58">Requested by: ${s.requestedBy || s.requested_by}</div>`}
+                    </div>
+                    <div class="flex gap-2 flex-shrink-0 ml-4">
+                      <button class="btn btn-primary" style="padding:4px 14px;font-size:13px" onClick=${() => approve(s.name)}>Approve</button>
+                      <button class="btn btn-danger" style="padding:4px 14px;font-size:13px" onClick=${() => reject(s.name)}>Reject</button>
+                    </div>
+                  </div>
+                `)}
+              </div>
+            </div>
+          `}
+
+          <!-- Active skills section -->
+          <div class="mb-6">
+            <h3 class="text-sm font-semibold mb-3 flex items-center gap-2" style="color:#3fb950">
+              \u{2705} Active Skills (${active.length})
+            </h3>
+            ${active.length === 0
+              ? html`<div class="p-4 rounded-lg text-sm" style="background:#1c2128;border:1px solid rgba(63,185,80,0.2);color:#8b949e">No active skills installed.</div>`
+              : html`
+                <div class="space-y-2">
+                  ${active.map(s => {
+                    const assigned = getAssigned(s);
+                    return html`
+                      <div key=${s.name} class="p-4 rounded-lg" style="background:#1c2128;border:1px solid rgba(63,185,80,0.3)">
+                        <div class="flex items-center justify-between">
+                          <div class="min-w-0">
+                            <button onClick=${() => openDetail(s.name, 'active')} class="text-sm font-medium hover:underline text-left" style="color:#e6edf3;background:none;border:none;cursor:pointer;padding:0">${s.name}</button>
+                            ${s.description && html`<div class="text-xs mt-0.5 truncate" style="color:#8b949e">${s.description}</div>`}
+                          </div>
+                          <div class="flex gap-2 flex-shrink-0 ml-4">
+                            <button class="btn btn-secondary" style="padding:4px 14px;font-size:13px" onClick=${() => { setAssigningSkill(assigningSkill === s.name ? null : s.name); setSelectedAgentId(''); }}>Assign</button>
+                            <button class="btn btn-danger" style="padding:4px 14px;font-size:13px" onClick=${() => remove(s.name)}>Remove</button>
+                          </div>
+                        </div>
+                        ${assigned.length > 0 && html`
+                          <div class="flex flex-wrap gap-1.5 mt-3">
+                            ${assigned.map(agentId => {
+                              const agent = agents.find(a => a.id === agentId);
+                              return html`
+                                <span key=${agentId} class="badge badge-blue flex items-center gap-1" style="padding-right:4px">
+                                  <span>${agent && agent.emoji || '\u{1F916}'}</span>
+                                  <span>${agent && agent.name || agentId}</span>
+                                  <button onClick=${() => unassignFromAgent(s.name, agentId)} style="background:none;border:none;cursor:pointer;color:#8b949e;padding:0 2px;margin-left:2px" title="Unassign">\u{2715}</button>
+                                </span>
+                              `;
+                            })}
+                          </div>
+                        `}
+                        ${assigningSkill === s.name && html`
+                          <div class="flex gap-2 mt-3 pt-3" style="border-top:1px solid #30363d">
+                            <select value=${selectedAgentId} onChange=${e => setSelectedAgentId(e.target.value)} class="flex-1">
+                              <option value="">Select an agent...</option>
+                              ${agents.filter(a => !assigned.includes(a.id)).map(a => html`
+                                <option key=${a.id} value=${a.id}>${a.emoji || '\u{1F916}'} ${a.name}</option>
+                              `)}
+                            </select>
+                            <button class="btn btn-primary" style="padding:4px 14px;font-size:13px" disabled=${!selectedAgentId} onClick=${() => assignToAgent(s.name, selectedAgentId)}>Assign</button>
+                          </div>
+                        `}
+                      </div>
+                    `;
+                  })}
+                </div>
+              `
+            }
+          </div>
+
+          <!-- Disabled skills -->
+          ${disabled.length > 0 && html`
+            <div class="mb-6">
+              <h3 class="text-sm font-semibold mb-3 flex items-center gap-2" style="color:#8b949e">
+                \u{26D4} Disabled (${disabled.length})
+              </h3>
+              <div class="space-y-2">
+                ${disabled.map(s => html`
+                  <div key=${s.name} class="flex items-center justify-between p-4 rounded-lg" style="background:#1c2128;border:1px solid #30363d">
+                    <span class="text-sm" style="color:#8b949e">${s.name}</span>
+                    <button class="btn btn-danger flex-shrink-0 ml-4" style="padding:4px 14px;font-size:13px" onClick=${() => remove(s.name)}>Remove</button>
+                  </div>
+                `)}
+              </div>
+            </div>
+          `}
+
+          <!-- Empty state -->
+          ${skills.length === 0 && html`
+            <div class="flex flex-col items-center justify-center py-16 text-center">
+              <div class="text-4xl mb-3 opacity-30">\u{1F4DA}</div>
+              <p class="text-sm font-medium" style="color:#8b949e">No skills</p>
+              <p class="text-xs mt-1" style="color:#484f58">Create skills with SKILL.md instruction files below</p>
+            </div>
+          `}
+
+          <!-- Create skill form -->
+          <div class="mt-8 p-5 rounded-lg" style="background:#1c2128;border:1px solid #30363d">
+            <h3 class="text-sm font-semibold mb-3" style="color:#e6edf3">Create Skill</h3>
+            <div class="space-y-3">
+              <input
+                type="text"
+                value=${skillName}
+                onInput=${e => setSkillName(e.target.value)}
+                placeholder="Skill name (e.g. code-review, deploy-helper)"
+                disabled=${installing}
+              />
+              <input
+                type="text"
+                value=${skillDesc}
+                onInput=${e => setSkillDesc(e.target.value)}
+                placeholder="Description (optional)"
+                disabled=${installing}
+              />
+              <textarea
+                class="mono-editor"
+                rows="6"
+                value=${skillContent}
+                onInput=${e => setSkillContent(e.target.value)}
+                placeholder="SKILL.md content (markdown instructions, slash commands, project-specific knowledge)..."
+                disabled=${installing}
+              />
+              <button class="btn btn-primary" onClick=${install} disabled=${installing || !skillName.trim()}>
+                ${installing ? 'Creating...' : 'Create Skill'}
+              </button>
+            </div>
+            <p class="text-xs mt-2" style="color:#484f58">Skills are SKILL.md instruction files that provide slash commands, project-specific knowledge, and agent instructions. New skills go to pending and require approval.</p>
+          </div>
+
+          <!-- Skill Detail Modal -->
+          ${selectedSkill && html`
+            <div class="fixed inset-0 z-50 flex items-center justify-center" style="background:rgba(0,0,0,0.6)" onClick=${(e) => e.target === e.currentTarget && closeDetail()}>
+              <div class="rounded-lg p-6 w-full max-w-3xl max-h-[80vh] flex flex-col" style="background:#1c2128;border:1px solid #30363d">
+                <div class="flex items-center justify-between mb-4">
+                  <div class="flex items-center gap-2">
+                    <span>\u{1F4DA}</span>
+                    <h3 class="text-lg font-semibold" style="color:#e6edf3">${selectedSkill.name}</h3>
+                    <span class="badge ${selectedSkill.status === 'active' ? 'badge-green' : 'badge-gray'}">${selectedSkill.status}</span>
+                  </div>
+                  <button onClick=${closeDetail} style="background:none;border:none;cursor:pointer;color:#8b949e;font-size:18px">\u{2715}</button>
+                </div>
+                ${loadingDetail
+                  ? html`<${LoadingState} text="Loading skill details..." />`
+                  : skillDetail
+                    ? html`
+                      <div class="flex-1 min-h-0 overflow-hidden flex flex-col">
+                        ${skillDetail.description && html`<p class="text-sm mb-3" style="color:#8b949e">${skillDetail.description}</p>`}
+                        <div class="text-sm font-medium mb-2" style="color:#e6edf3">SKILL.md</div>
+                        <div class="flex-1 overflow-y-auto rounded p-4" style="background:#0f1117;border:1px solid #30363d">
+                          <pre class="text-xs font-mono whitespace-pre-wrap break-words" style="color:#e6edf3">${(skillDetail.contents && skillDetail.contents['SKILL.md']) || skillDetail.content || '(empty)'}</pre>
+                        </div>
+                        ${skillDetail.path && html`<div class="pt-3 mt-3 text-xs" style="color:#484f58;border-top:1px solid #30363d">Path: ${skillDetail.path}</div>`}
+                      </div>
+                    `
+                    : html`<div class="py-8 text-center" style="color:#8b949e">Failed to load skill details</div>`
+                }
+              </div>
+            </div>
+          `}
+        </div>
+      `;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     //  PAGE 5: Channels
     // ═══════════════════════════════════════════════════════════════════
 
@@ -3792,6 +4078,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
       const [agents, setAgents]     = useState([]);
       const [sessions, setSessions] = useState([]);
       const [mcpServers, setMcpServers] = useState([]);
+      const [skills, setSkills] = useState([]);
       const [cronJobs, setCronJobs] = useState([]);
       const [channels, setChannels] = useState([]);
       const [agentFilesTick, setAgentFilesTick] = useState(0);
@@ -3801,6 +4088,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
       const fetchAgents   = useCallback(() => api('/agents').then(d => setAgents(d.agents || [])).catch(() => {}), []);
       const fetchSessions = useCallback(() => api('/sessions').then(d => setSessions(d.sessions || [])).catch(() => {}), []);
       const fetchMcp      = useCallback(() => api('/mcp').then(d => setMcpServers(d.mcpServers || [])).catch(() => {}), []);
+      const fetchSkills   = useCallback(() => api('/skills').then(d => setSkills(d.skills || [])).catch(() => {}), []);
       const fetchCron     = useCallback(() => api('/cron').then(d => setCronJobs(d.jobs || [])).catch(() => {}), []);
       const fetchChannels = useCallback(() => api('/channels').then(d => setChannels(d.channels || [])).catch(() => {}), []);
       const fetchHealth   = useCallback(() => healthApi().then(h => { if (h) setHealth(h); }), []);
@@ -3808,9 +4096,9 @@ If nothing needs attention, respond with: HEARTBEAT_OK
       const fetchAll = useCallback(() => {
         return Promise.allSettled([
           fetchHealth(), fetchAgents(), fetchSessions(),
-          fetchMcp(), fetchCron(), fetchChannels(),
+          fetchMcp(), fetchSkills(), fetchCron(), fetchChannels(),
         ]);
-      }, [fetchHealth, fetchAgents, fetchSessions, fetchMcp, fetchCron, fetchChannels]);
+      }, [fetchHealth, fetchAgents, fetchSessions, fetchMcp, fetchSkills, fetchCron, fetchChannels]);
 
       // ── WebSocket ────────────────────────────────────────────────
       useEffect(() => {
@@ -3834,6 +4122,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
                 if (domain === 'agent' || domain === 'memory')  { fetchAgents(); setAgentFilesTick(t => t + 1); }
                 else if (domain === 'session')                   fetchSessions();
                 else if (domain === 'mcp')                       fetchMcp();
+                else if (domain === 'skill')                     fetchSkills();
                 else if (domain === 'cron')                      fetchCron();
                 else if (domain === 'channel' || domain === 'webchat') fetchChannels();
                 else if (domain === 'config')                    fetchAll();
@@ -3852,7 +4141,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
 
         connect();
         return () => { clearTimeout(reconTimer); if (ws) ws.close(); };
-      }, [fetchAll, fetchAgents, fetchSessions, fetchMcp, fetchCron, fetchChannels]);
+      }, [fetchAll, fetchAgents, fetchSessions, fetchMcp, fetchSkills, fetchCron, fetchChannels]);
 
       // ── Initial load ─────────────────────────────────────────────
       useEffect(() => { fetchAll(); }, []);
@@ -3894,6 +4183,8 @@ If nothing needs attention, respond with: HEARTBEAT_OK
             return html`<${SessionsPage} sessions=${sessions} onRefresh=${fetchSessions} />`;
           case 'mcp':
             return html`<${McpPage} mcpServers=${mcpServers} onRefresh=${fetchMcp} />`;
+          case 'skills':
+            return html`<${SkillsPage} skills=${skills} agents=${agents} onRefresh=${fetchSkills} />`;
           case 'channels':
             return html`<${ChannelsPage} channels=${channels} onRefresh=${fetchChannels} />`;
           case 'cron':

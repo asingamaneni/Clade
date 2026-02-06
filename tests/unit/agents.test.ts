@@ -156,6 +156,88 @@ describe('AgentRegistry', () => {
   });
 });
 
+describe('Agent Skills Config', () => {
+  beforeEach(() => {
+    process.env['CLADE_HOME'] = TEST_HOME;
+    mkdirSync(TEST_HOME, { recursive: true });
+    mkdirSync(join(TEST_HOME, 'agents'), { recursive: true });
+  });
+
+  afterEach(() => {
+    delete process.env['CLADE_HOME'];
+    if (existsSync(TEST_HOME)) {
+      rmSync(TEST_HOME, { recursive: true, force: true });
+    }
+  });
+
+  it('should load agent with skills array from config', () => {
+    const config = ConfigSchema.parse({
+      agents: {
+        skillful: {
+          name: 'Skillful Agent',
+          skills: ['git-workflow', 'code-review'],
+          mcp: ['memory'],
+        },
+      },
+    });
+
+    const registry = new AgentRegistry(config);
+    const agent = registry.get('skillful');
+    expect(agent.config.skills).toEqual(['git-workflow', 'code-review']);
+    expect(agent.config.mcp).toEqual(['memory']);
+  });
+
+  it('should default skills to empty array', () => {
+    const config = ConfigSchema.parse({
+      agents: {
+        noskills: { name: 'No Skills Agent' },
+      },
+    });
+
+    const registry = new AgentRegistry(config);
+    const agent = registry.get('noskills');
+    expect(agent.config.skills).toEqual([]);
+  });
+
+  it('should preserve skills and mcp independently', () => {
+    const config = ConfigSchema.parse({
+      agents: {
+        hybrid: {
+          name: 'Hybrid',
+          skills: ['debugging'],
+          mcp: ['sessions', 'memory'],
+          toolPreset: 'coding',
+        },
+      },
+    });
+
+    const registry = new AgentRegistry(config);
+    const agent = registry.get('hybrid');
+    expect(agent.config.skills).toEqual(['debugging']);
+    expect(agent.config.mcp).toEqual(['sessions', 'memory']);
+    expect(agent.config.toolPreset).toBe('coding');
+  });
+
+  it('should register agent with skills at runtime', () => {
+    const config = ConfigSchema.parse({});
+    const registry = new AgentRegistry(config);
+
+    const agent = registry.register('runtime-skill', {
+      name: 'Runtime Skill Agent',
+      description: '',
+      model: 'sonnet',
+      toolPreset: 'full',
+      customTools: [],
+      mcp: [],
+      skills: ['new-skill'],
+      heartbeat: { enabled: false, interval: '30m', mode: 'check', suppressOk: true },
+      maxTurns: 25,
+    });
+
+    expect(agent.config.skills).toEqual(['new-skill']);
+  });
+});
+
 describe('Tool Presets', () => {
   it('should resolve potato preset to empty array', () => {
     const tools = resolveAllowedTools('potato');

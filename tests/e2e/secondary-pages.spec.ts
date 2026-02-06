@@ -47,6 +47,69 @@ test.describe('Secondary Pages', () => {
   });
 
   // ═══════════════════════════════════════════════════════════════════════
+  // Skills page
+  // ═══════════════════════════════════════════════════════════════════════
+
+  test('Skills page loads', async ({ page }) => {
+    await page.goto(server.baseUrl + '/admin');
+    await page.waitForLoadState('networkidle');
+    await page.locator('text=Skills').first().click();
+    await page.waitForTimeout(500);
+    // Skills page should show - look for "Skill" in the page
+    const hasSkills = await page.locator('text=/[Ss]kill/').first().isVisible();
+    expect(hasSkills).toBe(true);
+  });
+
+  test('Skills API returns pre-seeded skills from disk', async ({ request }) => {
+    const res = await request.get(server.baseUrl + '/api/skills');
+    expect(res.ok()).toBe(true);
+    const body = await res.json();
+    expect(body.skills).toBeDefined();
+    expect(Array.isArray(body.skills)).toBe(true);
+    // Should have the pre-seeded 'code-review' skill loaded from disk
+    const codeReview = body.skills.find((s: { name: string }) => s.name === 'code-review');
+    expect(codeReview).toBeDefined();
+    expect(codeReview.status).toBe('active');
+  });
+
+  test('Skills API full lifecycle: install, approve, delete', async ({ request }) => {
+    // Install a skill
+    const installRes = await request.post(server.baseUrl + '/api/skills/install', {
+      data: {
+        name: 'e2e-test-skill',
+        description: 'E2E test skill',
+        content: '# E2E Test Skill\n\nTest instructions.\n',
+      },
+    });
+    expect(installRes.status()).toBe(201);
+    const installBody = await installRes.json();
+    expect(installBody.skill.status).toBe('pending');
+
+    // Approve it
+    const approveRes = await request.post(server.baseUrl + '/api/skills/e2e-test-skill/approve');
+    expect(approveRes.ok()).toBe(true);
+    const approveBody = await approveRes.json();
+    expect(approveBody.skill.status).toBe('active');
+
+    // Verify it appears in the list
+    const listRes = await request.get(server.baseUrl + '/api/skills');
+    const listBody = await listRes.json();
+    const found = listBody.skills.find((s: { name: string }) => s.name === 'e2e-test-skill');
+    expect(found).toBeDefined();
+    expect(found.status).toBe('active');
+
+    // Delete it
+    const deleteRes = await request.delete(server.baseUrl + '/api/skills/e2e-test-skill');
+    expect(deleteRes.ok()).toBe(true);
+
+    // Verify it is gone
+    const afterDelete = await request.get(server.baseUrl + '/api/skills');
+    const afterDeleteBody = await afterDelete.json();
+    const gone = afterDeleteBody.skills.find((s: { name: string }) => s.name === 'e2e-test-skill');
+    expect(gone).toBeUndefined();
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
   // Channels page
   // ═══════════════════════════════════════════════════════════════════════
 

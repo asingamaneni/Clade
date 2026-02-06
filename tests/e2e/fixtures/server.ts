@@ -47,13 +47,16 @@ function seedTestHome(cladeHome: string, port: number): void {
     join(cladeHome, 'data', 'uploads'),
     join(cladeHome, 'mcp', 'active'),
     join(cladeHome, 'mcp', 'pending'),
+    join(cladeHome, 'skills', 'active'),
+    join(cladeHome, 'skills', 'pending'),
+    join(cladeHome, 'skills', 'disabled'),
     join(cladeHome, 'logs'),
   ];
   for (const d of dirs) mkdirSync(d, { recursive: true });
 
   // Config
   const config = {
-    version: 2,
+    version: 4,
     agents: {
       jarvis: {
         name: 'Jarvis',
@@ -62,6 +65,7 @@ function seedTestHome(cladeHome: string, port: number): void {
         toolPreset: 'coding',
         customTools: [],
         mcp: [],
+        skills: [],
         heartbeat: { enabled: false, interval: '30m', mode: 'check', suppressOk: true },
         reflection: { enabled: false, interval: 10 },
         maxTurns: 5,
@@ -74,6 +78,7 @@ function seedTestHome(cladeHome: string, port: number): void {
         toolPreset: 'messaging',
         customTools: [],
         mcp: [],
+        skills: [],
         heartbeat: { enabled: true, interval: '15m', mode: 'check', suppressOk: true },
         reflection: { enabled: true, interval: 10 },
         maxTurns: 10,
@@ -88,6 +93,7 @@ function seedTestHome(cladeHome: string, port: number): void {
     },
     gateway: { port, host: '127.0.0.1' },
     routing: { defaultAgent: 'jarvis', rules: [] },
+    skills: { autoApprove: [] },
   };
   writeFileSync(join(cladeHome, 'config.json'), JSON.stringify(config, null, 2));
 
@@ -126,6 +132,14 @@ function seedTestHome(cladeHome: string, port: number): void {
   writeFileSync(
     join(cladeHome, 'agents', 'jarvis', 'memory', `${today}.md`),
     `# ${today}\n\n- Fixed a TypeScript build issue\n- Discussed refactoring the API layer\n`,
+  );
+
+  // Pre-seed an active skill on disk (to test startup scanning)
+  const preseededSkillDir = join(cladeHome, 'skills', 'active', 'code-review');
+  mkdirSync(preseededSkillDir, { recursive: true });
+  writeFileSync(
+    join(preseededSkillDir, 'SKILL.md'),
+    '# Code Review\n\nReview code for quality, security, and best practices.\n\n- Check for OWASP top 10\n- Verify error handling\n',
   );
 
   // Pre-seed a chat conversation for jarvis

@@ -111,6 +111,9 @@ export const AgentConfigSchema = z.object({
   /** MCP server names to attach (e.g. ["memory", "sessions"]). */
   mcp: z.array(z.string()).default([]),
 
+  /** Skill names to attach (SKILL.md instruction files injected into system prompt). */
+  skills: z.array(z.string()).default([]),
+
   /** Heartbeat / proactive monitoring configuration. */
   heartbeat: HeartbeatConfigSchema.default({ enabled: true }),
 
@@ -254,6 +257,17 @@ export const McpConfigSchema = z.object({
 export type McpConfig = z.infer<typeof McpConfigSchema>;
 
 // ---------------------------------------------------------------------------
+// Skills configuration
+// ---------------------------------------------------------------------------
+
+export const SkillsConfigSchema = z.object({
+  /** Skill names that are auto-approved when requested by agents. */
+  autoApprove: z.array(z.string()).default([]),
+});
+
+export type SkillsConfig = z.infer<typeof SkillsConfigSchema>;
+
+// ---------------------------------------------------------------------------
 // Browser / Playwright MCP configuration
 // ---------------------------------------------------------------------------
 
@@ -309,7 +323,7 @@ export type BrowserConfig = z.infer<typeof BrowserConfigSchema>;
 
 export const ConfigSchema = z.object({
   /** Schema version for config migration support. */
-  version: z.number().int().default(3),
+  version: z.number().int().default(4),
 
   /** Agents are user-created. No pre-defined agents — starts empty. */
   agents: z
@@ -323,6 +337,9 @@ export const ConfigSchema = z.object({
   routing: RoutingConfigSchema.default({}),
 
   mcp: McpConfigSchema.default({}),
+
+  /** Skills configuration (SKILL.md instruction files). */
+  skills: SkillsConfigSchema.default({}),
 
   /** Browser automation configuration (Playwright MCP). */
   browser: BrowserConfigSchema.default({}),

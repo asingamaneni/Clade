@@ -1228,6 +1228,8 @@ async function startPlaceholderServer(
         toolPreset: a.toolPreset ?? 'full',
         emoji: a.emoji ?? '',
         admin: a.admin ?? undefined,
+        skills: a.skills ?? [],
+        mcp: a.mcp ?? [],
       })),
     };
   });
@@ -1866,6 +1868,321 @@ async function startPlaceholderServer(
       reply.status(500);
       return { error: `Installation failed: ${err instanceof Error ? err.message : 'Unknown error'}` };
     }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Skills API — /api/skills
+  // ═══════════════════════════════════════════════════════════════════════
+
+  function broadcastAdmin(msg: Record<string, unknown>): void {
+    const payload = JSON.stringify(msg);
+    for (const ws of wsClients) {
+      try { ws.send(payload); } catch { /* ignore closed sockets */ }
+    }
+  }
+
+  const skillsCladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+  const skillsDir = join(skillsCladeHome, 'skills');
+
+  // In-memory skill metadata (lightweight store for placeholder server)
+  interface SkillMeta {
+    name: string;
+    status: 'pending' | 'active' | 'disabled';
+    description: string;
+    path: string;
+    created_at: string;
+    approved_at: string | null;
+  }
+  const skillsMeta = new Map<string, SkillMeta>();
+
+  // Scan existing skills from disk on startup
+  for (const status of ['active', 'pending', 'disabled'] as const) {
+    const dir = join(skillsDir, status);
+    if (existsSync(dir)) {
+      for (const name of readdirSync(dir)) {
+        const skillPath = join(dir, name);
+        // Skip non-directories and hidden files
+        try {
+          const stat = require('fs').statSync(skillPath);
+          if (!stat.isDirectory()) continue;
+        } catch { continue; }
+
+        let description = '';
+        const skillMdPath = join(skillPath, 'SKILL.md');
+        if (existsSync(skillMdPath)) {
+          const content = readFileSync(skillMdPath, 'utf-8');
+          const descMatch = content.match(/^#[^\n]*\n+([^\n]+)/);
+          if (descMatch) description = descMatch[1].trim();
+        }
+
+        skillsMeta.set(name, {
+          name,
+          status,
+          description,
+          path: skillPath,
+          created_at: new Date().toISOString(),
+          approved_at: status === 'active' ? new Date().toISOString() : null,
+        });
+      }
+    }
+  }
+
+  // ── List all skills ─────────────────────────────────────────
+  fastify.get('/api/skills', async () => {
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const skillsList = Array.from(skillsMeta.values()).map(skill => {
+      // Compute which agents have this skill assigned
+      const assignedAgents: string[] = [];
+      for (const [agentId, agentCfg] of Object.entries(agents)) {
+        const agentSkills = (agentCfg.skills as string[]) ?? [];
+        if (agentSkills.includes(skill.name)) {
+          assignedAgents.push(agentId);
+        }
+      }
+      return { ...skill, assignedAgents };
+    });
+    return { skills: skillsList };
+  });
+
+  // ── Install / create a new skill ────────────────────────────
+  fastify.post('/api/skills/install', async (req, reply) => {
+    const body = req.body as Record<string, unknown>;
+    const name = body.name as string | undefined;
+    const description = (body.description as string) ?? '';
+    const content = (body.content as string) ?? `# ${name}\n\n${description}\n`;
+
+    if (!name || typeof name !== 'string') {
+      reply.status(400);
+      return { error: 'name is required' };
+    }
+
+    if (!/^[a-z0-9_-]+$/.test(name)) {
+      reply.status(400);
+      return { error: 'Skill name must contain only lowercase letters, numbers, hyphens, and underscores.' };
+    }
+
+    if (skillsMeta.has(name)) {
+      reply.status(409);
+      return { error: `Skill "${name}" already exists` };
+    }
+
+    try {
+      const skillDir = join(skillsDir, 'pending', name);
+      mkdirSync(skillDir, { recursive: true });
+      writeFileSync(join(skillDir, 'SKILL.md'), content, 'utf-8');
+
+      const skill: SkillMeta = {
+        name,
+        status: 'pending',
+        description,
+        path: skillDir,
+        created_at: new Date().toISOString(),
+        approved_at: null,
+      };
+      skillsMeta.set(name, skill);
+
+      broadcastAdmin({ type: 'skill:installed', name, timestamp: new Date().toISOString() });
+      reply.status(201);
+      return { success: true, skill };
+    } catch (err) {
+      reply.status(500);
+      return { error: `Failed to install skill: ${err instanceof Error ? err.message : 'Unknown error'}` };
+    }
+  });
+
+  // ── Approve pending skill ───────────────────────────────────
+  fastify.post<{ Params: { name: string } }>('/api/skills/:name/approve', async (req, reply) => {
+    const { name } = req.params;
+    const skill = skillsMeta.get(name);
+    if (!skill) {
+      reply.status(404);
+      return { error: `Skill "${name}" not found` };
+    }
+    if (skill.status !== 'pending') {
+      reply.status(400);
+      return { error: `Skill "${name}" is not pending (current status: ${skill.status})` };
+    }
+
+    try {
+      const pendingPath = join(skillsDir, 'pending', name);
+      const activePath = join(skillsDir, 'active', name);
+      mkdirSync(join(skillsDir, 'active'), { recursive: true });
+
+      if (existsSync(pendingPath)) {
+        const files = readdirSync(pendingPath);
+        mkdirSync(activePath, { recursive: true });
+        for (const file of files) {
+          const fileContent = readFileSync(join(pendingPath, file), 'utf-8');
+          writeFileSync(join(activePath, file), fileContent, 'utf-8');
+        }
+        rmSync(pendingPath, { recursive: true, force: true });
+      }
+
+      skill.status = 'active';
+      skill.path = activePath;
+      skill.approved_at = new Date().toISOString();
+
+      broadcastAdmin({ type: 'skill:approved', name, timestamp: new Date().toISOString() });
+      return { success: true, skill };
+    } catch (err) {
+      reply.status(500);
+      return { error: `Failed to approve skill: ${err instanceof Error ? err.message : 'Unknown error'}` };
+    }
+  });
+
+  // ── Reject pending skill ────────────────────────────────────
+  fastify.post<{ Params: { name: string } }>('/api/skills/:name/reject', async (req, reply) => {
+    const { name } = req.params;
+    const skill = skillsMeta.get(name);
+    if (!skill) {
+      reply.status(404);
+      return { error: `Skill "${name}" not found` };
+    }
+    if (skill.status !== 'pending') {
+      reply.status(400);
+      return { error: `Skill "${name}" is not pending (current status: ${skill.status})` };
+    }
+
+    try {
+      const pendingPath = join(skillsDir, 'pending', name);
+      const disabledPath = join(skillsDir, 'disabled', name);
+      mkdirSync(join(skillsDir, 'disabled'), { recursive: true });
+
+      if (existsSync(pendingPath)) {
+        const files = readdirSync(pendingPath);
+        mkdirSync(disabledPath, { recursive: true });
+        for (const file of files) {
+          const fileContent = readFileSync(join(pendingPath, file), 'utf-8');
+          writeFileSync(join(disabledPath, file), fileContent, 'utf-8');
+        }
+        rmSync(pendingPath, { recursive: true, force: true });
+      }
+
+      skill.status = 'disabled';
+      skill.path = disabledPath;
+
+      broadcastAdmin({ type: 'skill:rejected', name, timestamp: new Date().toISOString() });
+      return { success: true };
+    } catch (err) {
+      reply.status(500);
+      return { error: `Failed to reject skill: ${err instanceof Error ? err.message : 'Unknown error'}` };
+    }
+  });
+
+  // ── Delete skill permanently ────────────────────────────────
+  fastify.delete<{ Params: { name: string } }>('/api/skills/:name', async (req, reply) => {
+    const { name } = req.params;
+    const skill = skillsMeta.get(name);
+    if (!skill) {
+      reply.status(404);
+      return { error: `Skill "${name}" not found` };
+    }
+
+    try {
+      for (const subdir of ['active', 'pending', 'disabled']) {
+        const dirPath = join(skillsDir, subdir, name);
+        if (existsSync(dirPath)) {
+          rmSync(dirPath, { recursive: true, force: true });
+        }
+      }
+
+      // Remove from agent configs
+      const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+      for (const [, agentConfig] of Object.entries(agents)) {
+        const agentSkills = agentConfig.skills as string[] | undefined;
+        if (agentSkills?.includes(name)) {
+          agentConfig.skills = agentSkills.filter((s: string) => s !== name);
+        }
+      }
+
+      skillsMeta.delete(name);
+      broadcastAdmin({ type: 'skill:deleted', name, timestamp: new Date().toISOString() });
+      return { success: true };
+    } catch (err) {
+      reply.status(500);
+      return { error: `Failed to delete skill: ${err instanceof Error ? err.message : 'Unknown error'}` };
+    }
+  });
+
+  // ── Get skill detail ────────────────────────────────────────
+  fastify.get<{ Params: { status: string; name: string } }>('/api/skills/:status/:name', async (req, reply) => {
+    const { status, name } = req.params;
+    const dirPath = join(skillsDir, status, name);
+
+    if (!existsSync(dirPath)) {
+      reply.status(404);
+      return { error: `Skill "${name}" not found in ${status}` };
+    }
+
+    try {
+      const files = readdirSync(dirPath);
+      const contents: Record<string, string> = {};
+      for (const file of files) {
+        contents[file] = readFileSync(join(dirPath, file), 'utf-8');
+      }
+      return { name, status, path: dirPath, files, contents };
+    } catch (err) {
+      reply.status(500);
+      return { error: `Failed to read skill: ${err instanceof Error ? err.message : 'Unknown error'}` };
+    }
+  });
+
+  // ── Assign skill to agent ───────────────────────────────────
+  fastify.post<{ Params: { name: string } }>('/api/skills/:name/assign', async (req, reply) => {
+    const { name } = req.params;
+    const body = req.body as Record<string, unknown>;
+    const agentId = body.agentId as string | undefined;
+
+    if (!agentId) {
+      reply.status(400);
+      return { error: 'agentId is required' };
+    }
+
+    const skill = skillsMeta.get(name);
+    if (!skill) {
+      reply.status(404);
+      return { error: `Skill "${name}" not found` };
+    }
+
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const agent = agents[agentId];
+    if (!agent) {
+      reply.status(404);
+      return { error: `Agent "${agentId}" not found` };
+    }
+
+    const currentSkills = (agent.skills as string[]) ?? [];
+    if (!currentSkills.includes(name)) {
+      agent.skills = [...currentSkills, name];
+    }
+
+    broadcastAdmin({ type: 'skill:assigned', name, agentId, timestamp: new Date().toISOString() });
+    return { success: true };
+  });
+
+  // ── Unassign skill from agent ───────────────────────────────
+  fastify.post<{ Params: { name: string } }>('/api/skills/:name/unassign', async (req, reply) => {
+    const { name } = req.params;
+    const body = req.body as Record<string, unknown>;
+    const agentId = body.agentId as string | undefined;
+
+    if (!agentId) {
+      reply.status(400);
+      return { error: 'agentId is required' };
+    }
+
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+    const agent = agents[agentId];
+    if (!agent) {
+      reply.status(404);
+      return { error: `Agent "${agentId}" not found` };
+    }
+
+    const currentSkills = (agent.skills as string[]) ?? [];
+    agent.skills = currentSkills.filter((s: string) => s !== name);
+
+    broadcastAdmin({ type: 'skill:unassigned', name, agentId, timestamp: new Date().toISOString() });
+    return { success: true };
   });
 
   fastify.get('/api/channels', async () => ({

@@ -77,6 +77,16 @@ test.describe('REST API', () => {
     expect(scout.emoji).toBe('\u{1F50D}');
   });
 
+  test('GET /api/agents includes skills and mcp arrays', async ({ request }) => {
+    const res = await request.get(`${server.baseUrl}/api/agents`);
+    expect(res.ok()).toBe(true);
+    const body = await res.json();
+    const jarvis = body.agents.find((a: { id: string }) => a.id === 'jarvis');
+    expect(jarvis).toBeDefined();
+    expect(Array.isArray(jarvis.skills)).toBe(true);
+    expect(Array.isArray(jarvis.mcp)).toBe(true);
+  });
+
   // ═══════════════════════════════════════════════════════════════════════
   // Agent detail
   // ═══════════════════════════════════════════════════════════════════════
@@ -460,7 +470,188 @@ test.describe('REST API', () => {
   });
 
   // ═══════════════════════════════════════════════════════════════════════
-  // Stubs
+  // Skills
+  // ═══════════════════════════════════════════════════════════════════════
+
+  test('GET /api/skills loads pre-seeded skills from disk on startup', async ({ request }) => {
+    const res = await request.get(`${server.baseUrl}/api/skills`);
+    expect(res.ok()).toBe(true);
+    const body = await res.json();
+    expect(body.skills).toBeDefined();
+    expect(Array.isArray(body.skills)).toBe(true);
+    // Should have the pre-seeded 'code-review' skill from disk
+    const codeReview = body.skills.find((s: { name: string }) => s.name === 'code-review');
+    expect(codeReview).toBeDefined();
+    expect(codeReview.status).toBe('active');
+    expect(codeReview.description).toContain('Review code');
+  });
+
+  test('POST /api/skills/install creates a pending skill', async ({ request }) => {
+    const res = await request.post(`${server.baseUrl}/api/skills/install`, {
+      data: {
+        name: 'git-workflow',
+        description: 'Git branching workflow instructions',
+        content: '# Git Workflow\n\nUse feature branches.\n',
+      },
+    });
+    expect(res.status()).toBe(201);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.skill).toBeDefined();
+    expect(body.skill.name).toBe('git-workflow');
+    expect(body.skill.status).toBe('pending');
+    expect(body.skill.description).toBe('Git branching workflow instructions');
+  });
+
+  test('POST /api/skills/install rejects duplicate name', async ({ request }) => {
+    // Ensure the skill exists first (may have been created by previous test)
+    const check = await request.get(`${server.baseUrl}/api/skills`);
+    const checkBody = await check.json();
+    if (!checkBody.skills.find((s: { name: string }) => s.name === 'git-workflow')) {
+      await request.post(`${server.baseUrl}/api/skills/install`, {
+        data: { name: 'git-workflow', description: 'test' },
+      });
+    }
+
+    const res = await request.post(`${server.baseUrl}/api/skills/install`, {
+      data: { name: 'git-workflow', description: 'duplicate' },
+    });
+    expect(res.status()).toBe(409);
+    const body = await res.json();
+    expect(body.error).toContain('already exists');
+  });
+
+  test('POST /api/skills/install rejects invalid name', async ({ request }) => {
+    const res = await request.post(`${server.baseUrl}/api/skills/install`, {
+      data: { name: 'Invalid Name!', description: 'bad' },
+    });
+    expect(res.status()).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBeDefined();
+  });
+
+  test('POST /api/skills/install rejects missing name', async ({ request }) => {
+    const res = await request.post(`${server.baseUrl}/api/skills/install`, {
+      data: { description: 'no name' },
+    });
+    expect(res.status()).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain('name');
+  });
+
+  test('GET /api/skills lists installed skills', async ({ request }) => {
+    const res = await request.get(`${server.baseUrl}/api/skills`);
+    expect(res.ok()).toBe(true);
+    const body = await res.json();
+    expect(body.skills.length).toBeGreaterThanOrEqual(1);
+    const gitSkill = body.skills.find((s: { name: string }) => s.name === 'git-workflow');
+    expect(gitSkill).toBeDefined();
+    expect(gitSkill.status).toBe('pending');
+  });
+
+  test('POST /api/skills/:name/approve transitions to active', async ({ request }) => {
+    const res = await request.post(`${server.baseUrl}/api/skills/git-workflow/approve`);
+    expect(res.ok()).toBe(true);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.skill).toBeDefined();
+    expect(body.skill.status).toBe('active');
+    expect(body.skill.approved_at).toBeTruthy();
+  });
+
+  test('POST /api/skills/:name/approve rejects non-pending skill', async ({ request }) => {
+    const res = await request.post(`${server.baseUrl}/api/skills/git-workflow/approve`);
+    expect(res.status()).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain('not pending');
+  });
+
+  test('POST /api/skills/:name/approve rejects unknown skill', async ({ request }) => {
+    const res = await request.post(`${server.baseUrl}/api/skills/nonexistent/approve`);
+    expect(res.status()).toBe(404);
+    const body = await res.json();
+    expect(body.error).toContain('not found');
+  });
+
+  test('POST /api/skills/:name/reject transitions to disabled', async ({ request }) => {
+    // Create a new skill to reject
+    await request.post(`${server.baseUrl}/api/skills/install`, {
+      data: { name: 'reject-me', description: 'will be rejected' },
+    });
+
+    const res = await request.post(`${server.baseUrl}/api/skills/reject-me/reject`);
+    expect(res.ok()).toBe(true);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+  });
+
+  test('POST /api/skills/:name/reject rejects non-pending skill', async ({ request }) => {
+    const res = await request.post(`${server.baseUrl}/api/skills/reject-me/reject`);
+    expect(res.status()).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain('not pending');
+  });
+
+  test('POST /api/skills/:name/assign assigns skill to agent', async ({ request }) => {
+    const res = await request.post(`${server.baseUrl}/api/skills/git-workflow/assign`, {
+      data: { agentId: 'jarvis' },
+    });
+    expect(res.ok()).toBe(true);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+
+    // Verify agent has the skill
+    const agentRes = await request.get(`${server.baseUrl}/api/agents/jarvis`);
+    const agentBody = await agentRes.json();
+    expect(agentBody.agent.skills).toContain('git-workflow');
+  });
+
+  test('GET /api/skills includes assignedAgents after assignment', async ({ request }) => {
+    const res = await request.get(`${server.baseUrl}/api/skills`);
+    expect(res.ok()).toBe(true);
+    const body = await res.json();
+    const gitSkill = body.skills.find((s: { name: string }) => s.name === 'git-workflow');
+    expect(gitSkill).toBeDefined();
+    expect(Array.isArray(gitSkill.assignedAgents)).toBe(true);
+    expect(gitSkill.assignedAgents).toContain('jarvis');
+  });
+
+  test('POST /api/skills/:name/unassign removes skill from agent', async ({ request }) => {
+    const res = await request.post(`${server.baseUrl}/api/skills/git-workflow/unassign`, {
+      data: { agentId: 'jarvis' },
+    });
+    expect(res.ok()).toBe(true);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+
+    // Verify agent no longer has the skill
+    const agentRes = await request.get(`${server.baseUrl}/api/agents/jarvis`);
+    const agentBody = await agentRes.json();
+    expect(agentBody.agent.skills).not.toContain('git-workflow');
+  });
+
+  test('DELETE /api/skills/:name removes the skill', async ({ request }) => {
+    const res = await request.delete(`${server.baseUrl}/api/skills/reject-me`);
+    expect(res.ok()).toBe(true);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+
+    // Verify it is gone
+    const listRes = await request.get(`${server.baseUrl}/api/skills`);
+    const listBody = await listRes.json();
+    const found = listBody.skills.find((s: { name: string }) => s.name === 'reject-me');
+    expect(found).toBeUndefined();
+  });
+
+  test('DELETE /api/skills/:name returns 404 for unknown', async ({ request }) => {
+    const res = await request.delete(`${server.baseUrl}/api/skills/nonexistent`);
+    expect(res.status()).toBe(404);
+    const body = await res.json();
+    expect(body.error).toContain('not found');
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Stubs (MCP, Channels, Cron)
   // ═══════════════════════════════════════════════════════════════════════
 
   test('GET /api/mcp returns array', async ({ request }) => {

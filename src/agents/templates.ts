@@ -371,6 +371,7 @@ export function configFromTemplate(
     toolPreset: overrides?.toolPreset ?? template.toolPreset,
     customTools: [],
     mcp: [],
+    skills: [],
     heartbeat: {
       enabled: overrides?.heartbeatEnabled ?? template.heartbeat.enabled,
       interval: (overrides?.heartbeatInterval ?? template.heartbeat.interval) as '15m' | '30m' | '1h' | '4h' | 'daily',
@@ -386,6 +387,16 @@ export function configFromTemplate(
       minSeverity: 'info',
       batchDigest: false,
       digestIntervalMinutes: 30,
+    },
+    admin: {
+      enabled: false,
+      autoApproveSkills: true,
+      autoApproveMcp: true,
+      autoApprovePlugins: true,
+      canCreateSkills: true,
+      canPublishSkills: false,
+      canManageAgents: true,
+      canModifyConfig: false,
     },
   };
 }

@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import type { SessionStatus, McpServerStatus } from '../agents/types.js';
+import type { SessionStatus, McpServerStatus, SkillStatus } from '../agents/types.js';
 import { StoreError, StoreInitError } from '../utils/errors.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -34,6 +34,16 @@ export interface McpServerRow {
   status: McpServerStatus;
   package: string | null;
   config: string | null;
+  requested_by: string | null;
+  approved_at: string | null;
+  created_at: string;
+}
+
+export interface SkillRow {
+  name: string;
+  status: SkillStatus;
+  description: string | null;
+  path: string | null;
   requested_by: string | null;
   approved_at: string | null;
   created_at: string;
@@ -115,6 +125,19 @@ const SCHEMA_SQL = `
     approved_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- Skills: SKILL.md instruction files (pending approval, active, or disabled)
+  CREATE TABLE IF NOT EXISTS skills (
+    name TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'pending',
+    description TEXT,
+    path TEXT,
+    requested_by TEXT,
+    approved_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_skills_status ON skills(status);
 
   -- Cron jobs: scheduled prompts
   CREATE TABLE IF NOT EXISTS cron_jobs (
@@ -511,6 +534,71 @@ export class Store {
   }
 
   // =========================================================================
+  // SKILLS
+  // =========================================================================
+
+  createSkill(params: {
+    name: string;
+    description?: string;
+    path?: string;
+    requestedBy?: string;
+    status?: SkillStatus;
+  }): SkillRow {
+    const stmt = this.db.prepare<[string, string, string | null, string | null, string | null]>(`
+      INSERT INTO skills (name, status, description, path, requested_by)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      params.name,
+      params.status ?? 'pending',
+      params.description ?? null,
+      params.path ?? null,
+      params.requestedBy ?? null,
+    );
+    return this.getSkill(params.name)!;
+  }
+
+  getSkill(name: string): SkillRow | undefined {
+    const stmt = this.db.prepare<[string], SkillRow>(`
+      SELECT * FROM skills WHERE name = ?
+    `);
+    return stmt.get(name);
+  }
+
+  listSkills(status?: SkillStatus): SkillRow[] {
+    if (status) {
+      const stmt = this.db.prepare<[string], SkillRow>(
+        `SELECT * FROM skills WHERE status = ? ORDER BY created_at DESC`,
+      );
+      return stmt.all(status);
+    }
+    const stmt = this.db.prepare<[], SkillRow>(
+      `SELECT * FROM skills ORDER BY created_at DESC`,
+    );
+    return stmt.all();
+  }
+
+  approveSkill(name: string): void {
+    const stmt = this.db.prepare<[string]>(`
+      UPDATE skills SET status = 'active', approved_at = datetime('now') WHERE name = ?
+    `);
+    stmt.run(name);
+  }
+
+  disableSkill(name: string): void {
+    const stmt = this.db.prepare<[string]>(`
+      UPDATE skills SET status = 'disabled' WHERE name = ?
+    `);
+    stmt.run(name);
+  }
+
+  deleteSkill(name: string): boolean {
+    const stmt = this.db.prepare<[string]>(`DELETE FROM skills WHERE name = ?`);
+    const result = stmt.run(name);
+    return result.changes > 0;
+  }
+
+  // =========================================================================
   // CRON JOBS
   // =========================================================================
 
@@ -722,7 +810,7 @@ export class Store {
    * Return basic stats about the database (row counts per table).
    */
   stats(): Record<string, number> {
-    const tables = ['sessions', 'users', 'mcp_servers', 'cron_jobs', 'memory_index'];
+    const tables = ['sessions', 'users', 'mcp_servers', 'skills', 'cron_jobs', 'memory_index'];
     const result: Record<string, number> = {};
     for (const table of tables) {
       const row = this.db.prepare(`SELECT COUNT(*) as count FROM ${table}`).get() as

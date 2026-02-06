@@ -42,6 +42,7 @@ import {
   ChevronRight,
   Eye,
   Wrench,
+  BookOpen,
 } from "lucide-react"
 
 // ---------------------------------------------------------------------------
@@ -60,6 +61,7 @@ export interface Agent {
   avatar?: string
   customTools?: string[]
   mcp?: string[]
+  skills?: string[]
   heartbeat?: {
     enabled?: boolean
     interval?: string
@@ -766,6 +768,239 @@ function McpTab({
           )}
         </Button>
       </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Sub: Skills Tab (per-agent skill assignment)
+// ---------------------------------------------------------------------------
+
+interface SkillInfo {
+  name: string
+  status: 'active' | 'pending' | 'disabled'
+  description?: string
+}
+
+interface SkillDetailData {
+  name: string
+  status: string
+  path?: string
+  files?: string[]
+  contents?: Record<string, string>
+}
+
+function SkillsTab({
+  agent,
+  onRefresh,
+}: {
+  agent: Agent
+  onRefresh: () => void
+}) {
+  const [availableSkills, setAvailableSkills] = useState<SkillInfo[]>([])
+  const [assignedSkills, setAssignedSkills] = useState<string[]>(agent.skills || [])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [selectedSkillDetail, setSelectedSkillDetail] = useState<SkillDetailData | null>(null)
+  const [loadingDetail, setLoadingDetail] = useState(false)
+
+  // Fetch active skills
+  useEffect(() => {
+    setLoading(true)
+    api<{ skills: SkillInfo[] }>('/skills')
+      .then((d) => {
+        const active = (d.skills || []).filter((s) => s.status === 'active')
+        setAvailableSkills(active)
+      })
+      .catch((e) => console.error('Failed to load skills:', e.message))
+      .finally(() => setLoading(false))
+  }, [])
+
+  // Reset when agent changes
+  useEffect(() => {
+    setAssignedSkills(agent.skills || [])
+  }, [agent.id, agent.skills])
+
+  const toggle = (skillName: string) => {
+    setAssignedSkills((prev) =>
+      prev.includes(skillName)
+        ? prev.filter((s) => s !== skillName)
+        : [...prev, skillName]
+    )
+  }
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await api('/agents/' + agent.id, {
+        method: 'PUT',
+        body: { skills: assignedSkills },
+      })
+      onRefresh()
+    } catch (e: any) {
+      console.error('Save failed:', e.message)
+    }
+    setSaving(false)
+  }
+
+  const viewSkillDetail = async (name: string) => {
+    setLoadingDetail(true)
+    setSelectedSkillDetail(null)
+    try {
+      const detail = await api<SkillDetailData>('/skills/active/' + encodeURIComponent(name))
+      setSelectedSkillDetail(detail)
+    } catch (e: any) {
+      console.error('Failed to load skill detail:', e.message)
+    }
+    setLoadingDetail(false)
+  }
+
+  const hasChanges =
+    JSON.stringify([...assignedSkills].sort()) !==
+    JSON.stringify([...(agent.skills || [])].sort())
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-muted-foreground py-8">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Loading skills...
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold">Agent Skills</h3>
+          <p className="text-xs text-muted-foreground mt-1">
+            Skills are SKILL.md instruction files that provide slash commands and project-specific knowledge
+          </p>
+        </div>
+        <Badge variant="outline" className="text-xs">
+          {assignedSkills.length}/{availableSkills.length} assigned
+        </Badge>
+      </div>
+
+      {availableSkills.length === 0 ? (
+        <div className="rounded-lg border border-dashed p-6 text-center">
+          <BookOpen className="h-8 w-8 mx-auto mb-2 text-muted-foreground/30" />
+          <p className="text-sm text-muted-foreground">
+            No active skills available. Create skills from the Skills page.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {availableSkills.map((skill) => {
+            const isAssigned = assignedSkills.includes(skill.name)
+            return (
+              <div
+                key={skill.name}
+                className={cn(
+                  "flex items-center justify-between p-3 rounded-lg border transition-colors",
+                  isAssigned
+                    ? "border-[hsl(var(--success))]/30 bg-[hsl(var(--success))]/5"
+                    : "border-border hover:border-muted-foreground/30"
+                )}
+              >
+                <div className="flex items-center gap-3">
+                  <div
+                    onClick={() => toggle(skill.name)}
+                    className={cn(
+                      "w-4 h-4 rounded border-2 flex items-center justify-center transition-colors cursor-pointer",
+                      isAssigned
+                        ? "bg-[hsl(var(--success))] border-[hsl(var(--success))]"
+                        : "border-muted-foreground/30"
+                    )}
+                  >
+                    {isAssigned && (
+                      <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 12 12">
+                        <path d="M10.28 2.28L3.989 8.575 1.695 6.28A1 1 0 00.28 7.695l3 3a1 1 0 001.414 0l7-7A1 1 0 0010.28 2.28z" />
+                      </svg>
+                    )}
+                  </div>
+                  <div>
+                    <div className="font-mono text-sm">{skill.name}</div>
+                    {skill.description && (
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {skill.description}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => viewSkillDetail(skill.name)}
+                    className="text-xs text-muted-foreground hover:text-primary transition-colors"
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                  </button>
+                  <Badge variant="secondary" className="text-xs">
+                    SKILL.md
+                  </Badge>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      <div className="flex justify-end">
+        <Button onClick={save} disabled={saving || !hasChanges} size="sm">
+          {saving ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+              Saving...
+            </>
+          ) : (
+            <>
+              <Save className="h-3.5 w-3.5 mr-1.5" />
+              Save Skills
+            </>
+          )}
+        </Button>
+      </div>
+
+      {/* Skill detail dialog */}
+      <Dialog open={!!selectedSkillDetail || loadingDetail} onOpenChange={(open) => { if (!open) { setSelectedSkillDetail(null) } }}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <BookOpen className="h-4 w-4" />
+              {selectedSkillDetail?.name || 'Loading...'}
+            </DialogTitle>
+            <DialogDescription>
+              SKILL.md content for this skill
+            </DialogDescription>
+          </DialogHeader>
+          {loadingDetail ? (
+            <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-sm">Loading skill...</span>
+            </div>
+          ) : selectedSkillDetail?.contents ? (
+            <div className="overflow-y-auto min-h-0 flex-1">
+              {Object.entries(selectedSkillDetail.contents).map(([filename, content]) => (
+                <div key={filename} className="mb-4">
+                  <div className="text-xs font-mono text-muted-foreground mb-1">{filename}</div>
+                  <pre className="text-sm font-mono whitespace-pre-wrap text-foreground p-4 bg-muted/30 rounded-md">
+                    {content}
+                  </pre>
+                </div>
+              ))}
+              {selectedSkillDetail.path && (
+                <div className="text-xs text-muted-foreground/60 mt-2">
+                  Path: {selectedSkillDetail.path}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="py-8 text-center text-muted-foreground">
+              Failed to load skill details
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -1653,6 +1888,7 @@ function AgentDetail({
           <TabsTrigger value="identity">Identity</TabsTrigger>
           <TabsTrigger value="tools">Tools</TabsTrigger>
           <TabsTrigger value="mcp">MCP</TabsTrigger>
+          <TabsTrigger value="skills">Skills</TabsTrigger>
           <TabsTrigger value="tools-md">TOOLS.md</TabsTrigger>
           <TabsTrigger value="memory">Memory</TabsTrigger>
           <TabsTrigger value="heartbeat">Heartbeat</TabsTrigger>
@@ -1669,6 +1905,9 @@ function AgentDetail({
         </TabsContent>
         <TabsContent value="mcp">
           <McpTab agent={agent} onRefresh={onRefresh} />
+        </TabsContent>
+        <TabsContent value="skills">
+          <SkillsTab agent={agent} onRefresh={onRefresh} />
         </TabsContent>
         <TabsContent value="tools-md">
           <ToolsMdTab agentId={agent.id} />

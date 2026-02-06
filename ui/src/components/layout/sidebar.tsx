@@ -4,7 +4,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
-  LayoutDashboard, MessageSquare, Bot, FolderOpen, Puzzle,
+  LayoutDashboard, MessageSquare, Bot, FolderOpen, Puzzle, BookOpen,
   Radio, Clock, Settings, ChevronRight, User
 } from "lucide-react"
 
@@ -31,6 +31,7 @@ const NAV_ITEMS = [
   { id: 'user', label: 'User Profile', icon: User },
   { id: 'sessions', label: 'Sessions', icon: FolderOpen },
   { id: 'mcp', label: 'MCP Servers', icon: Puzzle },
+  { id: 'skills', label: 'Skills', icon: BookOpen },
   { id: 'channels', label: 'Channels', icon: Radio },
   { id: 'cron', label: 'Cron', icon: Clock },
   { id: 'config', label: 'Config', icon: Settings },

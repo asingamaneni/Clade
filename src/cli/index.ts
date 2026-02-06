@@ -4,6 +4,7 @@ import { registerStartCommand } from './commands/start.js';
 import { registerAskCommand } from './commands/ask.js';
 import { registerAgentCommand } from './commands/agent.js';
 import { registerMcpCommand } from './commands/mcp.js';
+import { registerSkillCommand } from './commands/skill.js';
 import { registerWorkCommand } from './commands/work.js';
 import { registerDoctorCommand } from './commands/doctor.js';
 import { registerUiCommand } from './commands/ui.js';
@@ -27,6 +28,7 @@ export function createCli(): Command {
   registerAskCommand(program);
   registerAgentCommand(program);
   registerMcpCommand(program);
+  registerSkillCommand(program);
   registerWorkCommand(program);
   registerDoctorCommand(program);
   registerUiCommand(program);
