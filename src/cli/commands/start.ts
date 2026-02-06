@@ -671,7 +671,7 @@ function askClaude(
       }
     }
 
-    // Build combined system prompt: agent context + SOUL.md + MEMORY.md
+    // Build combined system prompt: agent context + SOUL.md + USER.md + MEMORY.md
     const systemParts: string[] = [];
     if (agentContext?.trim()) {
       systemParts.push(agentContext.trim());
@@ -680,6 +680,27 @@ function askClaude(
       const soul = readFileSync(soulPath, 'utf-8');
       if (soul.trim()) {
         systemParts.push(soul.trim());
+      }
+    }
+
+    // Inject global USER.md so agent knows about the human
+    const userMdPath = join(home, 'USER.md');
+    if (existsSync(userMdPath)) {
+      const userMd = readFileSync(userMdPath, 'utf-8').trim();
+      if (userMd) {
+        systemParts.push('## About Your Human\n\n' + userMd);
+      }
+    }
+
+    // Inject TOOLS.md for workspace context
+    if (agentId) {
+      const toolsMdPath = join(home, 'agents', agentId, 'TOOLS.md');
+      if (existsSync(toolsMdPath)) {
+        const toolsMd = readFileSync(toolsMdPath, 'utf-8').trim();
+        const defaultToolsMd = '# Workspace Tools\n\n_Custom commands, scripts, and workflows for this agent._';
+        if (toolsMd && toolsMd !== defaultToolsMd) {
+          systemParts.push('## Workspace Context\n\n' + toolsMd);
+        }
       }
     }
 
