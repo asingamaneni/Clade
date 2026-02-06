@@ -33,6 +33,6 @@ features:
     details: Export agents as portable bundles and import them on another machine. Identity, memory, and config travel together.
   - title: Native Platform Integration
     details: Agents can send system notifications, read your clipboard, open URLs, and take screenshots out of the box.
-  - title: Skills via MCP
-    details: Standard MCP servers — no proprietary format. Discover skills from npm, or agents can create their own (with approval).
+  - title: MCP Servers
+    details: Standard MCP servers — no proprietary format. Discover MCP servers from npm, or agents can create their own (with approval).
 ---

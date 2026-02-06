@@ -1,6 +1,6 @@
-# Skills (MCP Servers)
+# MCP Servers
 
-Skills in Clade are standard MCP (Model Context Protocol) servers. No proprietary format — any MCP-compatible tool works.
+MCP servers in Clade are standard MCP (Model Context Protocol) servers. No proprietary format — any MCP-compatible tool works.
 
 ## Built-in MCP Servers
 
@@ -11,37 +11,37 @@ Clade ships with five custom MCP servers:
 | **Memory** | Persistent agent memory with full-text search |
 | **Sessions** | Session management, sub-agent spawning |
 | **Messaging** | Cross-channel message sending |
-| **Skills** | Skill discovery, installation, management |
+| **MCP Manager** | MCP server discovery, installation, management |
 | **Platform** | Native OS interaction (notifications, clipboard, URLs) |
 
 These are automatically available to agents based on their tool preset.
 
-## Discovering Skills
+## Discovering MCP Servers
 
-Agents can search for new skills from the npm registry:
+Agents can search for new MCP servers from the npm registry:
 
 ```
 Agent: "I need a tool to interact with GitHub"
-→ Skills MCP searches npm for MCP servers matching "github"
+→ MCP Manager searches npm for MCP servers matching "github"
 → Finds: @mcp/github-server
-→ Stages in ~/.clade/skills/pending/
+→ Stages in ~/.clade/mcp/pending/
 ```
 
 ## Approval Gate
 
-Agent-requested skills go to `pending/` and **require human approval** before activation:
+Agent-requested MCP servers go to `pending/` and **require human approval** before activation:
 
 ```bash
-# List pending skills
-clade skill list
+# List pending MCP servers
+clade mcp list
 
-# Approve a skill
-clade skill approve @mcp/github-server
+# Approve an MCP server
+clade mcp approve @mcp/github-server
 ```
 
 This prevents agents from installing arbitrary tools without oversight.
 
-## Creating Custom Skills
+## Creating Custom MCP Servers
 
 Agents can also create custom MCP server configs:
 
@@ -54,11 +54,11 @@ Agents can also create custom MCP server configs:
 }
 ```
 
-Custom skills also go through the approval gate.
+Custom MCP servers also go through the approval gate.
 
-## Skill Configuration
+## MCP Server Configuration
 
-Skills are injected into agent sessions via `--mcp-config`:
+MCP servers are injected into agent sessions via `--mcp-config`:
 
 ```json
 {
@@ -77,4 +77,4 @@ Skills are injected into agent sessions via `--mcp-config`:
 }
 ```
 
-Each agent session gets its own MCP config file with only the skills that agent has access to.
+Each agent session gets its own MCP config file with only the MCP servers that agent has access to.

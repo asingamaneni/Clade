@@ -30,7 +30,7 @@ const NAV_ITEMS = [
   { id: 'agents', label: 'Agents', icon: Bot },
   { id: 'user', label: 'User Profile', icon: User },
   { id: 'sessions', label: 'Sessions', icon: FolderOpen },
-  { id: 'skills', label: 'Skills', icon: Puzzle },
+  { id: 'mcp', label: 'MCP Servers', icon: Puzzle },
   { id: 'channels', label: 'Channels', icon: Radio },
   { id: 'cron', label: 'Cron', icon: Clock },
   { id: 'config', label: 'Config', icon: Settings },

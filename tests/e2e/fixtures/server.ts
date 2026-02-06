@@ -45,8 +45,8 @@ function seedTestHome(cladeHome: string, port: number): void {
     join(cladeHome, 'agents', 'scout', 'soul-history'),
     join(cladeHome, 'data', 'chats'),
     join(cladeHome, 'data', 'uploads'),
-    join(cladeHome, 'skills', 'active'),
-    join(cladeHome, 'skills', 'pending'),
+    join(cladeHome, 'mcp', 'active'),
+    join(cladeHome, 'mcp', 'pending'),
     join(cladeHome, 'logs'),
   ];
   for (const d of dirs) mkdirSync(d, { recursive: true });
@@ -61,7 +61,7 @@ function seedTestHome(cladeHome: string, port: number): void {
         model: 'sonnet',
         toolPreset: 'coding',
         customTools: [],
-        skills: [],
+        mcp: [],
         heartbeat: { enabled: false, interval: '30m', mode: 'check', suppressOk: true },
         reflection: { enabled: false, interval: 10 },
         maxTurns: 5,
@@ -73,7 +73,7 @@ function seedTestHome(cladeHome: string, port: number): void {
         model: 'sonnet',
         toolPreset: 'messaging',
         customTools: [],
-        skills: [],
+        mcp: [],
         heartbeat: { enabled: true, interval: '15m', mode: 'check', suppressOk: true },
         reflection: { enabled: true, interval: 10 },
         maxTurns: 10,

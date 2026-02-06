@@ -186,7 +186,7 @@ function handleAgentsList(deps: IpcDeps): IpcResponse {
     name: a.config.name,
     description: a.config.description ?? '',
     toolPreset: a.config.toolPreset,
-    skills: a.config.skills ?? [],
+    mcp: a.config.mcp ?? [],
   }));
   return { ok: true, agents };
 }

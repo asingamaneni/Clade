@@ -25,25 +25,25 @@ test.afterAll(() => {
 
 test.describe('Secondary Pages', () => {
   // ═══════════════════════════════════════════════════════════════════════
-  // Skills page
+  // MCP Servers page
   // ═══════════════════════════════════════════════════════════════════════
 
-  test('Skills page loads', async ({ page }) => {
+  test('MCP Servers page loads', async ({ page }) => {
     await page.goto(server.baseUrl + '/admin');
     await page.waitForLoadState('networkidle');
-    await page.locator('text=Skills').first().click();
+    await page.locator('text=MCP Servers').first().click();
     await page.waitForTimeout(500);
-    // Skills page should show - either empty state or skill list
-    // Look for "Skills" heading or "No skills" message
-    const hasSkills = await page.locator('text=/[Ss]kill/').first().isVisible();
-    expect(hasSkills).toBe(true);
+    // MCP Servers page should show - either empty state or server list
+    // Look for "MCP" heading or "No MCP servers" message
+    const hasMcp = await page.locator('text=/[Mm][Cc][Pp]/').first().isVisible();
+    expect(hasMcp).toBe(true);
   });
 
-  test('Skills API returns empty array', async ({ request }) => {
-    const res = await request.get(server.baseUrl + '/api/skills');
+  test('MCP Servers API returns empty array', async ({ request }) => {
+    const res = await request.get(server.baseUrl + '/api/mcp');
     expect(res.ok()).toBe(true);
     const body = await res.json();
-    expect(body.skills).toEqual([]);
+    expect(body.mcpServers).toEqual([]);
   });
 
   // ═══════════════════════════════════════════════════════════════════════

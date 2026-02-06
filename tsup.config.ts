@@ -7,7 +7,7 @@ export default defineConfig({
     'mcp/memory-server': 'src/mcp/memory/server.ts',
     'mcp/sessions-server': 'src/mcp/sessions/server.ts',
     'mcp/messaging-server': 'src/mcp/messaging/server.ts',
-    'mcp/skills-server': 'src/mcp/skills/server.ts',
+    'mcp/mcp-manager-server': 'src/mcp/mcp-manager/server.ts',
     'mcp/platform-server': 'src/mcp/platform/server.ts',
     'mcp/admin-server': 'src/mcp/admin/server.ts',
   },

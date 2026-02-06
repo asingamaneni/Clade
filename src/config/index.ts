@@ -39,10 +39,10 @@ export function getDatabasePath(): string {
 }
 
 /**
- * Directory for MCP skill packages.
+ * Directory for MCP server packages.
  */
-export function getSkillsDir(): string {
-  return join(getConfigDir(), 'skills');
+export function getMcpDir(): string {
+  return join(getConfigDir(), 'mcp');
 }
 
 /**
@@ -146,9 +146,9 @@ export function ensureDirectories(): void {
   const dirs = [
     getConfigDir(),
     getAgentsDir(),
-    getSkillsDir(),
-    join(getSkillsDir(), 'pending'),
-    join(getSkillsDir(), 'active'),
+    getMcpDir(),
+    join(getMcpDir(), 'pending'),
+    join(getMcpDir(), 'active'),
     getUserHistoryDir(),
   ];
   for (const dir of dirs) {
@@ -167,6 +167,6 @@ export type {
   GatewayConfig,
   RoutingRule,
   RoutingConfig,
-  SkillsConfig,
+  McpConfig,
   BrowserConfig,
 } from './schema.js';

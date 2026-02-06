@@ -15,7 +15,7 @@ The name "Clade" means *a group of organisms that share a common ancestor* — a
 - **Autonomous work loops** — RALPH loop: give an agent a task list, it works through each task, verifies its work, and reports back
 - **Self-improving** — Agents reflect on interactions and evolve their SOUL.md personality over time (core principles stay locked)
 - **Native platform integration** — Agents can send system notifications, read your clipboard, open URLs, take screenshots
-- **Admin dashboard** — Web UI at `localhost:7890/admin` for managing agents, sessions, skills, and configuration
+- **Admin dashboard** — Web UI at `localhost:7890/admin` for managing agents, sessions, MCP servers, and configuration
 
 ## Quick Start
 
@@ -62,12 +62,12 @@ claude -p "your message"
   --resume <session_id>            # Conversation continuity
   --append-system-prompt <SOUL.md> # Agent personality (preserves Claude Code defaults)
   --allowedTools "Read,Edit,..."   # Per-agent tool restrictions
-  --mcp-config <path>              # Skills (MCP servers)
+  --mcp-config <path>              # MCP servers (npm-packaged or custom)
   --max-turns 25                   # Autonomous iteration limit
   --model sonnet                   # Agent-specific model
 ```
 
-This means your agents have access to all of Claude Code's native capabilities — file editing, bash execution, web search, code analysis — plus custom skills via MCP.
+This means your agents have access to all of Claude Code's native capabilities — file editing, bash execution, web search, code analysis — plus custom MCP servers.
 
 ## Agent Templates
 
@@ -191,8 +191,8 @@ Agents can work together:
 | `clade agent export <name>` | Export agent as portable bundle |
 | `clade agent import <file>` | Import agent from bundle |
 | `clade work --agent <name> --plan <path>` | Start RALPH autonomous loop |
-| `clade skill list` | List installed skills |
-| `clade skill approve <name>` | Approve a pending skill |
+| `clade mcp list` | List installed MCP servers |
+| `clade mcp approve <name>` | Approve a pending MCP server |
 | `clade doctor` | Health check |
 
 ## Configuration

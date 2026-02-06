@@ -370,7 +370,7 @@ export function configFromTemplate(
     model: overrides?.model ?? template.model,
     toolPreset: overrides?.toolPreset ?? template.toolPreset,
     customTools: [],
-    skills: [],
+    mcp: [],
     heartbeat: {
       enabled: overrides?.heartbeatEnabled ?? template.heartbeat.enabled,
       interval: (overrides?.heartbeatInterval ?? template.heartbeat.interval) as '15m' | '30m' | '1h' | '4h' | 'daily',

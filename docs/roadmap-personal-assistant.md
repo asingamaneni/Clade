@@ -6,9 +6,9 @@
 
 ## Honest Assessment
 
-The six fixes from the previous analysis (memory injection, session persistence, skills
+The six fixes from the previous analysis (memory injection, session persistence, MCP server
 visibility, etc.) solve immediate pain points but don't get you to "personal AI employee."
-They fix the amnesia and the skills blindness. But an employee who can remember your name
+They fix the amnesia and the MCP server blindness. But an employee who can remember your name
 and see the tool shed still can't do work if nobody connects the conveyor belt.
 
 The good news: **the architecture doesn't need a rewrite.** The subprocess model
@@ -24,14 +24,14 @@ The pieces that exist and work:
 - Cron/heartbeat (periodic proactive checks)
 - Channel adapters (Telegram, Slack, Discord, webchat)
 - Agent collaboration (delegation, shared memory, pub/sub)
-- Skills system (npm-based MCP discovery/installation)
+- MCP server system (npm-based MCP discovery/installation)
 - Chat UI with multi-conversation tabs
 - SessionManager with SQLite persistence (in full gateway)
 
 The pieces that are broken or disconnected:
 - Memory never injected into sessions
 - Session persistence missing in placeholder server (the one the UI actually uses)
-- Skills hidden from most agent presets
+- MCP servers hidden from most agent presets
 - No bridge between chat and RALPH (can't say "go build X" in chat)
 - Heartbeat/cron sessions have no context from chat
 - Reflection reads empty memory (agents never store anything)
@@ -47,7 +47,7 @@ The pieces that are broken or disconnected:
 | Execute research tasks | Partial | Template exists, memory doesn't work |
 | Monitor systems proactively | Partial | Heartbeat works but context-blind |
 | Learn your preferences over time | Broken | Reflection reads empty memory |
-| Expand its own capabilities | Broken | Skills hidden from most presets |
+| Expand its own capabilities | Broken | MCP servers hidden from most presets |
 | Work while you're away | Works (RALPH/cron) | Results don't feed back to chat |
 | Report progress asynchronously | Partial | Cron can deliver to channels |
 | Coordinate with other agents | Exists | Untested in practice with broken memory |
@@ -141,7 +141,7 @@ You have access to memory tools. Use them:
 
 The `askClaude()` function in `start.ts` currently spawns `claude` **without any
 `--mcp-config`**. This means agents in the admin UI chat have NO access to memory
-tools, session tools, or skills tools. They literally cannot store or search memory
+tools, session tools, or MCP management tools. They literally cannot store or search memory
 even if instructed to.
 
 **File**: `src/cli/commands/start.ts`
@@ -191,20 +191,20 @@ instead of using the raw `askClaude()` function. This gets you:
 This is the largest single change but it eliminates the entire class of "placeholder
 server doesn't do X" problems.
 
-#### 2C. Skills MCP for all presets
+#### 2C. MCP Manager for all presets
 
 **File**: `src/agents/presets.ts` (line 80-84), `src/engine/manager.ts` (line 38-44)
 **Change**:
 ```typescript
 // manager.ts
-coding: ['memory', 'sessions', 'skills'],  // Add skills
-messaging: ['memory', 'sessions', 'messaging', 'skills'],  // Add skills
+coding: ['memory', 'sessions', 'skills'],  // Add MCP Manager
+messaging: ['memory', 'sessions', 'messaging', 'skills'],  // Add MCP Manager
 ```
 ```typescript
 // presets.ts — add MCP_SKILLS to coding and messaging tool lists
 ```
 
-The `pending/` approval gate is sufficient safety. Hiding the skills system entirely
+The `pending/` approval gate is sufficient safety. Hiding the MCP management system entirely
 is over-restriction.
 
 ---
@@ -288,7 +288,7 @@ Some things OpenClaw does that don't fit Clade's architecture:
 3. **Docker sandboxing**: OpenClaw isolates non-main sessions in Docker containers.
    This requires Docker infrastructure. For a personal assistant running on your
    own machine, the trust model is different — you trust your own agent. The
-   `pending/` approval gate for skills is sufficient.
+   `pending/` approval gate for MCP servers is sufficient.
 
 4. **Concurrent multi-agent orchestration**: OpenClaw can run multiple agents
    simultaneously via its persistent runtime. Clade can too (via separate subprocess
@@ -306,7 +306,7 @@ If you want to get to "usable personal assistant" as fast as possible:
 3. **1B** (Session persistence) — Conversations survive server restarts.
 4. **1C** (Memory instructions in templates) — Agent knows to store and recall.
 5. **2B** (Placeholder → SessionManager) — Eliminates the entire "two server" problem.
-6. **2C** (Skills for all presets) — Agents can expand capabilities.
+6. **2C** (MCP Manager for all presets) — Agents can expand capabilities.
 7. **2A** (Chat-triggered RALPH) — "Go build this" works from chat.
 8. **3A** (Heartbeat context) — Proactive behavior is context-aware.
 9. **3C** (Cross-conversation awareness) — Agent has continuity across tabs.

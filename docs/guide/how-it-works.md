@@ -12,12 +12,12 @@ claude -p "your message"
   --resume <session_id>            # Conversation continuity
   --append-system-prompt <SOUL.md> # Agent personality (preserves Claude Code defaults)
   --allowedTools "Read,Edit,..."   # Per-agent tool restrictions
-  --mcp-config <path>              # Skills (MCP servers)
+  --mcp-config <path>              # MCP servers (npm-packaged or custom)
   --max-turns 25                   # Autonomous iteration limit
   --model sonnet                   # Agent-specific model
 ```
 
-This means your agents have access to all of Claude Code's native tools — file editing, bash execution, web search, code analysis — plus custom skills via MCP.
+This means your agents have access to all of Claude Code's native tools — file editing, bash execution, web search, code analysis — plus custom MCP servers.
 
 ## Why Claude CLI, Not the SDK?
 
@@ -54,7 +54,7 @@ When a message arrives from any channel:
 - **Engine** — Wraps the `claude` CLI, manages subprocess lifecycle
 - **Router** — Maps messages to agents (supports @mentions)
 - **Session Manager** — Persistent sessions via `--resume`, stored in SQLite
-- **MCP Servers** — Five custom servers for memory, sessions, messaging, skills, platform
+- **MCP Servers** — Five custom servers for memory, sessions, messaging, MCP management, platform
 - **Scheduler** — Heartbeat intervals and cron jobs for proactive agents
 - **Gateway** — Fastify HTTP/WS server, REST API, admin dashboard
 

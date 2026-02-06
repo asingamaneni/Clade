@@ -38,7 +38,7 @@ const TODO_WRITE = 'TodoWrite';
 const MCP_MEMORY = 'mcp__memory__*';
 const MCP_SESSIONS = 'mcp__sessions__*';
 const MCP_MESSAGING = 'mcp__messaging__*';
-const MCP_SKILLS = 'mcp__skills__*';
+const MCP_MCP_MANAGER = 'mcp__mcp-manager__*';
 const MCP_PLATFORM = 'mcp__platform__*';
 
 // ---------------------------------------------------------------------------
@@ -55,7 +55,7 @@ const EXTENDED_TOOLS = [WEB_FETCH, WEB_SEARCH, TASK, TODO_WRITE] as const;
 const ALL_NATIVE_TOOLS = [...CODING_TOOLS, ...EXTENDED_TOOLS] as const;
 
 /** All custom MCP server tool wildcards. */
-const ALL_MCP_TOOLS = [MCP_MEMORY, MCP_SESSIONS, MCP_MESSAGING, MCP_SKILLS, MCP_PLATFORM] as const;
+const ALL_MCP_TOOLS = [MCP_MEMORY, MCP_SESSIONS, MCP_MESSAGING, MCP_MCP_MANAGER, MCP_PLATFORM] as const;
 
 // ---------------------------------------------------------------------------
 // Preset definitions
@@ -67,7 +67,7 @@ const ALL_MCP_TOOLS = [MCP_MEMORY, MCP_SESSIONS, MCP_MESSAGING, MCP_SKILLS, MCP_
  *
  * - **potato**: No tools at all. The agent can only chat.
  * - **coding**: File-system tools + memory and sessions MCP. No messaging, no
- *   skills installation, no web access.
+ *   MCP server installation, no web access.
  * - **messaging**: Only MCP tools (memory, sessions, messaging). No file system
  *   or code execution. Suitable for agents that only relay messages.
  * - **full**: Everything. All native tools and all MCP tools.
@@ -81,14 +81,14 @@ const PRESET_MAP: Record<ToolPreset, readonly string[]> = {
     ...CODING_TOOLS,
     MCP_MEMORY,
     MCP_SESSIONS,
-    MCP_SKILLS,
+    MCP_MCP_MANAGER,
   ],
 
   messaging: [
     MCP_MEMORY,
     MCP_SESSIONS,
     MCP_MESSAGING,
-    MCP_SKILLS,
+    MCP_MCP_MANAGER,
   ],
 
   full: [
@@ -125,9 +125,9 @@ export function describePreset(preset: ToolPreset): string {
     case 'potato':
       return 'No tools (chat only)';
     case 'coding':
-      return 'File system + code tools, memory, sessions & skills MCP';
+      return 'File system + code tools, memory, sessions & MCP manager';
     case 'messaging':
-      return 'Memory, sessions, messaging & skills MCP only';
+      return 'Memory, sessions, messaging & MCP manager only';
     case 'full':
       return 'All tools (native + MCP)';
     case 'custom':

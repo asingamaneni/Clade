@@ -34,8 +34,8 @@ async function startServer(): Promise<void> {
   mkdirSync(join(TEST_HOME, 'agents', 'testbot', 'soul-history'), { recursive: true });
   mkdirSync(join(TEST_HOME, 'data', 'chats'), { recursive: true });
   mkdirSync(join(TEST_HOME, 'data', 'uploads'), { recursive: true });
-  mkdirSync(join(TEST_HOME, 'skills', 'active'), { recursive: true });
-  mkdirSync(join(TEST_HOME, 'skills', 'pending'), { recursive: true });
+  mkdirSync(join(TEST_HOME, 'mcp', 'active'), { recursive: true });
+  mkdirSync(join(TEST_HOME, 'mcp', 'pending'), { recursive: true });
   mkdirSync(join(TEST_HOME, 'logs'), { recursive: true });
 
   // Create a test agent config
@@ -48,7 +48,7 @@ async function startServer(): Promise<void> {
         model: 'sonnet',
         toolPreset: 'coding',
         customTools: [],
-        skills: [],
+        mcp: [],
         heartbeat: { enabled: false, interval: '30m', mode: 'check', suppressOk: true },
         reflection: { enabled: false, interval: 10 },
         maxTurns: 5,
@@ -183,7 +183,7 @@ test.describe('Agent Autonomy E2E', () => {
     const distDir = join(process.cwd(), 'dist', 'mcp');
     expect(existsSync(join(distDir, 'memory-server.js'))).toBe(true);
     expect(existsSync(join(distDir, 'sessions-server.js'))).toBe(true);
-    expect(existsSync(join(distDir, 'skills-server.js'))).toBe(true);
+    expect(existsSync(join(distDir, 'mcp-manager-server.js'))).toBe(true);
   });
 
   test('can create a conversation via API', async ({ request }) => {
@@ -294,11 +294,11 @@ test.describe('Agent Autonomy E2E', () => {
     // That's acceptable — the structural test (file creation logic) is validated by unit tests
   });
 
-  test('skills MCP is accessible in coding preset', async ({ request }) => {
+  test('mcp-manager MCP is accessible in coding preset', async ({ request }) => {
     const res = await request.get(`${BASE_URL}/api/agents/testbot`);
     expect(res.ok()).toBe(true);
     const body = await res.json();
-    // Verify the agent has coding preset which now includes skills
+    // Verify the agent has coding preset which now includes mcp-manager
     expect(body.agent.toolPreset).toBe('coding');
   });
 });

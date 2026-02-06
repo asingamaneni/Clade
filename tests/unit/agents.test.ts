@@ -135,7 +135,7 @@ describe('AgentRegistry', () => {
       model: 'sonnet',
       toolPreset: 'coding',
       customTools: [],
-      skills: [],
+      mcp: [],
       heartbeat: { enabled: false, interval: '30m', mode: 'check', suppressOk: true },
       maxTurns: 25,
     });
@@ -173,7 +173,7 @@ describe('Tool Presets', () => {
     expect(tools).toContain('mcp__memory__*');
     expect(tools).toContain('mcp__sessions__*');
     // Skills MCP is now included for capability discovery
-    expect(tools).toContain('mcp__skills__*');
+    expect(tools).toContain('mcp__mcp-manager__*');
     // Should not include messaging MCP
     expect(tools).not.toContain('mcp__messaging__*');
   });
@@ -183,7 +183,7 @@ describe('Tool Presets', () => {
     expect(tools).toContain('mcp__memory__*');
     expect(tools).toContain('mcp__sessions__*');
     expect(tools).toContain('mcp__messaging__*');
-    expect(tools).toContain('mcp__skills__*');
+    expect(tools).toContain('mcp__mcp-manager__*');
     // Should not include native code tools
     expect(tools).not.toContain('Read');
     expect(tools).not.toContain('Bash');
@@ -198,7 +198,7 @@ describe('Tool Presets', () => {
     expect(tools).toContain('mcp__memory__*');
     expect(tools).toContain('mcp__sessions__*');
     expect(tools).toContain('mcp__messaging__*');
-    expect(tools).toContain('mcp__skills__*');
+    expect(tools).toContain('mcp__mcp-manager__*');
   });
 
   it('should resolve custom preset to provided custom tools', () => {

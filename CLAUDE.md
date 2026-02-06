@@ -30,7 +30,7 @@ agents evolving from a common AI foundation, specializing over time.
 - **Engine**: Spawns `claude -p` subprocesses with `--output-format stream-json`
 - **Compatibility**: Detects CLI version and adapts flags automatically (`src/engine/compat.ts`)
 - **Sessions**: Persistent via `--resume <session_id>`, stored in SQLite
-- **Skills**: Standard MCP servers injected via `--mcp-config`
+- **MCP**: npm-packaged MCP servers injected via `--mcp-config`
 - **Memory**: Two-layer (daily logs + curated MEMORY.md) with FTS5 search
 - **Identity**: SOUL.md per agent, injected via `--append-system-prompt`
 - **Self-Improvement**: Reflection cycle evolves SOUL.md based on user interactions
@@ -40,7 +40,7 @@ agents evolving from a common AI foundation, specializing over time.
 - **Routing**: @mention-based agent routing (`@jarvis do this` routes to jarvis agent)
 - **Chat**: Multi-conversation tabs per agent, auto-migrating from legacy flat format
 - **Tools**: Claude Code's native tools (Read/Edit/Bash/Glob/Grep) + 6 custom MCP servers
-- **Admin**: Orchestrator agents can autonomously discover, install, and create skills/plugins
+- **Admin**: Orchestrator agents can autonomously discover, install, and create skills/MCP servers/plugins
 
 ## Tech Stack
 
@@ -84,8 +84,10 @@ src/
 3. **`--allowedTools` for per-agent restrictions**: Each agent's tool access is controlled by
    passing explicit tool lists. Presets (potato/coding/messaging/full) map to allowedTools arrays.
 
-4. **Skills = MCP servers**: No proprietary skill format. Skills are standard MCP servers that
-   work with any MCP-compatible client. Discovered via npm registry.
+4. **Standard Claude Code terminology**: Clade aligns with Claude Code's naming conventions.
+   Skills = SKILL.md instruction files (slash commands, project-specific knowledge).
+   MCP = npm-packaged MCP servers installed and injected via `--mcp-config`.
+   Plugins = exportable bundles. Standard MCP protocol — any MCP-compatible server works.
 
 5. **Memory as files**: MEMORY.md and memory/YYYY-MM-DD.md are plain markdown files.
    Indexed with SQLite FTS5 for search. Human-auditable, version-controllable.
@@ -119,7 +121,7 @@ src/
     on first load. Sessions page derives real session data from active conversations.
 
 14. **Admin MCP for orchestrators**: Agents with `admin.enabled: true` get the admin MCP
-    server which provides autonomous skill management: search (local, GitHub, npm, web),
+    server which provides autonomous skill and MCP management: search (local, GitHub, npm, web),
     install (from any source), create (from scratch or templates), and manage MCP servers
     and plugins. Orchestrators can discover and install capabilities on demand.
 
@@ -188,7 +190,7 @@ the task complete.
 
 - Never use `--system-prompt` (replaces Claude Code defaults). Always use `--append-system-prompt`.
 - Agent SOUL.md files are injected via CLI flag, NOT placed in workspace (prevents agent self-modification).
-- Skills requested by agents go to pending/ and require human approval.
+- MCP servers requested by agents go to pending/ and require human approval.
 - Heartbeat and cron use separate prompt pipelines - never mix them.
 - Each agent session is an isolated `claude` subprocess with its own `--model`, `--allowedTools`, and `--mcp-config`.
 - SOUL.md Core Principles section is immutable — the reflection cycle cannot modify it.

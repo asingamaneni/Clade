@@ -127,8 +127,8 @@ export interface SessionRecord {
 }
 
 // ---------------------------------------------------------------------------
-// Skill status
+// MCP server status
 // ---------------------------------------------------------------------------
 
-/** Possible states for an installed skill. */
-export type SkillStatus = 'pending' | 'active' | 'disabled';
+/** Possible states for an installed MCP server. */
+export type McpServerStatus = 'pending' | 'active' | 'disabled';

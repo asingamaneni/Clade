@@ -49,7 +49,7 @@ channel routing, proactive scheduling, and autonomous work loops.
 │  ┌──────────────────────────────────────────────────────────────┐ │
 │  │                    MCP Server Layer                           │ │
 │  │  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌─────────────┐ │ │
-│  │  │  Memory   │ │ Sessions  │ │ Messaging │ │   Skills    │ │ │
+│  │  │  Memory   │ │ Sessions  │ │ Messaging │ │ MCP Manager │ │ │
 │  │  │  MCP      │ │ MCP       │ │ MCP       │ │   MCP       │ │ │
 │  │  │           │ │           │ │           │ │             │ │ │
 │  │  │memory_    │ │sessions_  │ │send_      │ │skills_      │ │ │
@@ -74,8 +74,8 @@ channel routing, proactive scheduling, and autonomous work loops.
 │  └──────────────────────────────────────────────────────────────┘ │
 │                                                                    │
 │  ┌──────────────────────────────────────────────────────────────┐ │
-│  │  SQLite Store                                                 │ │
-│  │  sessions | users | skills | cron_jobs | memory_index | logs │ │
+│  │  SQLite Store                                                       │ │
+│  │  sessions | users | mcp_servers | cron_jobs | memory_index | logs │ │
 │  └──────────────────────────────────────────────────────────────┘ │
 │                                                                    │
 │  ┌──────────────────────────────────────────────────────────────┐ │
@@ -126,7 +126,7 @@ Key flags used per invocation:
 - `--append-system-prompt` — Agent identity (SOUL.md content)
 - `--resume <session_id>` — Session continuity
 - `--allowedTools` — Per-agent tool restrictions
-- `--mcp-config <path>` — Skills (MCP servers) for this agent
+- `--mcp-config <path>` — MCP servers (npm-packaged or custom) for this agent
 - `--max-turns` — Limit autonomous iterations
 - `--model` — Agent-specific model selection
 - `--output-format stream-json` — Structured output for parsing
@@ -256,9 +256,9 @@ Agent config stored in `~/.clade/config.json`:
 
 Tool presets map to `--allowedTools` arrays:
 - **potato**: No tools (just chat)
-- **coding**: Read, Edit, Write, Bash, Glob, Grep + memory/sessions MCP
-- **messaging**: Memory/sessions/messaging MCP only
-- **full**: All Claude Code tools + all MCP tools
+- **coding**: Read, Edit, Write, Bash, Glob, Grep + memory/sessions MCP servers
+- **messaging**: Memory/sessions/messaging MCP servers only
+- **full**: All Claude Code tools + all MCP servers
 - **custom**: Explicitly listed tools
 
 ### 3. MCP Servers (src/mcp/)
@@ -281,11 +281,11 @@ Five custom MCP servers, each a stdio process:
 - Agents can proactively send messages to any configured channel
 - Routing is deterministic (agent specifies channel + recipient)
 
-#### Skills MCP (src/mcp/skills/)
+#### MCP Manager (src/mcp/skills/)
 - Searches npm registry for MCP server packages
-- Stages new skills in `~/.clade/skills/pending/`
+- Stages new MCP servers in `~/.clade/mcp/pending/`
 - Requires human approval before activation
-- Can create custom skills (agent writes MCP server config)
+- Can create custom MCP server configs (agent writes MCP server config)
 
 #### Platform MCP (src/mcp/platform/)
 - Native OS interactions: notifications, clipboard, open URLs, screenshots
@@ -306,8 +306,8 @@ Routes:
 - `POST /api/agents/:id/memory/search` — Search memory
 - `GET /api/sessions` — List sessions
 - `POST /api/sessions/:id/send` — Send message to session
-- `GET /api/skills` — List skills (active + pending)
-- `POST /api/skills/:name/approve` — Approve pending skill
+- `GET /api/mcp` — List MCP servers (active + pending)
+- `POST /api/mcp/:name/approve` — Approve pending MCP server
 - `GET /api/cron` — List cron jobs
 - `POST /api/cron` — Create cron job
 - `GET /api/config` — Get global config
@@ -386,7 +386,7 @@ CREATE TABLE users (
   UNIQUE(channel, channel_user_id)
 );
 
-CREATE TABLE skills (
+CREATE TABLE mcp_servers (
   name TEXT PRIMARY KEY,
   status TEXT DEFAULT 'pending', -- pending | active | disabled
   package TEXT,                  -- npm package or local path
@@ -511,10 +511,10 @@ CREATE VIRTUAL TABLE memory_fts USING fts5(
    Agents cannot modify their own personality.
 
 2. **Config is read-only**: `~/.clade/config.json` is never in the agent's workspace.
-   The Skills MCP server provides read-only access to relevant config.
+   The MCP Manager provides read-only access to relevant config.
 
-3. **Skill approval gate**: Agent-requested skills go to `pending/` and require human
-   approval via admin UI or CLI before activation.
+3. **MCP server approval gate**: Agent-requested MCP servers go to `pending/` and require
+   human approval via admin UI or CLI before activation.
 
 4. **Per-agent tool restrictions**: `--allowedTools` enforced at the Claude CLI level.
    An agent with "messaging" preset cannot use Bash or Edit.

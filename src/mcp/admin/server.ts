@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Admin MCP Server - Full autonomous skill management for orchestrator
+// Admin MCP Server - Full autonomous skill and MCP management for orchestrator
 // ---------------------------------------------------------------------------
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -1164,17 +1164,17 @@ server.tool(
 );
 
 // ---------------------------------------------------------------------------
-// Tool: admin_agent_assign_skill
+// Tool: admin_agent_assign_mcp
 // ---------------------------------------------------------------------------
 
 server.tool(
-  'admin_agent_assign_skill',
-  'Assign a skill to a Clade agent.',
+  'admin_agent_assign_mcp',
+  'Assign an MCP server to a Clade agent.',
   {
     agentId: z.string().describe('Agent ID'),
-    skill: z.string().describe('Skill name to assign'),
+    mcpServer: z.string().describe('MCP server name to assign'),
   },
-  async ({ agentId, skill }) => {
+  async ({ agentId, mcpServer }) => {
     try {
       if (!existsSync(CONFIG_PATH)) {
         return {
@@ -1187,7 +1187,7 @@ server.tool(
       }
 
       const config = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')) as {
-        agents?: Record<string, { skills?: string[] }>;
+        agents?: Record<string, { mcp?: string[] }>;
       };
 
       if (!config.agents?.[agentId]) {
@@ -1200,9 +1200,9 @@ server.tool(
         };
       }
 
-      config.agents[agentId].skills = config.agents[agentId].skills ?? [];
-      if (!config.agents[agentId].skills!.includes(skill)) {
-        config.agents[agentId].skills!.push(skill);
+      config.agents[agentId].mcp = config.agents[agentId].mcp ?? [];
+      if (!config.agents[agentId].mcp!.includes(mcpServer)) {
+        config.agents[agentId].mcp!.push(mcpServer);
       }
 
       writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
@@ -1210,14 +1210,14 @@ server.tool(
       return {
         content: [{
           type: 'text' as const,
-          text: `✅ Skill "${skill}" assigned to agent "${agentId}".`,
+          text: `✅ MCP server "${mcpServer}" assigned to agent "${agentId}".`,
         }],
       };
     } catch (err) {
       return {
         content: [{
           type: 'text' as const,
-          text: `Error assigning skill: ${err instanceof Error ? err.message : String(err)}`,
+          text: `Error assigning MCP server: ${err instanceof Error ? err.message : String(err)}`,
         }],
         isError: true,
       };

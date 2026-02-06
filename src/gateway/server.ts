@@ -271,7 +271,7 @@ export async function createGateway(deps: GatewayDeps) {
   registerAgentRoutes(app, deps);
   registerSessionRoutes(app, deps);
   registerMemoryRoutes(app, deps);
-  registerSkillRoutes(app, deps);
+  registerMcpRoutes(app, deps);
   registerChannelRoutes(app, deps);
   registerCronRoutes(app, deps);
   registerConfigRoutes(app, deps);
@@ -436,7 +436,7 @@ function registerAgentRoutes(app: FastifyInstance, deps: GatewayDeps): void {
       model?: string;
       toolPreset?: string;
       customTools?: string[];
-      skills?: string[];
+      mcp?: string[];
       maxTurns?: number;
     };
   }>('/api/agents', async (req, reply) => {
@@ -459,7 +459,7 @@ function registerAgentRoutes(app: FastifyInstance, deps: GatewayDeps): void {
         model: body.model,
         toolPreset: body.toolPreset,
         customTools: body.customTools,
-        skills: body.skills,
+        mcp: body.mcp,
         maxTurns: body.maxTurns,
       });
 
@@ -920,79 +920,79 @@ function resolveMemoryPath(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Skill Routes — /api/skills
+// MCP Routes — /api/mcp
 // ═══════════════════════════════════════════════════════════════════════════
 
-function registerSkillRoutes(app: FastifyInstance, deps: GatewayDeps): void {
+function registerMcpRoutes(app: FastifyInstance, deps: GatewayDeps): void {
   const { store } = deps;
 
-  // ── List all skills ────────────────────────────────────────────
-  app.get('/api/skills', async () => {
-    const skills = store.listSkills();
-    return { skills };
+  // ── List all MCP servers ──────────────────────────────────────
+  app.get('/api/mcp', async () => {
+    const mcpServers = store.listMcpServers();
+    return { mcpServers };
   });
 
-  // ── Approve pending skill ──────────────────────────────────────
-  app.post<{ Params: { name: string } }>('/api/skills/:name/approve', async (req, reply) => {
+  // ── Approve pending MCP server ────────────────────────────────
+  app.post<{ Params: { name: string } }>('/api/mcp/:name/approve', async (req, reply) => {
     const { name } = req.params;
-    const skill = store.getSkill(name);
-    if (!skill) {
-      return reply.code(404).send({ error: `Skill "${name}" not found` });
+    const server = store.getMcpServer(name);
+    if (!server) {
+      return reply.code(404).send({ error: `MCP server "${name}" not found` });
     }
-    if (skill.status !== 'pending') {
+    if (server.status !== 'pending') {
       return reply.code(400).send({
-        error: `Skill "${name}" is not pending (current status: ${skill.status})`,
+        error: `MCP server "${name}" is not pending (current status: ${server.status})`,
       });
     }
 
     try {
-      store.approveSkill(name);
-      broadcastAdmin({ type: 'skill:approved', name, timestamp: new Date().toISOString() });
-      const updated = store.getSkill(name);
-      return { success: true, skill: updated };
+      store.approveMcpServer(name);
+      broadcastAdmin({ type: 'mcp:approved', name, timestamp: new Date().toISOString() });
+      const updated = store.getMcpServer(name);
+      return { success: true, mcpServer: updated };
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to approve skill';
+      const message = err instanceof Error ? err.message : 'Failed to approve MCP server';
       return reply.code(500).send({ error: message });
     }
   });
 
-  // ── Reject pending skill ───────────────────────────────────────
-  app.post<{ Params: { name: string } }>('/api/skills/:name/reject', async (req, reply) => {
+  // ── Reject pending MCP server ─────────────────────────────────
+  app.post<{ Params: { name: string } }>('/api/mcp/:name/reject', async (req, reply) => {
     const { name } = req.params;
-    const skill = store.getSkill(name);
-    if (!skill) {
-      return reply.code(404).send({ error: `Skill "${name}" not found` });
+    const server = store.getMcpServer(name);
+    if (!server) {
+      return reply.code(404).send({ error: `MCP server "${name}" not found` });
     }
-    if (skill.status !== 'pending') {
+    if (server.status !== 'pending') {
       return reply.code(400).send({
-        error: `Skill "${name}" is not pending (current status: ${skill.status})`,
+        error: `MCP server "${name}" is not pending (current status: ${server.status})`,
       });
     }
 
     try {
-      store.disableSkill(name);
-      broadcastAdmin({ type: 'skill:rejected', name, timestamp: new Date().toISOString() });
+      store.disableMcpServer(name);
+      broadcastAdmin({ type: 'mcp:rejected', name, timestamp: new Date().toISOString() });
       return { success: true };
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to reject skill';
+      const message = err instanceof Error ? err.message : 'Failed to reject MCP server';
       return reply.code(500).send({ error: message });
     }
   });
 
-  // ── Delete skill ───────────────────────────────────────────────
-  app.delete<{ Params: { name: string } }>('/api/skills/:name', async (req, reply) => {
+  // ── Delete MCP server ─────────────────────────────────────────
+  app.delete<{ Params: { name: string } }>('/api/mcp/:name', async (req, reply) => {
     const { name } = req.params;
-    const skill = store.getSkill(name);
-    if (!skill) {
-      return reply.code(404).send({ error: `Skill "${name}" not found` });
+    const server = store.getMcpServer(name);
+    if (!server) {
+      return reply.code(404).send({ error: `MCP server "${name}" not found` });
     }
 
     try {
-      store.deleteSkill(name);
-      broadcastAdmin({ type: 'skill:deleted', name, timestamp: new Date().toISOString() });
+      store.deleteMcpServer(name);
+      broadcastAdmin({ type: 'mcp:deleted', name, timestamp: new Date().toISOString() });
       return { success: true };
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to delete skill';
+      const message = err instanceof Error ? err.message : 'Failed to delete MCP server';
       return reply.code(500).send({ error: message });
     }
   });

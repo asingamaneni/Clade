@@ -49,6 +49,32 @@ const migrations: Migration[] = [
       return result;
     },
   },
+  {
+    fromVersion: 2,
+    toVersion: 3,
+    description: 'Rename skills → mcp (align with Claude Code terminology)',
+    up: (config) => {
+      const result: Record<string, unknown> = { ...config, version: 3 };
+
+      // Rename root-level skills → mcp
+      if (result.skills !== undefined && result.mcp === undefined) {
+        result.mcp = result.skills;
+        delete result.skills;
+      }
+
+      // Rename agent.skills → agent.mcp for each agent
+      const agents = (result.agents ?? {}) as Record<string, Record<string, unknown>>;
+      for (const agentConfig of Object.values(agents)) {
+        if (agentConfig.skills !== undefined && agentConfig.mcp === undefined) {
+          agentConfig.mcp = agentConfig.skills;
+          delete agentConfig.skills;
+        }
+      }
+      result.agents = agents;
+
+      return result;
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------

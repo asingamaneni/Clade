@@ -15,7 +15,7 @@ Clade configuration lives at `~/.clade/config.json`. Override the location with 
       "model": "sonnet",
       "toolPreset": "full",
       "customTools": [],
-      "skills": [],
+      "mcp": [],
       "heartbeat": {
         "enabled": true,
         "interval": "30m",
@@ -83,7 +83,7 @@ Clade configuration lives at `~/.clade/config.json`. Override the location with 
     ]
   },
 
-  "skills": {
+  "mcp": {
     "autoApprove": []
   }
 }
@@ -98,7 +98,7 @@ Clade configuration lives at `~/.clade/config.json`. Override the location with 
 | `model` | string | `"sonnet"` | Claude model to use |
 | `toolPreset` | enum | `"full"` | `potato`, `coding`, `messaging`, `full`, `custom` |
 | `customTools` | string[] | `[]` | Tool list when preset is `custom` |
-| `skills` | string[] | `[]` | MCP server names to attach |
+| `mcp` | string[] | `[]` | MCP server names to attach |
 | `maxTurns` | number | `25` | Max autonomous turns per invocation |
 
 ## Heartbeat Config

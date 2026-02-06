@@ -31,7 +31,7 @@ describe('Config Schema', () => {
     expect(config.gateway.port).toBe(7890);
     expect(config.gateway.host).toBe('127.0.0.1');
     expect(config.routing.defaultAgent).toBe('');
-    expect(config.version).toBe(2);
+    expect(config.version).toBe(3);
   });
 
   it('should validate a fully specified config', () => {
@@ -43,7 +43,7 @@ describe('Config Schema', () => {
           model: 'opus',
           toolPreset: 'coding',
           customTools: [],
-          skills: ['memory'],
+          mcp: ['memory'],
           heartbeat: {
             enabled: true,
             interval: '1h',
@@ -66,7 +66,7 @@ describe('Config Schema', () => {
           { channel: 'telegram', agentId: 'myagent' },
         ],
       },
-      skills: { autoApprove: ['memory'] },
+      mcp: { autoApprove: ['memory'] },
     };
 
     const config = ConfigSchema.parse(input);
@@ -266,7 +266,7 @@ describe('Default Config Generation', () => {
     expect(config.channels).toBeDefined();
     expect(config.gateway).toBeDefined();
     expect(config.routing).toBeDefined();
-    expect(config.skills).toBeDefined();
+    expect(config.mcp).toBeDefined();
     expect(config.browser).toBeDefined();
   });
 

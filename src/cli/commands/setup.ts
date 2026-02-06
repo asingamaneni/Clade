@@ -322,9 +322,9 @@ function createDirectoryStructure(): void {
   const dirs = [
     CLADE_HOME,
     join(CLADE_HOME, 'agents'),
-    join(CLADE_HOME, 'skills'),
-    join(CLADE_HOME, 'skills', 'active'),
-    join(CLADE_HOME, 'skills', 'pending'),
+    join(CLADE_HOME, 'mcp'),
+    join(CLADE_HOME, 'mcp', 'active'),
+    join(CLADE_HOME, 'mcp', 'pending'),
     join(CLADE_HOME, 'data'),
     join(CLADE_HOME, 'logs'),
   ];
@@ -403,7 +403,7 @@ function buildConfig(opts: BuildConfigOptions): Record<string, unknown> {
       model: 'sonnet',
       toolPreset: 'full',
       customTools: [],
-      skills: [],
+      mcp: [],
       heartbeat: {
         enabled: true,
         interval: '30m',

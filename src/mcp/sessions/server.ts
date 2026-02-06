@@ -390,7 +390,7 @@ server.tool(
         name: string;
         description: string;
         toolPreset: string;
-        skills: string[];
+        mcp: string[];
       }> | undefined;
 
       if (!agents || agents.length === 0) {
@@ -405,13 +405,13 @@ server.tool(
       }
 
       const lines = agents.map((a) => {
-        const skills =
-          a.skills.length > 0 ? a.skills.join(', ') : 'none';
+        const mcp =
+          a.mcp.length > 0 ? a.mcp.join(', ') : 'none';
         return [
           `### ${a.name} (\`${a.id}\`)`,
           a.description ? `> ${a.description}` : '',
           `- **Tool preset:** ${a.toolPreset}`,
-          `- **Skills:** ${skills}`,
+          `- **MCP servers:** ${mcp}`,
         ]
           .filter(Boolean)
           .join('\n');

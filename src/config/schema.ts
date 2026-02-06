@@ -60,7 +60,7 @@ export type HeartbeatConfig = z.infer<typeof HeartbeatConfigSchema>;
 export const AdminConfigSchema = z.object({
   /**
    * Whether this agent has admin privileges.
-   * Admin agents get the admin MCP server for full skill/plugin management.
+   * Admin agents get the admin MCP server for full skill/MCP/plugin management.
    */
   enabled: z.boolean().default(false),
 
@@ -108,8 +108,8 @@ export const AgentConfigSchema = z.object({
   /** Explicit tool list when toolPreset is "custom". */
   customTools: z.array(z.string()).default([]),
 
-  /** MCP skill server names to attach (e.g. ["memory", "sessions"]). */
-  skills: z.array(z.string()).default([]),
+  /** MCP server names to attach (e.g. ["memory", "sessions"]). */
+  mcp: z.array(z.string()).default([]),
 
   /** Heartbeat / proactive monitoring configuration. */
   heartbeat: HeartbeatConfigSchema.default({ enabled: true }),
@@ -243,15 +243,15 @@ export const RoutingConfigSchema = z.object({
 export type RoutingConfig = z.infer<typeof RoutingConfigSchema>;
 
 // ---------------------------------------------------------------------------
-// Skills configuration
+// MCP configuration
 // ---------------------------------------------------------------------------
 
-export const SkillsConfigSchema = z.object({
-  /** Skill names that are auto-approved when requested by agents. */
+export const McpConfigSchema = z.object({
+  /** MCP server names that are auto-approved when requested by agents. */
   autoApprove: z.array(z.string()).default([]),
 });
 
-export type SkillsConfig = z.infer<typeof SkillsConfigSchema>;
+export type McpConfig = z.infer<typeof McpConfigSchema>;
 
 // ---------------------------------------------------------------------------
 // Browser / Playwright MCP configuration
@@ -309,7 +309,7 @@ export type BrowserConfig = z.infer<typeof BrowserConfigSchema>;
 
 export const ConfigSchema = z.object({
   /** Schema version for config migration support. */
-  version: z.number().int().default(2),
+  version: z.number().int().default(3),
 
   /** Agents are user-created. No pre-defined agents — starts empty. */
   agents: z
@@ -322,7 +322,7 @@ export const ConfigSchema = z.object({
 
   routing: RoutingConfigSchema.default({}),
 
-  skills: SkillsConfigSchema.default({}),
+  mcp: McpConfigSchema.default({}),
 
   /** Browser automation configuration (Playwright MCP). */
   browser: BrowserConfigSchema.default({}),

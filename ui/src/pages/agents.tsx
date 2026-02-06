@@ -59,7 +59,7 @@ export interface Agent {
   vibe?: string
   avatar?: string
   customTools?: string[]
-  skills?: string[]
+  mcp?: string[]
   heartbeat?: {
     enabled?: boolean
     interval?: string
@@ -155,11 +155,11 @@ const TOOL_CATEGORIES: ToolCategory[] = [
     ],
   },
   {
-    name: 'Skills',
-    label: 'Skills MCP',
+    name: 'McpManager',
+    label: 'MCP Manager',
     icon: '\uD83E\uDDE9',
     tools: [
-      { id: 'mcp__skills__*', desc: 'Dynamic skill search and installation' },
+      { id: 'mcp__mcp-manager__*', desc: 'Dynamic MCP server search and installation' },
     ],
   },
   {
@@ -167,7 +167,7 @@ const TOOL_CATEGORIES: ToolCategory[] = [
     label: 'Admin MCP',
     icon: '\uD83D\uDEE0\uFE0F',
     tools: [
-      { id: 'mcp__admin__*', desc: 'Full skill/plugin management (orchestrator only)' },
+      { id: 'mcp__admin__*', desc: 'Full MCP server/plugin management (orchestrator only)' },
     ],
   },
 ]
@@ -387,7 +387,7 @@ function IdentityTab({ agentId }: { agentId: string }) {
             Admin Privileges
           </Label>
           <p className="text-xs text-muted-foreground">
-            Enable full skill and MCP server management
+            Enable full MCP server and plugin management
           </p>
         </div>
         <Switch
@@ -608,7 +608,7 @@ function ToolsTab({
 }
 
 // ---------------------------------------------------------------------------
-// Sub: Skills Tab (per-agent skill assignment)
+// Sub: MCP Tab (per-agent MCP server assignment)
 // ---------------------------------------------------------------------------
 
 interface Skill {
@@ -618,7 +618,7 @@ interface Skill {
   path: string
 }
 
-function SkillsTab({
+function McpTab({
   agent,
   onRefresh,
 }: {
@@ -626,26 +626,26 @@ function SkillsTab({
   onRefresh: () => void
 }) {
   const [availableSkills, setAvailableSkills] = useState<Skill[]>([])
-  const [assignedSkills, setAssignedSkills] = useState<string[]>(agent.skills || [])
+  const [assignedSkills, setAssignedSkills] = useState<string[]>(agent.mcp || [])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
-  // Fetch active skills
+  // Fetch active MCP servers
   useEffect(() => {
     setLoading(true)
-    api<{ skills: Skill[] }>('/skills')
+    api<{ mcpServers: Skill[] }>('/mcp')
       .then((d) => {
-        const active = (d.skills || []).filter((s) => s.status === 'active')
+        const active = (d.mcpServers || []).filter((s) => s.status === 'active')
         setAvailableSkills(active)
       })
-      .catch((e) => console.error('Failed to load skills:', e.message))
+      .catch((e) => console.error('Failed to load MCP servers:', e.message))
       .finally(() => setLoading(false))
   }, [])
 
   // Reset when agent changes
   useEffect(() => {
-    setAssignedSkills(agent.skills || [])
-  }, [agent.id, agent.skills])
+    setAssignedSkills(agent.mcp || [])
+  }, [agent.id, agent.mcp])
 
   const toggle = (skillName: string) => {
     setAssignedSkills((prev) =>
@@ -660,9 +660,9 @@ function SkillsTab({
     try {
       await api('/agents/' + agent.id, {
         method: 'PUT',
-        body: { skills: assignedSkills },
+        body: { mcp: assignedSkills },
       })
-      console.log('Skills saved')
+      console.log('MCP config saved')
       onRefresh()
     } catch (e: any) {
       console.error('Save failed:', e.message)
@@ -672,13 +672,13 @@ function SkillsTab({
 
   const hasChanges =
     JSON.stringify([...assignedSkills].sort()) !==
-    JSON.stringify([...(agent.skills || [])].sort())
+    JSON.stringify([...(agent.mcp || [])].sort())
 
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-muted-foreground py-8">
         <Loader2 className="h-4 w-4 animate-spin" />
-        Loading skills...
+        Loading MCP servers...
       </div>
     )
   }
@@ -687,9 +687,9 @@ function SkillsTab({
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-semibold">Agent Skills</h3>
+          <h3 className="text-sm font-semibold">Agent MCP Servers</h3>
           <p className="text-xs text-muted-foreground mt-1">
-            Enable skills to give this agent additional capabilities via MCP servers
+            Enable MCP servers to give this agent additional capabilities
           </p>
         </div>
         <Badge variant="outline" className="text-xs">
@@ -700,7 +700,7 @@ function SkillsTab({
       {availableSkills.length === 0 ? (
         <div className="rounded-lg border border-dashed p-6 text-center">
           <p className="text-sm text-muted-foreground">
-            No active skills available. Install skills from the Skills page.
+            No active MCP servers available. Install MCP servers from the MCP Servers page.
           </p>
         </div>
       ) : (
@@ -761,7 +761,7 @@ function SkillsTab({
           ) : (
             <>
               <Save className="h-3.5 w-3.5 mr-1.5" />
-              Save Skills
+              Save MCP Config
             </>
           )}
         </Button>
@@ -1652,7 +1652,7 @@ function AgentDetail({
           <TabsTrigger value="soul">Soul</TabsTrigger>
           <TabsTrigger value="identity">Identity</TabsTrigger>
           <TabsTrigger value="tools">Tools</TabsTrigger>
-          <TabsTrigger value="skills">Skills</TabsTrigger>
+          <TabsTrigger value="mcp">MCP</TabsTrigger>
           <TabsTrigger value="tools-md">TOOLS.md</TabsTrigger>
           <TabsTrigger value="memory">Memory</TabsTrigger>
           <TabsTrigger value="heartbeat">Heartbeat</TabsTrigger>
@@ -1667,8 +1667,8 @@ function AgentDetail({
         <TabsContent value="tools">
           <ToolsTab agent={agent} onRefresh={onRefresh} />
         </TabsContent>
-        <TabsContent value="skills">
-          <SkillsTab agent={agent} onRefresh={onRefresh} />
+        <TabsContent value="mcp">
+          <McpTab agent={agent} onRefresh={onRefresh} />
         </TabsContent>
         <TabsContent value="tools-md">
           <ToolsMdTab agentId={agent.id} />
@@ -1783,9 +1783,9 @@ export function AgentsPage({
               >
                 <span className="shrink-0">{a.emoji || '\uD83E\uDD16'}</span>
                 <span className="truncate flex-1">{a.name || a.id}</span>
-                {a.skills && a.skills.length > 0 && (
+                {a.mcp && a.mcp.length > 0 && (
                   <span className="text-xs opacity-60">
-                    {a.skills.length}sk
+                    {a.mcp.length}mcp
                   </span>
                 )}
               </button>

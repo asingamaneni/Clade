@@ -23,13 +23,13 @@ The Clade gateway exposes a REST API on the configured port (default `7890`).
 | `POST` | `/api/sessions/:id/send` | Send message to session |
 | `DELETE` | `/api/sessions/:id` | Terminate session |
 
-## Skills
+## MCP Servers
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/skills` | List skills (active + pending) |
-| `POST` | `/api/skills/:name/approve` | Approve a pending skill |
-| `DELETE` | `/api/skills/:name` | Remove a skill |
+| `GET` | `/api/mcp` | List MCP servers (active + pending) |
+| `POST` | `/api/mcp/:name/approve` | Approve a pending MCP server |
+| `DELETE` | `/api/mcp/:name` | Remove an MCP server |
 
 ## Cron
 

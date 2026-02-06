@@ -29,7 +29,7 @@ const BUILTIN_MCP_SERVERS = [
   'memory',
   'sessions',
   'messaging',
-  'skills',
+  'mcp-manager',
   'admin',
 ] as const;
 
@@ -40,9 +40,9 @@ const BUILTIN_MCP_SERVERS = [
  */
 const MCP_SERVERS_BY_PRESET: Record<string, readonly string[]> = {
   potato: [],
-  coding: ['memory', 'sessions', 'skills'],
-  messaging: ['memory', 'sessions', 'messaging', 'skills'],
-  full: ['memory', 'sessions', 'messaging', 'skills'], // admin added separately if enabled
+  coding: ['memory', 'sessions', 'mcp-manager'],
+  messaging: ['memory', 'sessions', 'messaging', 'mcp-manager'],
+  full: ['memory', 'sessions', 'messaging', 'mcp-manager'], // admin added separately if enabled
   custom: [],
 };
 
@@ -342,8 +342,8 @@ export class SessionManager {
 
   /**
    * Build a temporary MCP config JSON file for the given agent.
-   * Includes built-in servers (memory, sessions, messaging, skills) based on
-   * the agent's tool preset, plus any active third-party skills.
+   * Includes built-in servers (memory, sessions, messaging, mcp-manager) based on
+   * the agent's tool preset, plus any active third-party MCP servers.
    *
    * Returns the path to the temp file, or undefined if no MCP servers needed.
    */
@@ -354,10 +354,10 @@ export class SessionManager {
     const preset = agentCfg.toolPreset;
     const builtinServers = MCP_SERVERS_BY_PRESET[preset] ?? [];
 
-    // If no built-in servers and no third-party skills, skip MCP config
+    // If no built-in servers and no third-party MCP servers, skip MCP config
     if (
       builtinServers.length === 0 &&
-      (!agentCfg.skills || agentCfg.skills.length === 0)
+      (!agentCfg.mcp || agentCfg.mcp.length === 0)
     ) {
       return undefined;
     }
@@ -375,7 +375,7 @@ export class SessionManager {
       memory: join(distDir, 'mcp', 'memory-server.js'),
       sessions: join(distDir, 'mcp', 'sessions-server.js'),
       messaging: join(distDir, 'mcp', 'messaging-server.js'),
-      skills: join(distDir, 'mcp', 'skills-server.js'),
+      'mcp-manager': join(distDir, 'mcp', 'mcp-manager-server.js'),
       admin: join(distDir, 'mcp', 'admin-server.js'),
     };
 
@@ -415,24 +415,24 @@ export class SessionManager {
       }
     }
 
-    // Add agent-specific third-party skills from ~/.clade/skills/active/
-    if (agentCfg.skills && agentCfg.skills.length > 0) {
-      const skillsDir = join(homeDir, 'skills', 'active');
-      for (const skillName of agentCfg.skills) {
+    // Add agent-specific third-party MCP servers from ~/.clade/mcp/active/
+    if (agentCfg.mcp && agentCfg.mcp.length > 0) {
+      const mcpDir = join(homeDir, 'mcp', 'active');
+      for (const mcpName of agentCfg.mcp) {
         // Skip built-in server names to avoid duplicates
-        if ((builtinServers as readonly string[]).includes(skillName)) {
+        if ((builtinServers as readonly string[]).includes(mcpName)) {
           continue;
         }
 
-        const skillConfigPath = join(skillsDir, `${skillName}.json`);
-        if (existsSync(skillConfigPath)) {
+        const mcpConfigPath = join(mcpDir, `${mcpName}.json`);
+        if (existsSync(mcpConfigPath)) {
           try {
-            const raw = readFileSync(skillConfigPath, 'utf-8');
-            const skillConfig = JSON.parse(raw) as McpServerEntry;
-            mcpConfig.mcpServers[skillName] = skillConfig;
+            const raw = readFileSync(mcpConfigPath, 'utf-8');
+            const mcpEntry = JSON.parse(raw) as McpServerEntry;
+            mcpConfig.mcpServers[mcpName] = mcpEntry;
           } catch (err: unknown) {
-            log.warn('Failed to load skill config', {
-              skill: skillName,
+            log.warn('Failed to load MCP server config', {
+              name: mcpName,
               error: err instanceof Error ? err.message : String(err),
             });
           }

@@ -463,12 +463,12 @@ test.describe('REST API', () => {
   // Stubs
   // ═══════════════════════════════════════════════════════════════════════
 
-  test('GET /api/skills returns array', async ({ request }) => {
-    const res = await request.get(`${server.baseUrl}/api/skills`);
+  test('GET /api/mcp returns array', async ({ request }) => {
+    const res = await request.get(`${server.baseUrl}/api/mcp`);
     expect(res.ok()).toBe(true);
     const body = await res.json();
-    expect(body.skills).toBeDefined();
-    expect(Array.isArray(body.skills)).toBe(true);
+    expect(body.mcpServers).toBeDefined();
+    expect(Array.isArray(body.mcpServers)).toBe(true);
   });
 
   test('GET /api/channels returns array', async ({ request }) => {

@@ -22,19 +22,19 @@ import { searchNpmRegistry } from './registry.js';
 const baseDir =
   process.env['CLADE_HOME'] ?? join(homedir(), '.clade');
 
-const skillsDir = join(baseDir, 'skills');
-const activeDir = join(skillsDir, 'active');
-const pendingDir = join(skillsDir, 'pending');
+const mcpDir = join(baseDir, 'mcp');
+const activeDir = join(mcpDir, 'active');
+const pendingDir = join(mcpDir, 'pending');
 
 // Ensure directories exist
 mkdirSync(activeDir, { recursive: true });
 mkdirSync(pendingDir, { recursive: true });
 
 // ---------------------------------------------------------------------------
-// Skill config type
+// MCP package config type
 // ---------------------------------------------------------------------------
 
-interface SkillConfig {
+interface McpPackageConfig {
   name: string;
   description: string;
   package?: string;
@@ -50,7 +50,7 @@ interface SkillConfig {
 /**
  * Derive a short directory-safe name from an npm package name or arbitrary string.
  */
-function toSkillDirName(nameOrPackage: string): string {
+function toMcpDirName(nameOrPackage: string): string {
   // Strip scope prefix (@org/) and replace non-alphanumeric with dashes
   return nameOrPackage
     .replace(/^@[^/]+\//, '')
@@ -60,24 +60,24 @@ function toSkillDirName(nameOrPackage: string): string {
 }
 
 /**
- * Read a skill's mcp.json config from a directory.
+ * Read an MCP server's mcp.json config from a directory.
  */
-function readSkillConfig(dir: string): SkillConfig | null {
+function readMcpConfig(dir: string): McpPackageConfig | null {
   const configPath = join(dir, 'mcp.json');
   if (!existsSync(configPath)) return null;
 
   try {
     const raw = readFileSync(configPath, 'utf-8');
-    return JSON.parse(raw) as SkillConfig;
+    return JSON.parse(raw) as McpPackageConfig;
   } catch {
     return null;
   }
 }
 
 /**
- * List skills from a given parent directory (active/ or pending/).
+ * List MCP servers from a given parent directory (active/ or pending/).
  */
-function listSkillsInDir(
+function listMcpInDir(
   dir: string,
   status: string,
 ): Array<{
@@ -110,7 +110,7 @@ function listSkillsInDir(
     }
     if (!stat.isDirectory()) continue;
 
-    const config = readSkillConfig(entryPath);
+    const config = readMcpConfig(entryPath);
     results.push({
       name: config?.name ?? entry,
       status,
@@ -127,16 +127,16 @@ function listSkillsInDir(
 // ---------------------------------------------------------------------------
 
 const server = new McpServer({
-  name: 'clade-skills',
+  name: 'clade-mcp-manager',
   version: '0.1.0',
 });
 
 // ---------------------------------------------------------------------------
-// Tool: skills_search
+// Tool: mcp_search
 // ---------------------------------------------------------------------------
 
 server.tool(
-  'skills_search',
+  'mcp_search',
   'Search for MCP server packages on the npm registry.',
   {
     query: z.string().describe('Search query'),
@@ -194,12 +194,12 @@ server.tool(
 );
 
 // ---------------------------------------------------------------------------
-// Tool: skills_install
+// Tool: mcp_install
 // ---------------------------------------------------------------------------
 
 server.tool(
-  'skills_install',
-  'Stage a skill for installation (placed in pending/ for approval).',
+  'mcp_install',
+  'Stage an MCP server for installation (placed in pending/ for approval).',
   {
     package: z
       .string()
@@ -210,12 +210,12 @@ server.tool(
         args: z.array(z.string()).optional().describe('Additional arguments'),
       })
       .optional()
-      .describe('Optional configuration for the skill'),
+      .describe('Optional configuration for the MCP server'),
   },
   async ({ package: pkgName, config }) => {
     try {
-      const dirName = toSkillDirName(pkgName);
-      const skillDir = join(pendingDir, dirName);
+      const dirName = toMcpDirName(pkgName);
+      const mcpServerDir = join(pendingDir, dirName);
 
       // Check if already exists
       if (existsSync(join(activeDir, dirName))) {
@@ -223,15 +223,15 @@ server.tool(
           content: [
             {
               type: 'text' as const,
-              text: `Skill "${dirName}" is already installed and active.`,
+              text: `MCP server "${dirName}" is already installed and active.`,
             },
           ],
         };
       }
 
-      mkdirSync(skillDir, { recursive: true });
+      mkdirSync(mcpServerDir, { recursive: true });
 
-      const skillConfig: SkillConfig = {
+      const mcpConfig: McpPackageConfig = {
         name: dirName,
         description: `MCP server from ${pkgName}`,
         package: pkgName,
@@ -241,8 +241,8 @@ server.tool(
       };
 
       writeFileSync(
-        join(skillDir, 'mcp.json'),
-        JSON.stringify(skillConfig, null, 2) + '\n',
+        join(mcpServerDir, 'mcp.json'),
+        JSON.stringify(mcpConfig, null, 2) + '\n',
         'utf-8',
       );
 
@@ -251,14 +251,14 @@ server.tool(
           {
             type: 'text' as const,
             text: [
-              `Skill "${dirName}" staged for approval in pending/.`,
+              `MCP server "${dirName}" staged for approval in pending/.`,
               '',
               '**Config:**',
               '```json',
-              JSON.stringify(skillConfig, null, 2),
+              JSON.stringify(mcpConfig, null, 2),
               '```',
               '',
-              'The skill will become active after operator approval.',
+              'The MCP server will become active after operator approval.',
             ].join('\n'),
           },
         ],
@@ -268,7 +268,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: `Error staging skill: ${err instanceof Error ? err.message : String(err)}`,
+            text: `Error staging MCP server: ${err instanceof Error ? err.message : String(err)}`,
           },
         ],
         isError: true,
@@ -278,15 +278,15 @@ server.tool(
 );
 
 // ---------------------------------------------------------------------------
-// Tool: skills_create
+// Tool: mcp_create
 // ---------------------------------------------------------------------------
 
 server.tool(
-  'skills_create',
-  'Create a custom skill configuration (staged in pending/ for approval).',
+  'mcp_create',
+  'Create a custom MCP server configuration (staged in pending/ for approval).',
   {
-    name: z.string().describe('Skill name'),
-    description: z.string().describe('Description of the skill'),
+    name: z.string().describe('MCP server name'),
+    description: z.string().describe('Description of the MCP server'),
     command: z.string().describe('Command to run the MCP server'),
     args: z.array(z.string()).describe('Command arguments'),
     env: z
@@ -296,23 +296,23 @@ server.tool(
   },
   async ({ name, description, command, args, env }) => {
     try {
-      const dirName = toSkillDirName(name);
-      const skillDir = join(pendingDir, dirName);
+      const dirName = toMcpDirName(name);
+      const mcpServerDir = join(pendingDir, dirName);
 
       if (existsSync(join(activeDir, dirName))) {
         return {
           content: [
             {
               type: 'text' as const,
-              text: `Skill "${dirName}" already exists in active/.`,
+              text: `MCP server "${dirName}" already exists in active/.`,
             },
           ],
         };
       }
 
-      mkdirSync(skillDir, { recursive: true });
+      mkdirSync(mcpServerDir, { recursive: true });
 
-      const skillConfig: SkillConfig = {
+      const mcpConfig: McpPackageConfig = {
         name: dirName,
         description,
         command,
@@ -321,8 +321,8 @@ server.tool(
       };
 
       writeFileSync(
-        join(skillDir, 'mcp.json'),
-        JSON.stringify(skillConfig, null, 2) + '\n',
+        join(mcpServerDir, 'mcp.json'),
+        JSON.stringify(mcpConfig, null, 2) + '\n',
         'utf-8',
       );
 
@@ -331,14 +331,14 @@ server.tool(
           {
             type: 'text' as const,
             text: [
-              `Custom skill "${dirName}" created in pending/.`,
+              `Custom MCP server "${dirName}" created in pending/.`,
               '',
               '**Config:**',
               '```json',
-              JSON.stringify(skillConfig, null, 2),
+              JSON.stringify(mcpConfig, null, 2),
               '```',
               '',
-              'The skill will become active after operator approval.',
+              'The MCP server will become active after operator approval.',
             ].join('\n'),
           },
         ],
@@ -348,7 +348,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: `Error creating skill: ${err instanceof Error ? err.message : String(err)}`,
+            text: `Error creating MCP server: ${err instanceof Error ? err.message : String(err)}`,
           },
         ],
         isError: true,
@@ -358,22 +358,22 @@ server.tool(
 );
 
 // ---------------------------------------------------------------------------
-// Tool: skills_list
+// Tool: mcp_list
 // ---------------------------------------------------------------------------
 
 server.tool(
-  'skills_list',
-  'List all skills (active, pending, and disabled).',
+  'mcp_list',
+  'List all MCP servers (active, pending, and disabled).',
   {},
   async () => {
     try {
-      const active = listSkillsInDir(activeDir, 'active');
-      const pending = listSkillsInDir(pendingDir, 'pending');
+      const active = listMcpInDir(activeDir, 'active');
+      const pending = listMcpInDir(pendingDir, 'pending');
 
       // Check for a disabled/ directory too
-      const disabledDir = join(skillsDir, 'disabled');
+      const disabledDir = join(mcpDir, 'disabled');
       const disabled = existsSync(disabledDir)
-        ? listSkillsInDir(disabledDir, 'disabled')
+        ? listMcpInDir(disabledDir, 'disabled')
         : [];
 
       const all = [...active, ...pending, ...disabled];
@@ -383,7 +383,7 @@ server.tool(
           content: [
             {
               type: 'text' as const,
-              text: 'No skills installed.',
+              text: 'No MCP servers installed.',
             },
           ],
         };
@@ -398,7 +398,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: `## Installed Skills\n\n${lines.join('\n')}`,
+            text: `## Installed MCP Servers\n\n${lines.join('\n')}`,
           },
         ],
       };
@@ -407,7 +407,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: `Error listing skills: ${err instanceof Error ? err.message : String(err)}`,
+            text: `Error listing MCP servers: ${err instanceof Error ? err.message : String(err)}`,
           },
         ],
         isError: true,
@@ -417,18 +417,18 @@ server.tool(
 );
 
 // ---------------------------------------------------------------------------
-// Tool: skills_remove
+// Tool: mcp_remove
 // ---------------------------------------------------------------------------
 
 server.tool(
-  'skills_remove',
-  'Remove a skill (from active/ or pending/).',
+  'mcp_remove',
+  'Remove an MCP server (from active/ or pending/).',
   {
-    name: z.string().describe('Skill name to remove'),
+    name: z.string().describe('MCP server name to remove'),
   },
   async ({ name }) => {
     try {
-      const dirName = toSkillDirName(name);
+      const dirName = toMcpDirName(name);
 
       // Look in active/ first, then pending/
       const activePath = join(activeDir, dirName);
@@ -445,7 +445,7 @@ server.tool(
       }
 
       // Also check disabled/
-      const disabledPath = join(skillsDir, 'disabled', dirName);
+      const disabledPath = join(mcpDir, 'disabled', dirName);
       if (existsSync(disabledPath)) {
         rmSync(disabledPath, { recursive: true, force: true });
         removedFrom = removedFrom ? `${removedFrom} and disabled` : 'disabled';
@@ -456,7 +456,7 @@ server.tool(
           content: [
             {
               type: 'text' as const,
-              text: `Skill "${dirName}" not found in active/, pending/, or disabled/.`,
+              text: `MCP server "${dirName}" not found in active/, pending/, or disabled/.`,
             },
           ],
           isError: true,
@@ -467,7 +467,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: `Skill "${dirName}" removed from ${removedFrom}/.`,
+            text: `MCP server "${dirName}" removed from ${removedFrom}/.`,
           },
         ],
       };
@@ -476,7 +476,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: `Error removing skill: ${err instanceof Error ? err.message : String(err)}`,
+            text: `Error removing MCP server: ${err instanceof Error ? err.message : String(err)}`,
           },
         ],
         isError: true,

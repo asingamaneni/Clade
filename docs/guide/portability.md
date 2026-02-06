@@ -58,4 +58,4 @@ git clone <repo> ~/.clade/agents/jarvis
 | Soul History | Yes | All previous SOUL.md versions |
 | Config | Yes | Agent-specific settings in manifest |
 | Sessions | No | Sessions are machine-specific |
-| Skills | No | Skills must be installed on the target machine |
+| MCP Servers | No | MCP servers must be installed on the target machine |

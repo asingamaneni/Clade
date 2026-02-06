@@ -48,7 +48,7 @@ async function runDoctor(opts: {
   results.push(checkAgents());
   results.push(checkSqlite());
   results.push(checkChannels());
-  results.push(checkSkills());
+  results.push(checkMcpServers());
   results.push(checkNodeVersion());
 
   if (opts.json) {
@@ -197,7 +197,7 @@ function checkDirectoryStructure(): CheckResult {
   const requiredDirs = [
     CLADE_HOME,
     join(CLADE_HOME, 'agents'),
-    join(CLADE_HOME, 'skills'),
+    join(CLADE_HOME, 'mcp'),
     join(CLADE_HOME, 'data'),
   ];
 
@@ -403,9 +403,9 @@ function checkChannels(): CheckResult {
   }
 }
 
-function checkSkills(): CheckResult {
-  const activeDir = join(CLADE_HOME, 'skills', 'active');
-  const pendingDir = join(CLADE_HOME, 'skills', 'pending');
+function checkMcpServers(): CheckResult {
+  const activeDir = join(CLADE_HOME, 'mcp', 'active');
+  const pendingDir = join(CLADE_HOME, 'mcp', 'pending');
 
   let activeCount = 0;
   let pendingCount = 0;
@@ -424,25 +424,25 @@ function checkSkills(): CheckResult {
     }
   } catch {
     return {
-      name: 'Skills',
+      name: 'MCP Servers',
       status: 'warn',
-      message: 'Could not read skills directories',
+      message: 'Could not read MCP server directories',
     };
   }
 
   if (pendingCount > 0) {
     return {
-      name: 'Skills',
+      name: 'MCP Servers',
       status: 'warn',
       message: `${activeCount} active, ${pendingCount} pending approval`,
-      detail: `Run "clade skill list --pending" to see pending skills.`,
+      detail: `Run "clade mcp list --pending" to see pending MCP servers.`,
     };
   }
 
   return {
-    name: 'Skills',
+    name: 'MCP Servers',
     status: 'ok',
-    message: `${activeCount} active skill${activeCount !== 1 ? 's' : ''}`,
+    message: `${activeCount} active MCP server${activeCount !== 1 ? 's' : ''}`,
   };
 }
 

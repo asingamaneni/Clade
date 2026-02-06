@@ -13,12 +13,12 @@ import inquirer from 'inquirer';
 import type { Command } from 'commander';
 
 const CLADE_HOME = join(homedir(), '.clade');
-const SKILLS_DIR = join(CLADE_HOME, 'skills');
-const ACTIVE_DIR = join(SKILLS_DIR, 'active');
-const PENDING_DIR = join(SKILLS_DIR, 'pending');
+const MCP_DIR = join(CLADE_HOME, 'mcp');
+const ACTIVE_DIR = join(MCP_DIR, 'active');
+const PENDING_DIR = join(MCP_DIR, 'pending');
 const CONFIG_PATH = join(CLADE_HOME, 'config.json');
 
-interface SkillConfig {
+interface McpServerConfig {
   name: string;
   description?: string;
   package?: string;
@@ -30,16 +30,16 @@ interface SkillConfig {
   approvedAt?: string;
 }
 
-export function registerSkillCommand(program: Command): void {
-  const skill = program.command('skill').description('Manage MCP skills');
+export function registerMcpCommand(program: Command): void {
+  const mcp = program.command('mcp').description('Manage MCP servers');
 
-  skill
+  mcp
     .command('list')
     .alias('ls')
-    .description('List all skills')
+    .description('List all MCP servers')
     .option('--json', 'Output as JSON')
-    .option('--pending', 'Show only pending skills')
-    .option('--active', 'Show only active skills')
+    .option('--pending', 'Show only pending MCP servers')
+    .option('--active', 'Show only active MCP servers')
     .action(
       async (opts: {
         json?: boolean;
@@ -47,7 +47,7 @@ export function registerSkillCommand(program: Command): void {
         active?: boolean;
       }) => {
         try {
-          await listSkills(opts);
+          await listMcpServers(opts);
         } catch (err: unknown) {
           console.error(
             'Error:',
@@ -58,19 +58,19 @@ export function registerSkillCommand(program: Command): void {
       },
     );
 
-  skill
+  mcp
     .command('add')
-    .description('Add a new skill from an npm package or local path')
+    .description('Add a new MCP server from an npm package or local path')
     .argument('<package>', 'npm package name or local path')
-    .option('-n, --name <name>', 'Skill name (defaults to package name)')
-    .option('--approve', 'Auto-approve the skill (skip pending)')
+    .option('-n, --name <name>', 'MCP server name (defaults to package name)')
+    .option('--approve', 'Auto-approve the MCP server (skip pending)')
     .action(
       async (
         pkg: string,
         opts: { name?: string; approve?: boolean },
       ) => {
         try {
-          await addSkill(pkg, opts);
+          await addMcpServer(pkg, opts);
         } catch (err: unknown) {
           console.error(
             'Error:',
@@ -81,15 +81,15 @@ export function registerSkillCommand(program: Command): void {
       },
     );
 
-  skill
+  mcp
     .command('remove')
     .alias('rm')
-    .description('Remove a skill')
-    .argument('<name>', 'Skill name to remove')
+    .description('Remove an MCP server')
+    .argument('<name>', 'MCP server name to remove')
     .option('-f, --force', 'Skip confirmation')
     .action(async (name: string, opts: { force?: boolean }) => {
       try {
-        await removeSkill(name, opts);
+        await removeMcpServer(name, opts);
       } catch (err: unknown) {
         console.error(
           'Error:',
@@ -99,13 +99,13 @@ export function registerSkillCommand(program: Command): void {
       }
     });
 
-  skill
+  mcp
     .command('approve')
-    .description('Approve a pending skill')
-    .argument('<name>', 'Skill name to approve')
+    .description('Approve a pending MCP server')
+    .argument('<name>', 'MCP server name to approve')
     .action(async (name: string) => {
       try {
-        await approveSkill(name);
+        await approveMcpServer(name);
       } catch (err: unknown) {
         console.error(
           'Error:',
@@ -116,40 +116,40 @@ export function registerSkillCommand(program: Command): void {
     });
 }
 
-async function listSkills(opts: {
+async function listMcpServers(opts: {
   json?: boolean;
   pending?: boolean;
   active?: boolean;
 }): Promise<void> {
-  ensureSkillDirs();
+  ensureMcpDirs();
 
-  const activeSkills = loadSkillsFromDir(ACTIVE_DIR, 'active');
-  const pendingSkills = loadSkillsFromDir(PENDING_DIR, 'pending');
+  const activeServers = loadMcpFromDir(ACTIVE_DIR, 'active');
+  const pendingServers = loadMcpFromDir(PENDING_DIR, 'pending');
 
-  let skills: SkillConfig[] = [];
+  let servers: McpServerConfig[] = [];
   if (opts.active) {
-    skills = activeSkills;
+    servers = activeServers;
   } else if (opts.pending) {
-    skills = pendingSkills;
+    servers = pendingServers;
   } else {
-    skills = [...activeSkills, ...pendingSkills];
+    servers = [...activeServers, ...pendingServers];
   }
 
   if (opts.json) {
-    console.log(JSON.stringify(skills, null, 2));
+    console.log(JSON.stringify(servers, null, 2));
     return;
   }
 
-  if (skills.length === 0) {
+  if (servers.length === 0) {
     console.log(
-      'No skills installed. Run "clade skill add <package>" to add one.',
+      'No MCP servers installed. Run "clade mcp add <package>" to add one.',
     );
     return;
   }
 
-  console.log(`\n  Skills (${skills.length})\n`);
+  console.log(`\n  MCP Servers (${servers.length})\n`);
 
-  for (const s of skills) {
+  for (const s of servers) {
     const statusTag =
       s.status === 'active' ? '[active]' : '[pending]';
     console.log(`  ${statusTag} ${s.name}`);
@@ -164,32 +164,32 @@ async function listSkills(opts: {
   }
 }
 
-async function addSkill(
+async function addMcpServer(
   pkg: string,
   opts: { name?: string; approve?: boolean },
 ): Promise<void> {
-  ensureSkillDirs();
+  ensureMcpDirs();
 
-  const skillName = opts.name ?? deriveSkillName(pkg);
+  const mcpName = opts.name ?? deriveMcpName(pkg);
 
   // Validate name
-  if (!/^[a-z0-9_-]+$/.test(skillName)) {
+  if (!/^[a-z0-9_-]+$/.test(mcpName)) {
     throw new Error(
-      'Skill name must contain only lowercase letters, numbers, hyphens, and underscores.',
+      'MCP server name must contain only lowercase letters, numbers, hyphens, and underscores.',
     );
   }
 
   // Check for duplicates
   if (
-    existsSync(join(ACTIVE_DIR, `${skillName}.json`)) ||
-    existsSync(join(PENDING_DIR, `${skillName}.json`))
+    existsSync(join(ACTIVE_DIR, `${mcpName}.json`)) ||
+    existsSync(join(PENDING_DIR, `${mcpName}.json`))
   ) {
     throw new Error(
-      `Skill "${skillName}" already exists. Remove it first or use a different name.`,
+      `MCP server "${mcpName}" already exists. Remove it first or use a different name.`,
     );
   }
 
-  console.log(`Installing skill "${skillName}" from ${pkg}...`);
+  console.log(`Installing MCP server "${mcpName}" from ${pkg}...`);
 
   // Determine if it's a local path or npm package
   let command: string;
@@ -223,8 +223,8 @@ async function addSkill(
     args = ['-y', pkg];
   }
 
-  const skillConfig: SkillConfig = {
-    name: skillName,
+  const mcpConfig: McpServerConfig = {
+    name: mcpName,
     description,
     package: pkg,
     command,
@@ -234,37 +234,37 @@ async function addSkill(
   };
 
   if (opts.approve) {
-    skillConfig.approvedAt = new Date().toISOString();
+    mcpConfig.approvedAt = new Date().toISOString();
   }
 
   // Write to appropriate directory
   const targetDir = opts.approve ? ACTIVE_DIR : PENDING_DIR;
-  const configPath = join(targetDir, `${skillName}.json`);
-  writeFileSync(configPath, JSON.stringify(skillConfig, null, 2), 'utf-8');
+  const configPath = join(targetDir, `${mcpName}.json`);
+  writeFileSync(configPath, JSON.stringify(mcpConfig, null, 2), 'utf-8');
 
   if (opts.approve) {
-    console.log(`\nSkill "${skillName}" installed and activated.`);
+    console.log(`\nMCP server "${mcpName}" installed and activated.`);
   } else {
     console.log(
-      `\nSkill "${skillName}" installed and pending approval.`,
+      `\nMCP server "${mcpName}" installed and pending approval.`,
     );
     console.log(
-      `Run "clade skill approve ${skillName}" to activate it.\n`,
+      `Run "clade mcp approve ${mcpName}" to activate it.\n`,
     );
   }
 }
 
-async function removeSkill(
+async function removeMcpServer(
   name: string,
   opts: { force?: boolean },
 ): Promise<void> {
-  ensureSkillDirs();
+  ensureMcpDirs();
 
   const activePath = join(ACTIVE_DIR, `${name}.json`);
   const pendingPath = join(PENDING_DIR, `${name}.json`);
 
   if (!existsSync(activePath) && !existsSync(pendingPath)) {
-    throw new Error(`Skill "${name}" not found.`);
+    throw new Error(`MCP server "${name}" not found.`);
   }
 
   if (!opts.force) {
@@ -272,7 +272,7 @@ async function removeSkill(
       {
         type: 'confirm',
         name: 'confirm',
-        message: `Remove skill "${name}"?`,
+        message: `Remove MCP server "${name}"?`,
         default: false,
       },
     ]);
@@ -290,87 +290,87 @@ async function removeSkill(
     rmSync(pendingPath);
   }
 
-  // Remove from agent skills lists in config
+  // Remove from agent MCP lists in config
   const config = loadConfig();
   const agents = (config.agents ?? {}) as Record<
     string,
-    { skills?: string[] }
+    { mcp?: string[] }
   >;
   for (const agentId of Object.keys(agents)) {
     const agent = agents[agentId];
-    if (agent?.skills) {
-      agent.skills = agent.skills.filter((s) => s !== name);
+    if (agent?.mcp) {
+      agent.mcp = agent.mcp.filter((s) => s !== name);
     }
   }
   saveConfig(config);
 
-  console.log(`Skill "${name}" removed.`);
+  console.log(`MCP server "${name}" removed.`);
 }
 
-async function approveSkill(name: string): Promise<void> {
-  ensureSkillDirs();
+async function approveMcpServer(name: string): Promise<void> {
+  ensureMcpDirs();
 
   const pendingPath = join(PENDING_DIR, `${name}.json`);
   const activePath = join(ACTIVE_DIR, `${name}.json`);
 
   if (existsSync(activePath)) {
-    console.log(`Skill "${name}" is already active.`);
+    console.log(`MCP server "${name}" is already active.`);
     return;
   }
 
   if (!existsSync(pendingPath)) {
     throw new Error(
-      `Skill "${name}" not found in pending. Run "clade skill list --pending" to see pending skills.`,
+      `MCP server "${name}" not found in pending. Run "clade mcp list --pending" to see pending MCP servers.`,
     );
   }
 
   // Read pending config
   const raw = readFileSync(pendingPath, 'utf-8');
-  const skillConfig = JSON.parse(raw) as SkillConfig;
+  const mcpConfig = JSON.parse(raw) as McpServerConfig;
 
   // Update status
-  skillConfig.status = 'active';
-  skillConfig.approvedAt = new Date().toISOString();
+  mcpConfig.status = 'active';
+  mcpConfig.approvedAt = new Date().toISOString();
 
   // Write to active directory
-  writeFileSync(activePath, JSON.stringify(skillConfig, null, 2), 'utf-8');
+  writeFileSync(activePath, JSON.stringify(mcpConfig, null, 2), 'utf-8');
 
   // Remove from pending
   rmSync(pendingPath);
 
-  console.log(`Skill "${name}" approved and activated.`);
+  console.log(`MCP server "${name}" approved and activated.`);
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function ensureSkillDirs(): void {
+function ensureMcpDirs(): void {
   mkdirSync(ACTIVE_DIR, { recursive: true });
   mkdirSync(PENDING_DIR, { recursive: true });
 }
 
-function loadSkillsFromDir(
+function loadMcpFromDir(
   dir: string,
   status: 'active' | 'pending',
-): SkillConfig[] {
+): McpServerConfig[] {
   if (!existsSync(dir)) return [];
 
   const files = readdirSync(dir).filter((f) => f.endsWith('.json'));
-  const skills: SkillConfig[] = [];
+  const servers: McpServerConfig[] = [];
 
   for (const file of files) {
     try {
       const raw = readFileSync(join(dir, file), 'utf-8');
-      const config = JSON.parse(raw) as SkillConfig;
+      const config = JSON.parse(raw) as McpServerConfig;
       config.status = status;
-      skills.push(config);
+      servers.push(config);
     } catch {
       // Skip invalid configs
     }
   }
 
-  return skills;
+  return servers;
 }
 
 function loadConfig(): Record<string, unknown> {
@@ -391,12 +391,12 @@ function saveConfig(config: Record<string, unknown>): void {
 }
 
 /**
- * Derive a skill name from a package identifier.
+ * Derive an MCP server name from a package identifier.
  * e.g., "@anthropic/mcp-memory" -> "mcp-memory"
  *       "some-mcp-server" -> "some-mcp-server"
  *       "./path/to/server.js" -> "server"
  */
-function deriveSkillName(pkg: string): string {
+function deriveMcpName(pkg: string): string {
   // Handle scoped packages
   if (pkg.startsWith('@')) {
     const parts = pkg.split('/');

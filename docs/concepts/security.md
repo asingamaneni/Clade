@@ -10,15 +10,15 @@ Agent personality is injected via `--append-system-prompt`, not as a workspace f
 
 ### 2. Config Is Read-Only
 
-`~/.clade/config.json` is never in the agent's workspace. Agents can read their own config via the Skills MCP server (read-only). They cannot change their tool permissions, model, or heartbeat settings.
+`~/.clade/config.json` is never in the agent's workspace. Agents can read their own config via the MCP Manager (read-only). They cannot change their tool permissions, model, or heartbeat settings.
 
-### 3. Skill Approval Gate
+### 3. MCP Server Approval Gate
 
-Skills requested by agents go to `~/.clade/skills/pending/` and require human approval before activation. This prevents agents from installing arbitrary MCP servers.
+MCP servers requested by agents go to `~/.clade/mcp/pending/` and require human approval before activation. This prevents agents from installing arbitrary MCP servers.
 
 ```bash
-clade skill list        # See pending and active skills
-clade skill approve X   # Approve after review
+clade mcp list        # See pending and active MCP servers
+clade mcp approve X   # Approve after review
 ```
 
 ### 4. Per-Agent Tool Restrictions
@@ -44,7 +44,7 @@ Each agent has its own memory namespace at `~/.clade/agents/<name>/memory/`. Cro
 
 - Modify their own SOUL.md or Core Principles
 - Change their config or tool permissions
-- Install skills without human approval
+- Install MCP servers without human approval
 - Access other agents' memory (without explicit sharing)
 - Push to git without committing through the RALPH loop
 - Modify the Clade source code or `node_modules`
@@ -53,6 +53,6 @@ Each agent has its own memory namespace at `~/.clade/agents/<name>/memory/`. Cro
 
 - **Review agent SOUL.md** periodically — check `soul-history/` for unexpected changes
 - **Use restrictive presets** — Give agents only the tools they need
-- **Monitor the pending skills queue** — Don't auto-approve blindly
+- **Monitor the pending MCP server queue** — Don't auto-approve blindly
 - **Set up quiet hours** — Prevent agents from acting during off-hours
 - **Keep `CLADE_HOME` outside your code repos** — Default `~/.clade` is good

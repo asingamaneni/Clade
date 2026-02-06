@@ -38,7 +38,7 @@ interface AgentConfigEntry {
   model?: string;
   toolPreset: ToolPreset;
   customTools?: string[];
-  skills?: string[];
+  mcp?: string[];
   heartbeat?: {
     enabled: boolean;
     interval: string;
@@ -252,7 +252,7 @@ async function addAgent(
     model,
     toolPreset,
     customTools: [],
-    skills: [],
+    mcp: [],
     heartbeat: {
       enabled: false,
       interval: '30m',
@@ -302,8 +302,8 @@ async function listAgents(opts: { json?: boolean }): Promise<void> {
     }
     console.log(`       Model: ${agent.model ?? 'default'}`);
     console.log(`       Tools: ${agent.toolPreset}`);
-    if (agent.skills && agent.skills.length > 0) {
-      console.log(`       Skills: ${agent.skills.join(', ')}`);
+    if (agent.mcp && agent.mcp.length > 0) {
+      console.log(`       MCP Servers: ${agent.mcp.join(', ')}`);
     }
     if (agent.heartbeat?.enabled) {
       console.log(

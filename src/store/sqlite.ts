@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import type { SessionStatus, SkillStatus } from '../agents/types.js';
+import type { SessionStatus, McpServerStatus } from '../agents/types.js';
 import { StoreError, StoreInitError } from '../utils/errors.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -29,9 +29,9 @@ export interface UserRow {
   created_at: string;
 }
 
-export interface SkillRow {
+export interface McpServerRow {
   name: string;
-  status: SkillStatus;
+  status: McpServerStatus;
   package: string | null;
   config: string | null;
   requested_by: string | null;
@@ -105,8 +105,8 @@ const SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_users_agent ON users(agent_id);
 
-  -- Skills: MCP server packages (pending approval, active, or disabled)
-  CREATE TABLE IF NOT EXISTS skills (
+  -- MCP servers: MCP server packages (pending approval, active, or disabled)
+  CREATE TABLE IF NOT EXISTS mcp_servers (
     name TEXT PRIMARY KEY,
     status TEXT NOT NULL DEFAULT 'pending',
     package TEXT,
@@ -224,6 +224,10 @@ export class Store {
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('synchronous = NORMAL');
     this.db.pragma('foreign_keys = ON');
+
+    // Migrate old 'skills' table to 'mcp_servers'
+    const oldSkillsTable = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='skills'").get();
+    if (oldSkillsTable) this.db.exec('ALTER TABLE skills RENAME TO mcp_servers');
 
     try {
       this.db.exec(SCHEMA_SQL);
@@ -430,17 +434,17 @@ export class Store {
   }
 
   // =========================================================================
-  // SKILLS
+  // MCP SERVERS
   // =========================================================================
 
-  createSkill(params: {
+  createMcpServer(params: {
     name: string;
     package?: string;
     config?: Record<string, unknown>;
     requestedBy?: string;
-  }): SkillRow {
+  }): McpServerRow {
     const stmt = this.db.prepare<[string, string | null, string | null, string | null]>(`
-      INSERT INTO skills (name, package, config, requested_by)
+      INSERT INTO mcp_servers (name, package, config, requested_by)
       VALUES (?, ?, ?, ?)
     `);
     stmt.run(
@@ -449,59 +453,59 @@ export class Store {
       params.config ? JSON.stringify(params.config) : null,
       params.requestedBy ?? null,
     );
-    return this.getSkill(params.name)!;
+    return this.getMcpServer(params.name)!;
   }
 
-  getSkill(name: string): SkillRow | undefined {
-    const stmt = this.db.prepare<[string], SkillRow>(`
-      SELECT * FROM skills WHERE name = ?
+  getMcpServer(name: string): McpServerRow | undefined {
+    const stmt = this.db.prepare<[string], McpServerRow>(`
+      SELECT * FROM mcp_servers WHERE name = ?
     `);
     return stmt.get(name);
   }
 
-  listSkills(status?: SkillStatus): SkillRow[] {
+  listMcpServers(status?: McpServerStatus): McpServerRow[] {
     if (status) {
-      const stmt = this.db.prepare<[string], SkillRow>(
-        `SELECT * FROM skills WHERE status = ? ORDER BY created_at DESC`,
+      const stmt = this.db.prepare<[string], McpServerRow>(
+        `SELECT * FROM mcp_servers WHERE status = ? ORDER BY created_at DESC`,
       );
       return stmt.all(status);
     }
-    const stmt = this.db.prepare<[], SkillRow>(
-      `SELECT * FROM skills ORDER BY created_at DESC`,
+    const stmt = this.db.prepare<[], McpServerRow>(
+      `SELECT * FROM mcp_servers ORDER BY created_at DESC`,
     );
     return stmt.all();
   }
 
-  approveSkill(name: string): void {
+  approveMcpServer(name: string): void {
     const stmt = this.db.prepare<[string]>(`
-      UPDATE skills SET status = 'active', approved_at = datetime('now') WHERE name = ?
+      UPDATE mcp_servers SET status = 'active', approved_at = datetime('now') WHERE name = ?
     `);
     stmt.run(name);
   }
 
-  disableSkill(name: string): void {
+  disableMcpServer(name: string): void {
     const stmt = this.db.prepare<[string]>(`
-      UPDATE skills SET status = 'disabled' WHERE name = ?
+      UPDATE mcp_servers SET status = 'disabled' WHERE name = ?
     `);
     stmt.run(name);
   }
 
-  deleteSkill(name: string): boolean {
-    const stmt = this.db.prepare<[string]>(`DELETE FROM skills WHERE name = ?`);
+  deleteMcpServer(name: string): boolean {
+    const stmt = this.db.prepare<[string]>(`DELETE FROM mcp_servers WHERE name = ?`);
     const result = stmt.run(name);
     return result.changes > 0;
   }
 
   /**
-   * Parse the JSON config stored in a skill row, returning `undefined` on
+   * Parse the JSON config stored in an MCP server row, returning `undefined` on
    * parse failure or if no config is stored.
    */
-  parseSkillConfig(row: SkillRow): Record<string, unknown> | undefined {
+  parseMcpServerConfig(row: McpServerRow): Record<string, unknown> | undefined {
     if (!row.config) return undefined;
     try {
       return JSON.parse(row.config) as Record<string, unknown>;
     } catch {
-      log.warn('Failed to parse skill config JSON', { skill: row.name });
+      log.warn('Failed to parse MCP server config JSON', { name: row.name });
       return undefined;
     }
   }
@@ -718,7 +722,7 @@ export class Store {
    * Return basic stats about the database (row counts per table).
    */
   stats(): Record<string, number> {
-    const tables = ['sessions', 'users', 'skills', 'cron_jobs', 'memory_index'];
+    const tables = ['sessions', 'users', 'mcp_servers', 'cron_jobs', 'memory_index'];
     const result: Record<string, number> = {};
     for (const table of tables) {
       const row = this.db.prepare(`SELECT COUNT(*) as count FROM ${table}`).get() as

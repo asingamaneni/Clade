@@ -9,7 +9,7 @@ import { DashboardPage } from '@/pages/dashboard'
 import { ChatPage } from '@/pages/chat'
 import { AgentsPage } from '@/pages/agents'
 import { SessionsPage } from '@/pages/sessions'
-import { SkillsPage } from '@/pages/skills'
+import { McpPage } from '@/pages/mcp'
 import { ChannelsPage } from '@/pages/channels'
 import { CronPage } from '@/pages/cron'
 import { ConfigPage } from '@/pages/config'
@@ -26,7 +26,7 @@ export interface Agent {
   toolPreset?: string
   emoji?: string
   customTools?: string[]
-  skills?: string[]
+  mcp?: string[]
 }
 
 export interface Session {
@@ -40,7 +40,7 @@ export interface Session {
   messageCount?: number
 }
 
-export interface Skill {
+export interface McpServer {
   name: string
   status: 'pending' | 'active' | 'disabled'
   description?: string
@@ -119,7 +119,7 @@ export default function App() {
   const [health, setHealth] = useState<any>(null)
   const [agents, setAgents] = useState<Agent[]>([])
   const [sessions, setSessions] = useState<Session[]>([])
-  const [skills, setSkills] = useState<Skill[]>([])
+  const [mcpServers, setMcpServers] = useState<McpServer[]>([])
   const [cronJobs, setCronJobs] = useState<CronJob[]>([])
   const [channels, setChannels] = useState<Channel[]>([])
   const [initialLoaded, setInitialLoaded] = useState(false)
@@ -134,8 +134,8 @@ export default function App() {
     api<{ sessions: Session[] }>('/sessions').then(d => setSessions(d.sessions || [])).catch(() => {})
   }, [])
 
-  const fetchSkills = useCallback(() => {
-    api<{ skills: Skill[] }>('/skills').then(d => setSkills(d.skills || [])).catch(() => {})
+  const fetchMcp = useCallback(() => {
+    api<{ mcpServers: McpServer[] }>('/mcp').then(d => setMcpServers(d.mcpServers || [])).catch(() => {})
   }, [])
 
   const fetchCron = useCallback(() => {
@@ -153,9 +153,9 @@ export default function App() {
   const fetchAll = useCallback(() => {
     return Promise.allSettled([
       fetchHealth(), fetchAgents(), fetchSessions(),
-      fetchSkills(), fetchCron(), fetchChannels(),
+      fetchMcp(), fetchCron(), fetchChannels(),
     ])
-  }, [fetchHealth, fetchAgents, fetchSessions, fetchSkills, fetchCron, fetchChannels])
+  }, [fetchHealth, fetchAgents, fetchSessions, fetchMcp, fetchCron, fetchChannels])
 
   // ── WebSocket for admin real-time updates ──────────────────
   useEffect(() => {
@@ -181,7 +181,7 @@ export default function App() {
             const domain = msg.type.split(':')[0]
             if (domain === 'agent' || domain === 'memory') fetchAgents()
             else if (domain === 'session') fetchSessions()
-            else if (domain === 'skill') fetchSkills()
+            else if (domain === 'mcp') fetchMcp()
             else if (domain === 'cron') fetchCron()
             else if (domain === 'channel' || domain === 'webchat') fetchChannels()
             else if (domain === 'config') fetchAll()
@@ -204,7 +204,7 @@ export default function App() {
       clearTimeout(reconTimer)
       if (ws) ws.close()
     }
-  }, [fetchAll, fetchAgents, fetchSessions, fetchSkills, fetchCron, fetchChannels])
+  }, [fetchAll, fetchAgents, fetchSessions, fetchMcp, fetchCron, fetchChannels])
 
   // ── Initial load ───────────────────────────────────────────
   useEffect(() => { fetchAll().finally(() => setInitialLoaded(true)) }, [])
@@ -265,8 +265,8 @@ export default function App() {
         return <UserProfilePage />
       case 'sessions':
         return <SessionsPage sessions={sessions} onRefresh={fetchSessions} />
-      case 'skills':
-        return <SkillsPage skills={skills} onRefresh={fetchSkills} />
+      case 'mcp':
+        return <McpPage mcpServers={mcpServers} onRefresh={fetchMcp} />
       case 'channels':
         return <ChannelsPage channels={channels} onRefresh={fetchChannels} />
       case 'cron':

@@ -586,11 +586,11 @@
         ],
       },
       {
-        name: 'Skills',
-        label: 'Skills MCP',
+        name: 'McpManager',
+        label: 'MCP Manager',
         icon: '\u{1F9E9}',
         tools: [
-          { id: 'mcp__skills__*', desc: 'Dynamic skill search and installation' },
+          { id: 'mcp__mcp-manager__*', desc: 'Dynamic MCP server search and installation' },
         ],
       },
       {
@@ -598,7 +598,7 @@
         label: 'Admin MCP',
         icon: '\u{1F6E0}\u{FE0F}',
         tools: [
-          { id: 'mcp__admin__*', desc: 'Full skill/plugin management (orchestrator only)' },
+          { id: 'mcp__admin__*', desc: 'Full MCP server/plugin management (orchestrator only)' },
         ],
       },
     ];
@@ -717,7 +717,7 @@
       { id: 'agents',    label: 'Agents',     icon: '\u{1F916}' },
       { id: 'user',      label: 'User Profile', icon: '\u{1F464}' },
       { id: 'sessions',  label: 'Sessions',   icon: '\u{1F5C2}' },
-      { id: 'skills',    label: 'Skills',     icon: '\u{1F9E9}' },
+      { id: 'mcp',       label: 'MCP Servers', icon: '\u{1F9E9}' },
       { id: 'channels',  label: 'Channels',   icon: '\u{1F4E1}' },
       { id: 'cron',      label: 'Cron',       icon: '\u{23F0}'  },
       { id: 'config',    label: 'Config',     icon: '\u{2699}\u{FE0F}' },
@@ -757,8 +757,8 @@
                 >
                   <span class="text-sm" style="width:20px;text-align:center">${a.emoji || '\u{1F916}'}</span>
                   <span class="truncate flex-1">${a.name || a.id}</span>
-                  ${a.skills && a.skills.length > 0 && html`
-                    <span class="text-xs px-1.5 rounded" style="background:#282e36;color:#8b949e">${a.skills.length}</span>
+                  ${a.mcp && a.mcp.length > 0 && html`
+                    <span class="text-xs px-1.5 rounded" style="background:#282e36;color:#8b949e">${a.mcp.length}</span>
                   `}
                 </div>
               `)}
@@ -2329,8 +2329,8 @@ If nothing needs attention, respond with: HEARTBEAT_OK
                   >
                     <span>\u{1F916}</span>
                     <span class="truncate flex-1">${a.name || a.id}</span>
-                    ${a.skills && a.skills.length > 0 && html`
-                      <span class="text-xs opacity-60">${a.skills.length}sk</span>
+                    ${a.mcp && a.mcp.length > 0 && html`
+                      <span class="text-xs opacity-60">${a.mcp.length}mcp</span>
                     `}
                   </div>
                 `)
@@ -2727,7 +2727,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
             <div class="flex items-center justify-between">
               <div>
                 <label class="block text-sm font-medium" style="color:#e6edf3">\u{1F6E0}\u{FE0F} Admin Privileges</label>
-                <p class="text-xs mt-0.5" style="color:#8b949e">Enable full skill and MCP server management</p>
+                <p class="text-xs mt-0.5" style="color:#8b949e">Enable full MCP server and plugin management</p>
               </div>
               <${Toggle} active=${form.adminEnabled} onToggle=${() => upd('adminEnabled', !form.adminEnabled)} />
             </div>
@@ -3196,37 +3196,37 @@ If nothing needs attention, respond with: HEARTBEAT_OK
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  PAGE 4: Skills
+    //  PAGE 4: MCP Servers
     // ═══════════════════════════════════════════════════════════════════
 
-    function SkillsPage({ skills, onRefresh }) {
+    function McpPage({ mcpServers, onRefresh }) {
       const [pkgName, setPkgName] = useState('');
       const [installing, setInstalling] = useState(false);
 
-      const active   = skills.filter(s => s.status === 'active');
-      const pending  = skills.filter(s => s.status === 'pending');
-      const disabled = skills.filter(s => s.status === 'disabled');
+      const active   = mcpServers.filter(s => s.status === 'active');
+      const pending  = mcpServers.filter(s => s.status === 'pending');
+      const disabled = mcpServers.filter(s => s.status === 'disabled');
 
       const approve = async (name) => {
         try {
-          await api('/skills/' + encodeURIComponent(name) + '/approve', { method: 'POST' });
-          showToast('Skill "' + name + '" approved', 'success');
+          await api('/mcp/' + encodeURIComponent(name) + '/approve', { method: 'POST' });
+          showToast('MCP server "' + name + '" approved', 'success');
           onRefresh && onRefresh();
         } catch (e) { showToast('Approve failed: ' + e.message, 'error'); }
       };
 
       const reject = async (name) => {
         try {
-          await api('/skills/' + encodeURIComponent(name) + '/reject', { method: 'POST' });
-          showToast('Skill "' + name + '" rejected', 'success');
+          await api('/mcp/' + encodeURIComponent(name) + '/reject', { method: 'POST' });
+          showToast('MCP server "' + name + '" rejected', 'success');
           onRefresh && onRefresh();
         } catch (e) { showToast('Reject failed: ' + e.message, 'error'); }
       };
 
       const remove = async (name) => {
         try {
-          await api('/skills/' + encodeURIComponent(name), { method: 'DELETE' });
-          showToast('Skill removed', 'success');
+          await api('/mcp/' + encodeURIComponent(name), { method: 'DELETE' });
+          showToast('MCP server removed', 'success');
           onRefresh && onRefresh();
         } catch (e) { showToast('Remove failed: ' + e.message, 'error'); }
       };
@@ -3234,7 +3234,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
       const install = async () => {
         if (!pkgName.trim()) return;
         setInstalling(true);
-        showToast('Skill install requested: ' + pkgName, 'info');
+        showToast('MCP server install requested: ' + pkgName, 'info');
         setPkgName('');
         setInstalling(false);
       };
@@ -3242,7 +3242,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
       return html`
         <div class="page-enter p-6">
           <div class="flex items-center justify-between mb-5">
-            <h2 class="text-xl font-semibold" style="color:#e6edf3">Skills</h2>
+            <h2 class="text-xl font-semibold" style="color:#e6edf3">MCP Servers</h2>
             <button class="btn btn-secondary" onClick=${onRefresh}>Refresh</button>
           </div>
 
@@ -3270,13 +3270,13 @@ If nothing needs attention, respond with: HEARTBEAT_OK
             </div>
           `}
 
-          <!-- Active skills section -->
+          <!-- Active MCP servers section -->
           <div class="mb-6">
             <h3 class="text-sm font-semibold mb-3 flex items-center gap-2" style="color:#3fb950">
-              \u{2705} Active Skills (${active.length})
+              \u{2705} Active MCP Servers (${active.length})
             </h3>
             ${active.length === 0
-              ? html`<div class="p-4 rounded-lg text-sm" style="background:#1c2128;border:1px solid rgba(63,185,80,0.2);color:#8b949e">No active skills installed.</div>`
+              ? html`<div class="p-4 rounded-lg text-sm" style="background:#1c2128;border:1px solid rgba(63,185,80,0.2);color:#8b949e">No active MCP servers installed.</div>`
               : html`
                 <div class="space-y-2">
                   ${active.map(s => html`
@@ -3293,7 +3293,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
             }
           </div>
 
-          <!-- Disabled skills -->
+          <!-- Disabled MCP servers -->
           ${disabled.length > 0 && html`
             <div class="mb-6">
               <h3 class="text-sm font-semibold mb-3 flex items-center gap-2" style="color:#8b949e">
@@ -3310,9 +3310,9 @@ If nothing needs attention, respond with: HEARTBEAT_OK
             </div>
           `}
 
-          <!-- Install skill form -->
+          <!-- Install MCP server form -->
           <div class="mt-8 p-5 rounded-lg" style="background:#1c2128;border:1px solid #30363d">
-            <h3 class="text-sm font-semibold mb-3" style="color:#e6edf3">Install Skill</h3>
+            <h3 class="text-sm font-semibold mb-3" style="color:#e6edf3">Install MCP Server</h3>
             <div class="flex gap-2">
               <input
                 type="text" class="flex-1"
@@ -3325,7 +3325,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
                 ${installing ? 'Installing...' : 'Install'}
               </button>
             </div>
-            <p class="text-xs mt-2" style="color:#484f58">Skills are standard MCP servers from npm. New skills go to pending and require approval.</p>
+            <p class="text-xs mt-2" style="color:#484f58">MCP servers are installed from npm. New servers go to pending and require approval.</p>
           </div>
         </div>
       `;
@@ -3791,7 +3791,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
       const [health, setHealth]     = useState(null);
       const [agents, setAgents]     = useState([]);
       const [sessions, setSessions] = useState([]);
-      const [skills, setSkills]     = useState([]);
+      const [mcpServers, setMcpServers] = useState([]);
       const [cronJobs, setCronJobs] = useState([]);
       const [channels, setChannels] = useState([]);
       const [agentFilesTick, setAgentFilesTick] = useState(0);
@@ -3800,7 +3800,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
       // ── Fetch helpers ────────────────────────────────────────────
       const fetchAgents   = useCallback(() => api('/agents').then(d => setAgents(d.agents || [])).catch(() => {}), []);
       const fetchSessions = useCallback(() => api('/sessions').then(d => setSessions(d.sessions || [])).catch(() => {}), []);
-      const fetchSkills   = useCallback(() => api('/skills').then(d => setSkills(d.skills || [])).catch(() => {}), []);
+      const fetchMcp      = useCallback(() => api('/mcp').then(d => setMcpServers(d.mcpServers || [])).catch(() => {}), []);
       const fetchCron     = useCallback(() => api('/cron').then(d => setCronJobs(d.jobs || [])).catch(() => {}), []);
       const fetchChannels = useCallback(() => api('/channels').then(d => setChannels(d.channels || [])).catch(() => {}), []);
       const fetchHealth   = useCallback(() => healthApi().then(h => { if (h) setHealth(h); }), []);
@@ -3808,9 +3808,9 @@ If nothing needs attention, respond with: HEARTBEAT_OK
       const fetchAll = useCallback(() => {
         return Promise.allSettled([
           fetchHealth(), fetchAgents(), fetchSessions(),
-          fetchSkills(), fetchCron(), fetchChannels(),
+          fetchMcp(), fetchCron(), fetchChannels(),
         ]);
-      }, [fetchHealth, fetchAgents, fetchSessions, fetchSkills, fetchCron, fetchChannels]);
+      }, [fetchHealth, fetchAgents, fetchSessions, fetchMcp, fetchCron, fetchChannels]);
 
       // ── WebSocket ────────────────────────────────────────────────
       useEffect(() => {
@@ -3833,7 +3833,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
                 const domain = msg.type.split(':')[0];
                 if (domain === 'agent' || domain === 'memory')  { fetchAgents(); setAgentFilesTick(t => t + 1); }
                 else if (domain === 'session')                   fetchSessions();
-                else if (domain === 'skill')                     fetchSkills();
+                else if (domain === 'mcp')                       fetchMcp();
                 else if (domain === 'cron')                      fetchCron();
                 else if (domain === 'channel' || domain === 'webchat') fetchChannels();
                 else if (domain === 'config')                    fetchAll();
@@ -3852,7 +3852,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
 
         connect();
         return () => { clearTimeout(reconTimer); if (ws) ws.close(); };
-      }, [fetchAll, fetchAgents, fetchSessions, fetchSkills, fetchCron, fetchChannels]);
+      }, [fetchAll, fetchAgents, fetchSessions, fetchMcp, fetchCron, fetchChannels]);
 
       // ── Initial load ─────────────────────────────────────────────
       useEffect(() => { fetchAll(); }, []);
@@ -3892,8 +3892,8 @@ If nothing needs attention, respond with: HEARTBEAT_OK
             return html`<${UserProfilePage} />`;
           case 'sessions':
             return html`<${SessionsPage} sessions=${sessions} onRefresh=${fetchSessions} />`;
-          case 'skills':
-            return html`<${SkillsPage} skills=${skills} onRefresh=${fetchSkills} />`;
+          case 'mcp':
+            return html`<${McpPage} mcpServers=${mcpServers} onRefresh=${fetchMcp} />`;
           case 'channels':
             return html`<${ChannelsPage} channels=${channels} onRefresh=${fetchChannels} />`;
           case 'cron':

@@ -37,7 +37,7 @@ Clade is a multi-agent orchestration platform that uses the `claude` CLI as its 
 │                                                                     │
 │  ┌───────────────────────────────────────────────────────────────┐  │
 │  │                    MCP Server Layer                            │  │
-│  │  Memory │ Sessions │ Messaging │ Skills │ Platform             │  │
+│  │  Memory │ Sessions │ Messaging │ MCP Mgr │ Platform            │  │
 │  └───────────────────────────────────────────────────────────────┘  │
 │                                                                     │
 │  ┌───────────────────────────────────────────────────────────────┐  │
@@ -45,7 +45,7 @@ Clade is a multi-agent orchestration platform that uses the `claude` CLI as its 
 │  └───────────────────────────────────────────────────────────────┘  │
 │                                                                     │
 │  ┌───────────────────────────────────────────────────────────────┐  │
-│  │  SQLite: sessions │ users │ skills │ cron_jobs │ memory_fts   │  │
+│  │  SQLite: sessions │ users │ mcp_servers │ cron_jobs │ memory_fts│  │
 │  └───────────────────────────────────────────────────────────────┘  │
 │                                                                     │
 │  ┌───────────────────────────────────────────────────────────────┐  │
@@ -84,7 +84,7 @@ Five custom MCP servers, each a stdio process:
 | Memory | `memory_store`, `memory_search`, `memory_get`, `memory_list` | Persistent agent memory with FTS5 search |
 | Sessions | `sessions_list`, `sessions_spawn`, `sessions_send`, `session_status`, `agents_list` | Session management, sub-agent spawning |
 | Messaging | `send_message`, `send_typing`, `get_channel_info` | Cross-channel messaging |
-| Skills | `skills_search`, `skills_install`, `skills_create`, `skills_list`, `skills_remove` | MCP skill discovery and management |
+| MCP Manager | `skills_search`, `skills_install`, `skills_create`, `skills_list`, `skills_remove` | MCP server package discovery and management |
 | Platform | `platform_notify`, `clipboard_read`, `clipboard_write`, `platform_open`, `platform_screenshot`, `platform_info` | Native OS interaction |
 
 ### Gateway (`src/gateway/`)
@@ -93,7 +93,7 @@ Fastify HTTP/WebSocket server. See [API Endpoints](/reference/api) for the full 
 
 ### Store (`src/store/`)
 
-SQLite via better-sqlite3. Tables: `sessions`, `users`, `skills`, `cron_jobs`, `memory_index`, `memory_fts` (FTS5).
+SQLite via better-sqlite3. Tables: `sessions`, `users`, `mcp_servers`, `cron_jobs`, `memory_index`, `memory_fts` (FTS5).
 
 ## Data Flows
 

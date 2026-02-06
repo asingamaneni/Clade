@@ -32,7 +32,7 @@ describe('Store', () => {
       const tableNames = tables.map((t) => t.name);
       expect(tableNames).toContain('sessions');
       expect(tableNames).toContain('users');
-      expect(tableNames).toContain('skills');
+      expect(tableNames).toContain('mcp_servers');
       expect(tableNames).toContain('cron_jobs');
       expect(tableNames).toContain('memory_index');
     });
@@ -52,7 +52,7 @@ describe('Store', () => {
       const stats = store.stats();
       expect(stats['sessions']).toBe(0);
       expect(stats['users']).toBe(0);
-      expect(stats['skills']).toBe(0);
+      expect(stats['mcp_servers']).toBe(0);
       expect(stats['cron_jobs']).toBe(0);
       expect(stats['memory_index']).toBe(0);
     });
@@ -224,70 +224,70 @@ describe('Store', () => {
   });
 
   // -----------------------------------------------------------------------
-  // Skills CRUD
+  // MCP Servers CRUD
   // -----------------------------------------------------------------------
 
-  describe('skills', () => {
-    it('should create and retrieve a skill', () => {
-      const skill = store.createSkill({
+  describe('mcp_servers', () => {
+    it('should create and retrieve an mcp server', () => {
+      const server = store.createMcpServer({
         name: 'weather-mcp',
         package: '@mcp/weather',
         requestedBy: 'main',
       });
 
-      expect(skill.name).toBe('weather-mcp');
-      expect(skill.status).toBe('pending');
-      expect(skill.requested_by).toBe('main');
+      expect(server.name).toBe('weather-mcp');
+      expect(server.status).toBe('pending');
+      expect(server.requested_by).toBe('main');
     });
 
-    it('should approve a skill', () => {
-      store.createSkill({ name: 'test-skill' });
-      store.approveSkill('test-skill');
+    it('should approve an mcp server', () => {
+      store.createMcpServer({ name: 'test-skill' });
+      store.approveMcpServer('test-skill');
 
-      const skill = store.getSkill('test-skill');
-      expect(skill!.status).toBe('active');
-      expect(skill!.approved_at).toBeTruthy();
+      const server = store.getMcpServer('test-skill');
+      expect(server!.status).toBe('active');
+      expect(server!.approved_at).toBeTruthy();
     });
 
-    it('should disable a skill', () => {
-      store.createSkill({ name: 'dis-skill' });
-      store.approveSkill('dis-skill');
-      store.disableSkill('dis-skill');
+    it('should disable an mcp server', () => {
+      store.createMcpServer({ name: 'dis-skill' });
+      store.approveMcpServer('dis-skill');
+      store.disableMcpServer('dis-skill');
 
-      const skill = store.getSkill('dis-skill');
-      expect(skill!.status).toBe('disabled');
+      const server = store.getMcpServer('dis-skill');
+      expect(server!.status).toBe('disabled');
     });
 
-    it('should list skills by status', () => {
-      store.createSkill({ name: 's1' });
-      store.createSkill({ name: 's2' });
-      store.createSkill({ name: 's3' });
-      store.approveSkill('s2');
+    it('should list mcp servers by status', () => {
+      store.createMcpServer({ name: 's1' });
+      store.createMcpServer({ name: 's2' });
+      store.createMcpServer({ name: 's3' });
+      store.approveMcpServer('s2');
 
-      const pending = store.listSkills('pending');
+      const pending = store.listMcpServers('pending');
       expect(pending).toHaveLength(2);
 
-      const active = store.listSkills('active');
+      const active = store.listMcpServers('active');
       expect(active).toHaveLength(1);
       expect(active[0]!.name).toBe('s2');
     });
 
-    it('should delete a skill', () => {
-      store.createSkill({ name: 'to-delete' });
-      const deleted = store.deleteSkill('to-delete');
+    it('should delete an mcp server', () => {
+      store.createMcpServer({ name: 'to-delete' });
+      const deleted = store.deleteMcpServer('to-delete');
       expect(deleted).toBe(true);
-      expect(store.getSkill('to-delete')).toBeUndefined();
+      expect(store.getMcpServer('to-delete')).toBeUndefined();
     });
 
-    it('should store and parse skill config JSON', () => {
+    it('should store and parse mcp server config JSON', () => {
       const config = { apiKey: 'abc', endpoint: 'https://example.com' };
-      store.createSkill({
+      store.createMcpServer({
         name: 'config-skill',
         config,
       });
 
-      const skill = store.getSkill('config-skill')!;
-      const parsed = store.parseSkillConfig(skill);
+      const server = store.getMcpServer('config-skill')!;
+      const parsed = store.parseMcpServerConfig(server);
       expect(parsed).toEqual(config);
     });
   });

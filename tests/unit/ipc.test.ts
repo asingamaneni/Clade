@@ -26,7 +26,7 @@ function createMockDeps(overrides?: Partial<IpcDeps>): IpcDeps {
             name: 'Jarvis',
             description: 'Orchestrator agent',
             toolPreset: 'full',
-            skills: ['memory'],
+            mcp: ['memory'],
           },
         },
         {
@@ -35,7 +35,7 @@ function createMockDeps(overrides?: Partial<IpcDeps>): IpcDeps {
             name: 'Coder',
             description: 'Coding agent',
             toolPreset: 'coding',
-            skills: [],
+            mcp: [],
           },
         },
       ]),

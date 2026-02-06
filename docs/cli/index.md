@@ -11,7 +11,7 @@ Clade is primarily a CLI tool. All commands are available via the `clade` binary
 | [`clade agent`](/cli/agent) | Create, list, export, import agents |
 | [`clade ask`](/cli/ask) | One-off question to an agent |
 | [`clade work`](/cli/work) | Start RALPH autonomous work loop |
-| [`clade skill`](/cli/skill) | Manage MCP skills |
+| [`clade mcp`](/cli/mcp) | Manage MCP servers |
 | [`clade ui`](/cli/ui) | Open admin dashboard in browser |
 | [`clade docs`](/cli/docs) | Open or serve documentation |
 | [`clade doctor`](/cli/doctor) | Health check |

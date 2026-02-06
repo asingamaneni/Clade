@@ -110,9 +110,9 @@ function bootstrapDefaultConfig(cladeHome: string, configPath: string): void {
   const dirs = [
     cladeHome,
     join(cladeHome, 'agents'),
-    join(cladeHome, 'skills'),
-    join(cladeHome, 'skills', 'active'),
-    join(cladeHome, 'skills', 'pending'),
+    join(cladeHome, 'mcp'),
+    join(cladeHome, 'mcp', 'active'),
+    join(cladeHome, 'mcp', 'pending'),
     join(cladeHome, 'data'),
     join(cladeHome, 'data', 'chats'),
     join(cladeHome, 'data', 'uploads'),
@@ -435,7 +435,7 @@ function findMcpServerScript(serverName: string): string | null {
 
 /**
  * Build a temporary MCP config file for an agent, so it has access to
- * memory, sessions, and skills tools during chat.
+ * memory, sessions, and mcp-manager tools during chat.
  */
 function buildMcpConfigForAgent(
   agentId: string,
@@ -446,9 +446,9 @@ function buildMcpConfigForAgent(
   // Determine which MCP servers this preset needs
   const MCP_SERVERS_BY_PRESET: Record<string, string[]> = {
     potato: [],
-    coding: ['memory', 'sessions', 'skills'],
-    messaging: ['memory', 'sessions', 'messaging', 'skills'],
-    full: ['memory', 'sessions', 'messaging', 'skills'],
+    coding: ['memory', 'sessions', 'mcp-manager'],
+    messaging: ['memory', 'sessions', 'messaging', 'mcp-manager'],
+    full: ['memory', 'sessions', 'messaging', 'mcp-manager'],
     custom: ['memory', 'sessions'],
   };
 
@@ -474,19 +474,19 @@ function buildMcpConfigForAgent(
 
   if (Object.keys(mcpServers).length === 0) return undefined;
 
-  // Also add any active third-party skills
-  const activeSkillsDir = join(cladeHome, 'skills', 'active');
-  if (existsSync(activeSkillsDir)) {
+  // Also add any active third-party MCP servers
+  const activeMcpDir = join(cladeHome, 'mcp', 'active');
+  if (existsSync(activeMcpDir)) {
     try {
-      const entries = readdirSync(activeSkillsDir);
+      const entries = readdirSync(activeMcpDir);
       for (const entry of entries) {
-        const configPath = join(activeSkillsDir, entry, 'mcp.json');
+        const configPath = join(activeMcpDir, entry, 'mcp.json');
         if (existsSync(configPath)) {
           try {
             const raw = readFileSync(configPath, 'utf-8');
-            const skillCfg = JSON.parse(raw) as { command: string; args: string[]; env?: Record<string, string> };
-            mcpServers[`skill_${entry}`] = skillCfg;
-          } catch { /* skip malformed skill configs */ }
+            const mcpCfg = JSON.parse(raw) as { command: string; args: string[]; env?: Record<string, string> };
+            mcpServers[`mcp_${entry}`] = mcpCfg;
+          } catch { /* skip malformed MCP configs */ }
         }
       }
     } catch { /* skip if unreadable */ }
@@ -734,7 +734,7 @@ function askClaude(
       args.push('--append-system-prompt', systemParts.join('\n\n'));
     }
 
-    // Build and pass MCP config so agent has access to memory/skills/sessions tools
+    // Build and pass MCP config so agent has access to memory/mcp-manager/sessions tools
     const mcpConfigPath = (agentId && toolPreset)
       ? buildMcpConfigForAgent(agentId, home, toolPreset, browserConfig)
       : buildMcpConfigForAgent(agentId || 'default', home, 'coding', browserConfig);
@@ -1611,47 +1611,47 @@ async function startPlaceholderServer(
     sessions.sort((a, b) => new Date(b.lastActiveAt as string).getTime() - new Date(a.lastActiveAt as string).getTime());
     return { sessions };
   });
-  fastify.get('/api/skills', async () => {
-    const skillsDir = join(homedir(), '.clade', 'skills');
-    const skills: Array<{ name: string; status: 'active' | 'pending'; description?: string; path: string }> = [];
+  fastify.get('/api/mcp', async () => {
+    const mcpDir = join(homedir(), '.clade', 'mcp');
+    const mcpServers: Array<{ name: string; status: 'active' | 'pending'; description?: string; path: string }> = [];
 
-    // Read active skills
-    const activeDir = join(skillsDir, 'active');
+    // Read active MCP servers
+    const activeDir = join(mcpDir, 'active');
     if (existsSync(activeDir)) {
       for (const name of readdirSync(activeDir)) {
-        const skillPath = join(activeDir, name);
-        const skillMd = join(skillPath, 'SKILL.md');
+        const mcpPath = join(activeDir, name);
+        const descMd = join(mcpPath, 'SKILL.md');
         let description = '';
-        if (existsSync(skillMd)) {
-          const content = readFileSync(skillMd, 'utf-8');
+        if (existsSync(descMd)) {
+          const content = readFileSync(descMd, 'utf-8');
           const descMatch = content.match(/^#[^\n]*\n+([^\n]+)/);
           if (descMatch) description = descMatch[1].trim();
         }
-        skills.push({ name, status: 'active', description, path: skillPath });
+        mcpServers.push({ name, status: 'active', description, path: mcpPath });
       }
     }
 
-    // Read pending skills
-    const pendingDir = join(skillsDir, 'pending');
+    // Read pending MCP servers
+    const pendingDir = join(mcpDir, 'pending');
     if (existsSync(pendingDir)) {
       for (const name of readdirSync(pendingDir)) {
-        const skillPath = join(pendingDir, name);
-        const skillMd = join(skillPath, 'SKILL.md');
+        const mcpPath = join(pendingDir, name);
+        const descMd = join(mcpPath, 'SKILL.md');
         let description = '';
-        if (existsSync(skillMd)) {
-          const content = readFileSync(skillMd, 'utf-8');
+        if (existsSync(descMd)) {
+          const content = readFileSync(descMd, 'utf-8');
           const descMatch = content.match(/^#[^\n]*\n+([^\n]+)/);
           if (descMatch) description = descMatch[1].trim();
         }
-        skills.push({ name, status: 'pending', description, path: skillPath });
+        mcpServers.push({ name, status: 'pending', description, path: mcpPath });
       }
     }
 
-    return { skills };
+    return { mcpServers };
   });
 
-  // ── Get skill details ───────────────────────────────────────
-  fastify.get<{ Params: { status: string; name: string } }>('/api/skills/:status/:name', async (req, reply) => {
+  // ── Get MCP server details ───────────────────────────────────
+  fastify.get<{ Params: { status: string; name: string } }>('/api/mcp/:status/:name', async (req, reply) => {
     const { status, name } = req.params;
 
     if (status !== 'active' && status !== 'pending') {
@@ -1659,21 +1659,21 @@ async function startPlaceholderServer(
       return { error: 'Status must be "active" or "pending"' };
     }
 
-    const skillsDir = join(homedir(), '.clade', 'skills');
-    const skillPath = join(skillsDir, status, name);
+    const mcpDir = join(homedir(), '.clade', 'mcp');
+    const mcpPath = join(mcpDir, status, name);
 
-    if (!existsSync(skillPath)) {
+    if (!existsSync(mcpPath)) {
       reply.status(404);
-      return { error: `Skill "${name}" not found in ${status}` };
+      return { error: `MCP server "${name}" not found in ${status}` };
     }
 
-    // Get list of files in skill directory
+    // Get list of files in MCP server directory
     const files: Array<{ name: string; size: number; content?: string }> = [];
-    const entries = readdirSync(skillPath, { withFileTypes: true });
+    const entries = readdirSync(mcpPath, { withFileTypes: true });
 
     for (const entry of entries) {
       if (entry.isFile()) {
-        const filePath = join(skillPath, entry.name);
+        const filePath = join(mcpPath, entry.name);
         const stats = { size: 0 };
         try {
           const s = require('fs').statSync(filePath);
@@ -1710,75 +1710,75 @@ async function startPlaceholderServer(
     return {
       name,
       status,
-      path: skillPath,
+      path: mcpPath,
       files,
     };
   });
 
-  // ── Approve pending skill ───────────────────────────────────
-  fastify.post<{ Params: { name: string } }>('/api/skills/:name/approve', async (req, reply) => {
+  // ── Approve pending MCP server ───────────────────────────────
+  fastify.post<{ Params: { name: string } }>('/api/mcp/:name/approve', async (req, reply) => {
     const { name } = req.params;
-    const skillsDir = join(homedir(), '.clade', 'skills');
-    const pendingPath = join(skillsDir, 'pending', name);
-    const activePath = join(skillsDir, 'active', name);
+    const mcpDir = join(homedir(), '.clade', 'mcp');
+    const pendingPath = join(mcpDir, 'pending', name);
+    const activePath = join(mcpDir, 'active', name);
 
     if (!existsSync(pendingPath)) {
       reply.status(404);
-      return { error: `Pending skill "${name}" not found` };
+      return { error: `Pending MCP server "${name}" not found` };
     }
 
     try {
-      mkdirSync(join(skillsDir, 'active'), { recursive: true });
+      mkdirSync(join(mcpDir, 'active'), { recursive: true });
       renameSync(pendingPath, activePath);
-      return { success: true, message: `Skill "${name}" approved and moved to active` };
+      return { success: true, message: `MCP server "${name}" approved and moved to active` };
     } catch (err) {
       reply.status(500);
-      return { error: `Failed to approve skill: ${err instanceof Error ? err.message : 'Unknown error'}` };
+      return { error: `Failed to approve MCP server: ${err instanceof Error ? err.message : 'Unknown error'}` };
     }
   });
 
-  // ── Reject pending skill ────────────────────────────────────
-  fastify.post<{ Params: { name: string } }>('/api/skills/:name/reject', async (req, reply) => {
+  // ── Reject pending MCP server ────────────────────────────────
+  fastify.post<{ Params: { name: string } }>('/api/mcp/:name/reject', async (req, reply) => {
     const { name } = req.params;
-    const skillsDir = join(homedir(), '.clade', 'skills');
-    const pendingPath = join(skillsDir, 'pending', name);
+    const mcpDir = join(homedir(), '.clade', 'mcp');
+    const pendingPath = join(mcpDir, 'pending', name);
 
     if (!existsSync(pendingPath)) {
       reply.status(404);
-      return { error: `Pending skill "${name}" not found` };
+      return { error: `Pending MCP server "${name}" not found` };
     }
 
     try {
       rmSync(pendingPath, { recursive: true, force: true });
-      return { success: true, message: `Skill "${name}" rejected and removed` };
+      return { success: true, message: `MCP server "${name}" rejected and removed` };
     } catch (err) {
       reply.status(500);
-      return { error: `Failed to reject skill: ${err instanceof Error ? err.message : 'Unknown error'}` };
+      return { error: `Failed to reject MCP server: ${err instanceof Error ? err.message : 'Unknown error'}` };
     }
   });
 
-  // ── Remove active skill ─────────────────────────────────────
-  fastify.delete<{ Params: { name: string } }>('/api/skills/:name', async (req, reply) => {
+  // ── Remove active MCP server ─────────────────────────────────
+  fastify.delete<{ Params: { name: string } }>('/api/mcp/:name', async (req, reply) => {
     const { name } = req.params;
-    const skillsDir = join(homedir(), '.clade', 'skills');
-    const activePath = join(skillsDir, 'active', name);
+    const mcpDir = join(homedir(), '.clade', 'mcp');
+    const activePath = join(mcpDir, 'active', name);
 
     if (!existsSync(activePath)) {
       reply.status(404);
-      return { error: `Active skill "${name}" not found` };
+      return { error: `Active MCP server "${name}" not found` };
     }
 
     try {
       rmSync(activePath, { recursive: true, force: true });
-      return { success: true, message: `Skill "${name}" removed` };
+      return { success: true, message: `MCP server "${name}" removed` };
     } catch (err) {
       reply.status(500);
-      return { error: `Failed to remove skill: ${err instanceof Error ? err.message : 'Unknown error'}` };
+      return { error: `Failed to remove MCP server: ${err instanceof Error ? err.message : 'Unknown error'}` };
     }
   });
 
-  // ── Install skill from npm ──────────────────────────────────
-  fastify.post<{ Body: { package: string } }>('/api/skills/install', async (req, reply) => {
+  // ── Install MCP server from npm ──────────────────────────────
+  fastify.post<{ Body: { package: string } }>('/api/mcp/install', async (req, reply) => {
     const body = req.body as Record<string, unknown>;
     const packageName = body.package;
 
@@ -1794,39 +1794,39 @@ async function startPlaceholderServer(
       return { error: 'Invalid package name' };
     }
 
-    // Extract skill name from package (e.g., @mcp/weather-server -> weather-server)
-    const skillName = sanitized.startsWith('@')
+    // Extract MCP server name from package (e.g., @mcp/weather-server -> weather-server)
+    const mcpName = sanitized.startsWith('@')
       ? sanitized.split('/')[1] || sanitized
       : sanitized.replace(/^@/, '');
 
-    const skillsDir = join(homedir(), '.clade', 'skills');
-    const pendingDir = join(skillsDir, 'pending');
-    const skillPath = join(pendingDir, skillName);
+    const mcpDir = join(homedir(), '.clade', 'mcp');
+    const pendingDir = join(mcpDir, 'pending');
+    const mcpPath = join(pendingDir, mcpName);
 
-    // Check if skill already exists
-    if (existsSync(skillPath) || existsSync(join(skillsDir, 'active', skillName))) {
+    // Check if MCP server already exists
+    if (existsSync(mcpPath) || existsSync(join(mcpDir, 'active', mcpName))) {
       reply.status(409);
-      return { error: `Skill "${skillName}" already exists` };
+      return { error: `MCP server "${mcpName}" already exists` };
     }
 
     try {
-      // Create skill directory
-      mkdirSync(skillPath, { recursive: true });
+      // Create MCP server directory
+      mkdirSync(mcpPath, { recursive: true });
 
       // Create package.json for npm install
       const pkgJson = {
-        name: `clade-skill-${skillName}`,
+        name: `clade-mcp-${mcpName}`,
         version: '1.0.0',
         private: true,
         dependencies: {
           [sanitized]: 'latest'
         }
       };
-      writeFileSync(join(skillPath, 'package.json'), JSON.stringify(pkgJson, null, 2));
+      writeFileSync(join(mcpPath, 'package.json'), JSON.stringify(pkgJson, null, 2));
 
       // Run npm install
       const npmInstall = spawn('npm', ['install', '--silent'], {
-        cwd: skillPath,
+        cwd: mcpPath,
         stdio: ['ignore', 'pipe', 'pipe'],
         shell: true,
       });
@@ -1844,24 +1844,24 @@ async function startPlaceholderServer(
 
       if (exitCode !== 0) {
         // Cleanup on failure
-        rmSync(skillPath, { recursive: true, force: true });
+        rmSync(mcpPath, { recursive: true, force: true });
         reply.status(500);
         return { error: `npm install failed: ${stderr || 'Unknown error'}` };
       }
 
-      // Create SKILL.md
-      const skillMd = `# ${skillName}\n\nInstalled from npm package: ${sanitized}\n`;
-      writeFileSync(join(skillPath, 'SKILL.md'), skillMd);
+      // Create SKILL.md description file
+      const descMd = `# ${mcpName}\n\nInstalled from npm package: ${sanitized}\n`;
+      writeFileSync(join(mcpPath, 'SKILL.md'), descMd);
 
       return {
         success: true,
-        message: `Skill "${skillName}" installed to pending. Approve it to activate.`,
-        skill: { name: skillName, status: 'pending' }
+        message: `MCP server "${mcpName}" installed to pending. Approve it to activate.`,
+        mcpServer: { name: mcpName, status: 'pending' }
       };
     } catch (err) {
       // Cleanup on error
-      if (existsSync(skillPath)) {
-        rmSync(skillPath, { recursive: true, force: true });
+      if (existsSync(mcpPath)) {
+        rmSync(mcpPath, { recursive: true, force: true });
       }
       reply.status(500);
       return { error: `Installation failed: ${err instanceof Error ? err.message : 'Unknown error'}` };
@@ -1942,7 +1942,7 @@ async function startPlaceholderServer(
         model: String(body.model || 'sonnet'),
         toolPreset: String(body.toolPreset || 'full'),
         customTools: [],
-        skills: [],
+        mcp: [],
         heartbeat: { enabled: hbEnabled, interval: hbInterval, mode: 'check', suppressOk: true },
         reflection: { enabled: true, interval: 10 },
         maxTurns: 25,

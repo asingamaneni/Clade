@@ -1,8 +1,8 @@
-# Agent Autonomy Analysis: Memory Persistence & Skill Management Gaps
+# Agent Autonomy Analysis: Memory Persistence & MCP Server Management Gaps
 
 > **Date**: 2026-02-03
 > **Context**: Analysis of why agents (e.g., Jarvis) cannot remember across conversations
-> and cannot manage their own skills, contrasted with OpenClaw's approach.
+> and cannot manage their own MCP servers, contrasted with OpenClaw's approach.
 
 ## Executive Summary
 
@@ -12,7 +12,7 @@ autonomously:
 
 1. **Memory is never auto-loaded** — agents start each conversation blank
 2. **Session state is ephemeral** — conversation-to-session mappings are lost on restart
-3. **Skills are walled off** — most presets don't even mount the skills MCP server
+3. **MCP servers are walled off** — most presets don't even mount the MCP Manager server
 
 These are architectural decisions, not bugs. They were made to avoid "self-mutation crash loops"
 observed in OpenClaw, but the cure is worse than the disease: agents are rendered amnesiac and
@@ -113,16 +113,16 @@ Nothing was ever stored because the agent was never instructed to save observati
 
 ---
 
-## Issue 2: Agents Cannot Manage Skills
+## Issue 2: Agents Cannot Manage MCP Servers
 
 ### Symptom
 
-User asks Jarvis "can you create skills for yourself?" Jarvis correctly responds that it
-cannot install or activate skills on its own.
+User asks Jarvis "can you create MCP servers for yourself?" Jarvis correctly responds that it
+cannot install or activate MCP servers on its own.
 
 ### Root Causes
 
-#### A. `coding` preset excludes skills MCP entirely
+#### A. `coding` preset excludes MCP Manager entirely
 
 Jarvis is a `coding` agent. The coding preset only mounts `memory` and `sessions` MCP servers:
 
@@ -133,7 +133,7 @@ coding: [
   ...CODING_TOOLS,     // Read, Edit, Write, Bash, Glob, Grep, NotebookEdit
   MCP_MEMORY,          // mcp__memory__*
   MCP_SESSIONS,        // mcp__sessions__*
-  // ❌ No MCP_SKILLS — agent cannot even see the skills system
+  // No MCP_SKILLS — agent cannot even see the MCP management system
 ],
 ```
 
@@ -142,18 +142,18 @@ File: src/engine/manager.ts (lines 38-44)
 
 const MCP_SERVERS_BY_PRESET: Record<string, readonly string[]> = {
   potato:    [],
-  coding:    ['memory', 'sessions'],          // ❌ No skills server
+  coding:    ['memory', 'sessions'],          // No MCP Manager server
   messaging: ['memory', 'sessions', 'messaging'],
-  full:      BUILTIN_MCP_SERVERS,             // ✅ Includes skills
+  full:      BUILTIN_MCP_SERVERS,             // Includes MCP Manager
   custom:    [],
 };
 ```
 
-Only the `full` preset includes the skills MCP server.
+Only the `full` preset includes the MCP Manager server.
 
-#### B. Even with skills access, everything goes to pending/
+#### B. Even with MCP Manager access, everything goes to pending/
 
-Both `skills_install` and `skills_create` write to `~/.clade/skills/pending/`:
+Both `skills_install` and `skills_create` write to `~/.clade/mcp/pending/`:
 
 ```
 File: src/mcp/skills/server.ts (lines 218, 300)
@@ -161,7 +161,7 @@ File: src/mcp/skills/server.ts (lines 218, 300)
 const skillDir = join(pendingDir, dirName);  // Always pending
 ```
 
-There is no self-approval mechanism. Agents cannot move skills from `pending/` to `active/`.
+There is no self-approval mechanism. Agents cannot move MCP servers from `pending/` to `active/`.
 
 #### C. The stated rationale is self-mutation prevention
 
@@ -173,8 +173,8 @@ This was a blanket response to a specific failure mode, applied too broadly.
 ### Impact
 
 - Agents cannot expand their own capabilities even when the user wants them to
-- The `coding` preset (most common) has no visibility into the skills system at all
-- Agents cannot even search for available skills on npm
+- The `coding` preset (most common) has no visibility into the MCP server system at all
+- Agents cannot even search for available MCP servers on npm
 - The approval workflow exists but is unreachable for most agents
 
 ---
@@ -187,7 +187,7 @@ This was a blanket response to a specific failure mode, applied too broadly.
 |---|---|
 | "Agents are proactive by default" (Decision #8) | Agents can't load their own memory at session start |
 | "Memory: human-auditable, version-controllable" (Decision #5) | Memory exists but agents don't read or write it automatically |
-| "Skills = MCP servers" (Decision #4) | Most presets don't mount the skills MCP |
+| "MCP servers for extensibility" (Decision #4) | Most presets don't mount the MCP Manager |
 | "Reflection cycle evolves SOUL.md" (Decision #9) | Reflection reads empty memory logs → no meaningful evolution |
 | "RALPH loop for continuous autonomous work" | RALPH works, but regular chat sessions have zero continuity |
 | "Agents observe, anticipate, and act" | Agents start blank every conversation, observe nothing |
@@ -201,7 +201,7 @@ Clade made two incompatible architectural commitments:
 
 These conflict because meaningful autonomy requires the ability to:
 - Remember past interactions (requires writing to and reading from memory)
-- Expand capabilities when needed (requires skill management)
+- Expand capabilities when needed (requires MCP server management)
 - Adapt behavior based on experience (requires memory → reflection pipeline to actually work)
 
 The RALPH loop (src/engine/ralph.ts) is the one place where autonomy works well: it has its
@@ -219,7 +219,7 @@ OpenClaw (https://github.com/openclaw/openclaw) takes a fundamentally different 
 | **Safety model** | Capability restriction (remove tools) | Sandbox isolation (Docker + denylists) |
 | **Session persistence** | In-memory Map (lost on restart) | Session history with compaction/summarization |
 | **Memory injection** | Agent must manually call MCP tools | Workspace context auto-injected |
-| **Skill management** | Agents can't see skills (most presets) | Skills discoverable via ClawHub |
+| **MCP management** | Agents can't see MCP servers (most presets) | MCP servers discoverable via ClawHub |
 | **Trust model** | Agents are untrusted by default | DMs trusted, groups sandboxed |
 | **Elevation** | Permanent restriction per preset | Per-session elevation toggles |
 
@@ -262,10 +262,10 @@ about this user." This can go in SOUL.md templates or be appended automatically.
 
 **Location**: `src/agents/templates.ts` and/or `src/cli/commands/start.ts`
 
-### Fix 4: Give `coding` preset access to skills MCP
+### Fix 4: Give `coding` preset access to MCP Manager
 
-Agents should be able to discover and request skills. The `pending/` approval gate is
-sufficient safety — there's no reason to hide the entire skills system.
+Agents should be able to discover and request MCP servers. The `pending/` approval gate is
+sufficient safety — there's no reason to hide the entire MCP management system.
 
 **Location**: `src/agents/presets.ts` line 80-84, `src/engine/manager.ts` line 39-40
 **Change**: Add `MCP_SKILLS` to `coding` preset's allowed tools and `'skills'` to MCP servers
@@ -277,10 +277,10 @@ be part of the system prompt or SOUL.md template.
 
 **Location**: Agent SOUL.md templates in `src/agents/templates.ts`
 
-### Fix 6: Consider sandbox isolation for skill activation
+### Fix 6: Consider sandbox isolation for MCP server activation
 
-Instead of requiring human approval for every skill, allow agents to self-activate skills
-within a sandbox. Human approval can be required for sandbox escape (accessing host
+Instead of requiring human approval for every MCP server, allow agents to self-activate MCP
+servers within a sandbox. Human approval can be required for sandbox escape (accessing host
 filesystem, network, etc.).
 
 ---
@@ -290,9 +290,9 @@ filesystem, network, etc.).
 | File | Issue | Lines |
 |---|---|---|
 | `src/cli/commands/start.ts` | Memory not injected; sessionMap ephemeral | 363, 380-393 |
-| `src/agents/presets.ts` | `coding` excludes skills | 80-84 |
-| `src/engine/manager.ts` | MCP server mapping excludes skills for coding | 38-44 |
-| `src/mcp/skills/server.ts` | All skills go to pending/ | 218, 300 |
+| `src/agents/presets.ts` | `coding` excludes MCP Manager | 80-84 |
+| `src/engine/manager.ts` | MCP server mapping excludes MCP Manager for coding | 38-44 |
+| `src/mcp/skills/server.ts` | All MCP servers go to pending/ | 218, 300 |
 | `src/mcp/memory/server.ts` | Memory tools exist but never auto-invoked | Full file |
 | `src/agents/reflection.ts` | Reflection reads empty memory | 184-204 |
 | `src/agents/templates.ts` | Templates don't instruct memory usage | Full file |
