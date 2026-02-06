@@ -1629,6 +1629,71 @@ async function startPlaceholderServer(
     return { skills };
   });
 
+  // ── Get skill details ───────────────────────────────────────
+  fastify.get<{ Params: { status: string; name: string } }>('/api/skills/:status/:name', async (req, reply) => {
+    const { status, name } = req.params;
+
+    if (status !== 'active' && status !== 'pending') {
+      reply.status(400);
+      return { error: 'Status must be "active" or "pending"' };
+    }
+
+    const skillsDir = join(homedir(), '.clade', 'skills');
+    const skillPath = join(skillsDir, status, name);
+
+    if (!existsSync(skillPath)) {
+      reply.status(404);
+      return { error: `Skill "${name}" not found in ${status}` };
+    }
+
+    // Get list of files in skill directory
+    const files: Array<{ name: string; size: number; content?: string }> = [];
+    const entries = readdirSync(skillPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (entry.isFile()) {
+        const filePath = join(skillPath, entry.name);
+        const stats = { size: 0 };
+        try {
+          const s = require('fs').statSync(filePath);
+          stats.size = s.size;
+        } catch {}
+
+        // Read content for small text files
+        let content: string | undefined;
+        const textExtensions = ['.md', '.json', '.txt', '.js', '.ts', '.yaml', '.yml'];
+        const isTextFile = textExtensions.some(ext => entry.name.toLowerCase().endsWith(ext));
+
+        if (isTextFile && stats.size < 50000) { // 50KB limit
+          try {
+            content = readFileSync(filePath, 'utf-8');
+          } catch {}
+        }
+
+        files.push({ name: entry.name, size: stats.size, content });
+      } else if (entry.isDirectory()) {
+        // Just note that it's a directory
+        files.push({ name: entry.name + '/', size: 0 });
+      }
+    }
+
+    // Sort: directories first, then files alphabetically
+    files.sort((a, b) => {
+      const aIsDir = a.name.endsWith('/');
+      const bIsDir = b.name.endsWith('/');
+      if (aIsDir && !bIsDir) return -1;
+      if (!aIsDir && bIsDir) return 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    return {
+      name,
+      status,
+      path: skillPath,
+      files,
+    };
+  });
+
   // ── Approve pending skill ───────────────────────────────────
   fastify.post<{ Params: { name: string } }>('/api/skills/:name/approve', async (req, reply) => {
     const { name } = req.params;
