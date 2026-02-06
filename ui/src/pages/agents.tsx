@@ -5,6 +5,13 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -34,6 +41,7 @@ import {
   Sparkles,
   ChevronRight,
   Eye,
+  Wrench,
 } from "lucide-react"
 
 // ---------------------------------------------------------------------------
@@ -56,6 +64,12 @@ export interface Agent {
     enabled?: boolean
     interval?: string
     activeHours?: { start?: string; end?: string }
+  }
+  admin?: {
+    enabled?: boolean
+    autoApproveSkills?: boolean
+    canCreateSkills?: boolean
+    canManageAgents?: boolean
   }
 }
 
@@ -146,6 +160,14 @@ const TOOL_CATEGORIES: ToolCategory[] = [
     icon: '\uD83E\uDDE9',
     tools: [
       { id: 'mcp__skills__*', desc: 'Dynamic skill search and installation' },
+    ],
+  },
+  {
+    name: 'Admin',
+    label: 'Admin MCP',
+    icon: '\uD83D\uDEE0\uFE0F',
+    tools: [
+      { id: 'mcp__admin__*', desc: 'Full skill/plugin management (orchestrator only)' },
     ],
   },
 ]
@@ -262,6 +284,8 @@ interface IdentityForm {
   vibe: string
   emoji: string
   avatar: string
+  model: string
+  adminEnabled: boolean
 }
 
 function IdentityTab({ agentId }: { agentId: string }) {
@@ -271,6 +295,8 @@ function IdentityTab({ agentId }: { agentId: string }) {
     vibe: '',
     emoji: '',
     avatar: '',
+    model: 'sonnet',
+    adminEnabled: false,
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -286,20 +312,24 @@ function IdentityTab({ agentId }: { agentId: string }) {
           vibe: a.vibe || '',
           emoji: a.emoji || '',
           avatar: a.avatar || '',
+          model: a.model || 'sonnet',
+          adminEnabled: a.admin?.enabled || false,
         })
       })
       .catch((e) => console.error('Failed to load identity:', e.message))
       .finally(() => setLoading(false))
   }, [agentId])
 
-  const updateField = (key: keyof IdentityForm, value: string) => {
+  const updateField = (key: keyof IdentityForm, value: string | boolean) => {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
   const save = async () => {
     setSaving(true)
     try {
-      await api('/agents/' + agentId, { method: 'PUT', body: form })
+      const { adminEnabled, ...rest } = form
+      const body = { ...rest, admin: { enabled: adminEnabled } }
+      await api('/agents/' + agentId, { method: 'PUT', body })
       console.log('Identity saved')
     } catch (e: any) {
       console.error('Save failed:', e.message)
@@ -330,13 +360,42 @@ function IdentityTab({ agentId }: { agentId: string }) {
         <div key={f.key} className="space-y-1.5">
           <Label className="text-xs text-muted-foreground">{f.label}</Label>
           <Input
-            value={form[f.key]}
+            value={form[f.key] as string}
             onChange={(e) => updateField(f.key, e.target.value)}
             placeholder={f.placeholder}
           />
         </div>
       ))}
-      <div className="flex justify-end pt-2">
+      <div className="space-y-1.5">
+        <Label className="text-xs text-muted-foreground">Model</Label>
+        <Select value={form.model} onValueChange={(v) => updateField('model', v)}>
+          <SelectTrigger>
+            <SelectValue placeholder="Select model" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="sonnet">Sonnet</SelectItem>
+            <SelectItem value="opus">Opus</SelectItem>
+            <SelectItem value="haiku">Haiku</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <Separator className="my-4" />
+      <div className="flex items-center justify-between">
+        <div className="space-y-0.5">
+          <Label className="text-sm flex items-center gap-1.5">
+            <Wrench className="h-4 w-4" />
+            Admin Privileges
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            Enable full skill and MCP server management
+          </p>
+        </div>
+        <Switch
+          checked={form.adminEnabled}
+          onCheckedChange={(checked) => updateField('adminEnabled', checked)}
+        />
+      </div>
+      <div className="flex justify-end pt-4">
         <Button size="sm" onClick={save} disabled={saving}>
           {saving ? (
             <>
@@ -458,7 +517,7 @@ function ToolsTab({
       </div>
 
       {/* Tool category sections */}
-      {TOOL_CATEGORIES.map((cat) => {
+      {TOOL_CATEGORIES.filter((cat) => cat.name !== 'Admin' || agent.admin?.enabled).map((cat) => {
         const catEnabled = cat.tools.filter((t) =>
           enabled.includes(t.id),
         ).length
@@ -540,6 +599,169 @@ function ToolsTab({
             <>
               <Save className="h-3.5 w-3.5 mr-1.5" />
               Save Tool Config
+            </>
+          )}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Sub: Skills Tab (per-agent skill assignment)
+// ---------------------------------------------------------------------------
+
+interface Skill {
+  name: string
+  status: 'active' | 'pending'
+  description?: string
+  path: string
+}
+
+function SkillsTab({
+  agent,
+  onRefresh,
+}: {
+  agent: Agent
+  onRefresh: () => void
+}) {
+  const [availableSkills, setAvailableSkills] = useState<Skill[]>([])
+  const [assignedSkills, setAssignedSkills] = useState<string[]>(agent.skills || [])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  // Fetch active skills
+  useEffect(() => {
+    setLoading(true)
+    api<{ skills: Skill[] }>('/skills')
+      .then((d) => {
+        const active = (d.skills || []).filter((s) => s.status === 'active')
+        setAvailableSkills(active)
+      })
+      .catch((e) => console.error('Failed to load skills:', e.message))
+      .finally(() => setLoading(false))
+  }, [])
+
+  // Reset when agent changes
+  useEffect(() => {
+    setAssignedSkills(agent.skills || [])
+  }, [agent.id, agent.skills])
+
+  const toggle = (skillName: string) => {
+    setAssignedSkills((prev) =>
+      prev.includes(skillName)
+        ? prev.filter((s) => s !== skillName)
+        : [...prev, skillName]
+    )
+  }
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await api('/agents/' + agent.id, {
+        method: 'PUT',
+        body: { skills: assignedSkills },
+      })
+      console.log('Skills saved')
+      onRefresh()
+    } catch (e: any) {
+      console.error('Save failed:', e.message)
+    }
+    setSaving(false)
+  }
+
+  const hasChanges =
+    JSON.stringify([...assignedSkills].sort()) !==
+    JSON.stringify([...(agent.skills || [])].sort())
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-muted-foreground py-8">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Loading skills...
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold">Agent Skills</h3>
+          <p className="text-xs text-muted-foreground mt-1">
+            Enable skills to give this agent additional capabilities via MCP servers
+          </p>
+        </div>
+        <Badge variant="outline" className="text-xs">
+          {assignedSkills.length}/{availableSkills.length} enabled
+        </Badge>
+      </div>
+
+      {availableSkills.length === 0 ? (
+        <div className="rounded-lg border border-dashed p-6 text-center">
+          <p className="text-sm text-muted-foreground">
+            No active skills available. Install skills from the Skills page.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {availableSkills.map((skill) => {
+            const isAssigned = assignedSkills.includes(skill.name)
+            return (
+              <div
+                key={skill.name}
+                onClick={() => toggle(skill.name)}
+                className={cn(
+                  "flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-colors",
+                  isAssigned
+                    ? "border-[hsl(var(--success))]/30 bg-[hsl(var(--success))]/5"
+                    : "border-border hover:border-muted-foreground/30"
+                )}
+              >
+                <div className="flex items-center gap-3">
+                  <div
+                    className={cn(
+                      "w-4 h-4 rounded border-2 flex items-center justify-center transition-colors",
+                      isAssigned
+                        ? "bg-[hsl(var(--success))] border-[hsl(var(--success))]"
+                        : "border-muted-foreground/30"
+                    )}
+                  >
+                    {isAssigned && (
+                      <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 12 12">
+                        <path d="M10.28 2.28L3.989 8.575 1.695 6.28A1 1 0 00.28 7.695l3 3a1 1 0 001.414 0l7-7A1 1 0 0010.28 2.28z" />
+                      </svg>
+                    )}
+                  </div>
+                  <div>
+                    <div className="font-mono text-sm">{skill.name}</div>
+                    {skill.description && (
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {skill.description}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <Badge variant="secondary" className="text-xs">
+                  🧩 MCP
+                </Badge>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      <div className="flex justify-end">
+        <Button onClick={save} disabled={saving || !hasChanges} size="sm">
+          {saving ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+              Saving...
+            </>
+          ) : (
+            <>
+              <Save className="h-3.5 w-3.5 mr-1.5" />
+              Save Skills
             </>
           )}
         </Button>
@@ -1430,6 +1652,7 @@ function AgentDetail({
           <TabsTrigger value="soul">Soul</TabsTrigger>
           <TabsTrigger value="identity">Identity</TabsTrigger>
           <TabsTrigger value="tools">Tools</TabsTrigger>
+          <TabsTrigger value="skills">Skills</TabsTrigger>
           <TabsTrigger value="tools-md">TOOLS.md</TabsTrigger>
           <TabsTrigger value="memory">Memory</TabsTrigger>
           <TabsTrigger value="heartbeat">Heartbeat</TabsTrigger>
@@ -1443,6 +1666,9 @@ function AgentDetail({
         </TabsContent>
         <TabsContent value="tools">
           <ToolsTab agent={agent} onRefresh={onRefresh} />
+        </TabsContent>
+        <TabsContent value="skills">
+          <SkillsTab agent={agent} onRefresh={onRefresh} />
         </TabsContent>
         <TabsContent value="tools-md">
           <ToolsMdTab agentId={agent.id} />

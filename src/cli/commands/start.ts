@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, readdirSync, watch } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, readdirSync, watch, renameSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -1206,6 +1206,7 @@ async function startPlaceholderServer(
         model: a.model ?? 'sonnet',
         toolPreset: a.toolPreset ?? 'full',
         emoji: a.emoji ?? '',
+        admin: a.admin ?? undefined,
       })),
     };
   });
@@ -1589,7 +1590,198 @@ async function startPlaceholderServer(
     sessions.sort((a, b) => new Date(b.lastActiveAt as string).getTime() - new Date(a.lastActiveAt as string).getTime());
     return { sessions };
   });
-  fastify.get('/api/skills', async () => ({ skills: [] }));
+  fastify.get('/api/skills', async () => {
+    const skillsDir = join(homedir(), '.clade', 'skills');
+    const skills: Array<{ name: string; status: 'active' | 'pending'; description?: string; path: string }> = [];
+
+    // Read active skills
+    const activeDir = join(skillsDir, 'active');
+    if (existsSync(activeDir)) {
+      for (const name of readdirSync(activeDir)) {
+        const skillPath = join(activeDir, name);
+        const skillMd = join(skillPath, 'SKILL.md');
+        let description = '';
+        if (existsSync(skillMd)) {
+          const content = readFileSync(skillMd, 'utf-8');
+          const descMatch = content.match(/^#[^\n]*\n+([^\n]+)/);
+          if (descMatch) description = descMatch[1].trim();
+        }
+        skills.push({ name, status: 'active', description, path: skillPath });
+      }
+    }
+
+    // Read pending skills
+    const pendingDir = join(skillsDir, 'pending');
+    if (existsSync(pendingDir)) {
+      for (const name of readdirSync(pendingDir)) {
+        const skillPath = join(pendingDir, name);
+        const skillMd = join(skillPath, 'SKILL.md');
+        let description = '';
+        if (existsSync(skillMd)) {
+          const content = readFileSync(skillMd, 'utf-8');
+          const descMatch = content.match(/^#[^\n]*\n+([^\n]+)/);
+          if (descMatch) description = descMatch[1].trim();
+        }
+        skills.push({ name, status: 'pending', description, path: skillPath });
+      }
+    }
+
+    return { skills };
+  });
+
+  // ── Approve pending skill ───────────────────────────────────
+  fastify.post<{ Params: { name: string } }>('/api/skills/:name/approve', async (req, reply) => {
+    const { name } = req.params;
+    const skillsDir = join(homedir(), '.clade', 'skills');
+    const pendingPath = join(skillsDir, 'pending', name);
+    const activePath = join(skillsDir, 'active', name);
+
+    if (!existsSync(pendingPath)) {
+      reply.status(404);
+      return { error: `Pending skill "${name}" not found` };
+    }
+
+    try {
+      mkdirSync(join(skillsDir, 'active'), { recursive: true });
+      renameSync(pendingPath, activePath);
+      return { success: true, message: `Skill "${name}" approved and moved to active` };
+    } catch (err) {
+      reply.status(500);
+      return { error: `Failed to approve skill: ${err instanceof Error ? err.message : 'Unknown error'}` };
+    }
+  });
+
+  // ── Reject pending skill ────────────────────────────────────
+  fastify.post<{ Params: { name: string } }>('/api/skills/:name/reject', async (req, reply) => {
+    const { name } = req.params;
+    const skillsDir = join(homedir(), '.clade', 'skills');
+    const pendingPath = join(skillsDir, 'pending', name);
+
+    if (!existsSync(pendingPath)) {
+      reply.status(404);
+      return { error: `Pending skill "${name}" not found` };
+    }
+
+    try {
+      rmSync(pendingPath, { recursive: true, force: true });
+      return { success: true, message: `Skill "${name}" rejected and removed` };
+    } catch (err) {
+      reply.status(500);
+      return { error: `Failed to reject skill: ${err instanceof Error ? err.message : 'Unknown error'}` };
+    }
+  });
+
+  // ── Remove active skill ─────────────────────────────────────
+  fastify.delete<{ Params: { name: string } }>('/api/skills/:name', async (req, reply) => {
+    const { name } = req.params;
+    const skillsDir = join(homedir(), '.clade', 'skills');
+    const activePath = join(skillsDir, 'active', name);
+
+    if (!existsSync(activePath)) {
+      reply.status(404);
+      return { error: `Active skill "${name}" not found` };
+    }
+
+    try {
+      rmSync(activePath, { recursive: true, force: true });
+      return { success: true, message: `Skill "${name}" removed` };
+    } catch (err) {
+      reply.status(500);
+      return { error: `Failed to remove skill: ${err instanceof Error ? err.message : 'Unknown error'}` };
+    }
+  });
+
+  // ── Install skill from npm ──────────────────────────────────
+  fastify.post<{ Body: { package: string } }>('/api/skills/install', async (req, reply) => {
+    const body = req.body as Record<string, unknown>;
+    const packageName = body.package;
+
+    if (!packageName || typeof packageName !== 'string') {
+      reply.status(400);
+      return { error: 'package name is required' };
+    }
+
+    // Sanitize package name (basic validation)
+    const sanitized = packageName.trim();
+    if (!sanitized || sanitized.includes('..') || sanitized.includes('/') && !sanitized.startsWith('@')) {
+      reply.status(400);
+      return { error: 'Invalid package name' };
+    }
+
+    // Extract skill name from package (e.g., @mcp/weather-server -> weather-server)
+    const skillName = sanitized.startsWith('@')
+      ? sanitized.split('/')[1] || sanitized
+      : sanitized.replace(/^@/, '');
+
+    const skillsDir = join(homedir(), '.clade', 'skills');
+    const pendingDir = join(skillsDir, 'pending');
+    const skillPath = join(pendingDir, skillName);
+
+    // Check if skill already exists
+    if (existsSync(skillPath) || existsSync(join(skillsDir, 'active', skillName))) {
+      reply.status(409);
+      return { error: `Skill "${skillName}" already exists` };
+    }
+
+    try {
+      // Create skill directory
+      mkdirSync(skillPath, { recursive: true });
+
+      // Create package.json for npm install
+      const pkgJson = {
+        name: `clade-skill-${skillName}`,
+        version: '1.0.0',
+        private: true,
+        dependencies: {
+          [sanitized]: 'latest'
+        }
+      };
+      writeFileSync(join(skillPath, 'package.json'), JSON.stringify(pkgJson, null, 2));
+
+      // Run npm install
+      const npmInstall = spawn('npm', ['install', '--silent'], {
+        cwd: skillPath,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: true,
+      });
+
+      let stdout = '';
+      let stderr = '';
+
+      npmInstall.stdout?.on('data', (data) => { stdout += data.toString(); });
+      npmInstall.stderr?.on('data', (data) => { stderr += data.toString(); });
+
+      const exitCode = await new Promise<number>((resolve) => {
+        npmInstall.on('close', resolve);
+        npmInstall.on('error', () => resolve(1));
+      });
+
+      if (exitCode !== 0) {
+        // Cleanup on failure
+        rmSync(skillPath, { recursive: true, force: true });
+        reply.status(500);
+        return { error: `npm install failed: ${stderr || 'Unknown error'}` };
+      }
+
+      // Create SKILL.md
+      const skillMd = `# ${skillName}\n\nInstalled from npm package: ${sanitized}\n`;
+      writeFileSync(join(skillPath, 'SKILL.md'), skillMd);
+
+      return {
+        success: true,
+        message: `Skill "${skillName}" installed to pending. Approve it to activate.`,
+        skill: { name: skillName, status: 'pending' }
+      };
+    } catch (err) {
+      // Cleanup on error
+      if (existsSync(skillPath)) {
+        rmSync(skillPath, { recursive: true, force: true });
+      }
+      reply.status(500);
+      return { error: `Installation failed: ${err instanceof Error ? err.message : 'Unknown error'}` };
+    }
+  });
+
   fastify.get('/api/channels', async () => ({
     channels: Array.from(activeChannelNames).map((name) => ({ name, connected: true })),
   }));

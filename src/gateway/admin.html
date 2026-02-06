@@ -593,6 +593,14 @@
           { id: 'mcp__skills__*', desc: 'Dynamic skill search and installation' },
         ],
       },
+      {
+        name: 'Admin',
+        label: 'Admin MCP',
+        icon: '\u{1F6E0}\u{FE0F}',
+        tools: [
+          { id: 'mcp__admin__*', desc: 'Full skill/plugin management (orchestrator only)' },
+        ],
+      },
     ];
 
     const ALL_TOOL_IDS = TOOL_CATEGORIES.flatMap(c => c.tools.map(t => t.id));
@@ -2653,7 +2661,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
     // ── Identity Tab ─────────────────────────────────────────────────
 
     function IdentityTab({ agentId }) {
-      const [form, setForm] = useState({ name: '', creature: '', vibe: '', emoji: '', avatar: '', model: 'sonnet' });
+      const [form, setForm] = useState({ name: '', creature: '', vibe: '', emoji: '', avatar: '', model: 'sonnet', adminEnabled: false });
       const [loading, setLoading] = useState(true);
       const [saving, setSaving] = useState(false);
 
@@ -2669,6 +2677,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
               emoji:    a.emoji    || '',
               avatar:   a.avatar   || '',
               model:    a.model    || 'sonnet',
+              adminEnabled: a.admin?.enabled || false,
             });
           })
           .catch(e => showToast('Failed to load identity: ' + e.message, 'error'))
@@ -2680,7 +2689,9 @@ If nothing needs attention, respond with: HEARTBEAT_OK
       const save = async () => {
         setSaving(true);
         try {
-          await api('/agents/' + agentId, { method: 'PUT', body: form });
+          const { adminEnabled, ...rest } = form;
+          const body = { ...rest, admin: { enabled: adminEnabled } };
+          await api('/agents/' + agentId, { method: 'PUT', body });
           showToast('Identity saved', 'success');
         } catch (e) { showToast('Save failed: ' + e.message, 'error'); }
         setSaving(false);
@@ -2712,7 +2723,16 @@ If nothing needs attention, respond with: HEARTBEAT_OK
               <option value="haiku">Haiku</option>
             </select>
           </div>
-          <div class="flex justify-end pt-2">
+          <div class="pt-4 mt-4" style="border-top:1px solid #30363d">
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="block text-sm font-medium" style="color:#e6edf3">\u{1F6E0}\u{FE0F} Admin Privileges</label>
+                <p class="text-xs mt-0.5" style="color:#8b949e">Enable full skill and MCP server management</p>
+              </div>
+              <${Toggle} active=${form.adminEnabled} onToggle=${() => upd('adminEnabled', !form.adminEnabled)} />
+            </div>
+          </div>
+          <div class="flex justify-end pt-4">
             <button class="btn btn-primary" onClick=${save} disabled=${saving}>
               ${saving ? 'Saving...' : 'Save Identity'}
             </button>
@@ -2782,7 +2802,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
 
           <!-- Tool category sections -->
           <div class="space-y-6">
-            ${TOOL_CATEGORIES.map(cat => {
+            ${TOOL_CATEGORIES.filter(cat => cat.name !== 'Admin' || agent.admin?.enabled).map(cat => {
               const catEnabled = cat.tools.filter(t => enabled.includes(t.id)).length;
               return html`
                 <div key=${cat.name}>

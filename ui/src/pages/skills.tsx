@@ -14,6 +14,9 @@ import {
   ThumbsUp,
   ThumbsDown,
   Trash2,
+  Loader2,
+  AlertCircle,
+  CheckCircle,
 } from "lucide-react"
 
 // ---------------------------------------------------------------------------
@@ -40,6 +43,10 @@ interface SkillsPageProps {
 export function SkillsPage({ skills, onRefresh }: SkillsPageProps) {
   const [pkgName, setPkgName] = useState('')
   const [installing, setInstalling] = useState(false)
+  const [installStatus, setInstallStatus] = useState<{
+    type: 'success' | 'error' | null
+    message: string
+  }>({ type: null, message: '' })
 
   const active = skills.filter((s) => s.status === 'active')
   const pending = skills.filter((s) => s.status === 'pending')
@@ -75,12 +82,23 @@ export function SkillsPage({ skills, onRefresh }: SkillsPageProps) {
   const install = async () => {
     if (!pkgName.trim()) return
     setInstalling(true)
+    setInstallStatus({ type: null, message: '' })
     try {
-      console.log('Skill install requested:', pkgName)
-      // The install goes through MCP skill pipeline -- notifying is enough
-      setPkgName('')
+      const result = await api<{ success?: boolean; message?: string; error?: string }>(
+        '/skills/install',
+        { method: 'POST', body: { package: pkgName.trim() } }
+      )
+      if (result.success) {
+        setInstallStatus({ type: 'success', message: result.message || 'Skill installed to pending' })
+        setPkgName('')
+        onRefresh()
+        // Clear success message after 5 seconds
+        setTimeout(() => setInstallStatus({ type: null, message: '' }), 5000)
+      } else {
+        setInstallStatus({ type: 'error', message: result.error || 'Installation failed' })
+      }
     } catch (e: any) {
-      console.error('Install failed:', e.message)
+      setInstallStatus({ type: 'error', message: e.message || 'Installation failed' })
     }
     setInstalling(false)
   }
@@ -243,14 +261,38 @@ export function SkillsPage({ skills, onRefresh }: SkillsPageProps) {
             <Input
               value={pkgName}
               onChange={(e) => setPkgName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && install()}
+              onKeyDown={(e) => e.key === 'Enter' && !installing && install()}
               placeholder="npm package name (e.g. @mcp/weather-server)"
               className="flex-1"
+              disabled={installing}
             />
-            <Button onClick={install} disabled={installing}>
-              {installing ? 'Installing...' : 'Install'}
+            <Button onClick={install} disabled={installing || !pkgName.trim()}>
+              {installing ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  Installing...
+                </>
+              ) : (
+                'Install'
+              )}
             </Button>
           </div>
+          {installStatus.type && (
+            <div
+              className={`flex items-center gap-2 mt-3 text-sm ${
+                installStatus.type === 'success'
+                  ? 'text-[hsl(var(--success))]'
+                  : 'text-[hsl(var(--destructive))]'
+              }`}
+            >
+              {installStatus.type === 'success' ? (
+                <CheckCircle className="h-4 w-4" />
+              ) : (
+                <AlertCircle className="h-4 w-4" />
+              )}
+              {installStatus.message}
+            </div>
+          )}
           <p className="text-xs mt-2 text-muted-foreground/60">
             Skills are standard MCP servers from npm. New skills go to pending and
             require approval.

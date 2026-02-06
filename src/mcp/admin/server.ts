@@ -520,6 +520,121 @@ server.tool(
   },
 );
 
+// ---------------------------------------------------------------------------
+// Tool: admin_skill_approve
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'admin_skill_approve',
+  'Approve a pending skill by moving it from pending/ to active/. This makes the skill available for use.',
+  {
+    name: z.string().describe('Skill name to approve'),
+  },
+  async ({ name }) => {
+    try {
+      const { renameSync, existsSync, mkdirSync } = await import('node:fs');
+      const { join } = await import('node:path');
+      const { homedir } = await import('node:os');
+
+      const skillsDir = join(homedir(), '.clade', 'skills');
+      const pendingPath = join(skillsDir, 'pending', name);
+      const activePath = join(skillsDir, 'active', name);
+
+      if (!existsSync(pendingPath)) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Skill "${name}" not found in pending/. Available pending skills can be listed with admin_skill_search_local.`,
+          }],
+          isError: true,
+        };
+      }
+
+      if (existsSync(activePath)) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Skill "${name}" already exists in active/. Remove it first if you want to replace it.`,
+          }],
+          isError: true,
+        };
+      }
+
+      // Ensure active directory exists
+      const activeDir = join(skillsDir, 'active');
+      if (!existsSync(activeDir)) {
+        mkdirSync(activeDir, { recursive: true });
+      }
+
+      // Move from pending to active
+      renameSync(pendingPath, activePath);
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `✅ Skill "${name}" approved and moved to active/. It is now available for use.`,
+        }],
+      };
+    } catch (err) {
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `Error approving skill: ${err instanceof Error ? err.message : String(err)}`,
+        }],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Tool: admin_skill_reject
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'admin_skill_reject',
+  'Reject a pending skill by removing it from pending/.',
+  {
+    name: z.string().describe('Skill name to reject'),
+  },
+  async ({ name }) => {
+    try {
+      const { rmSync, existsSync } = await import('node:fs');
+      const { join } = await import('node:path');
+      const { homedir } = await import('node:os');
+
+      const pendingPath = join(homedir(), '.clade', 'skills', 'pending', name);
+
+      if (!existsSync(pendingPath)) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Skill "${name}" not found in pending/.`,
+          }],
+          isError: true,
+        };
+      }
+
+      rmSync(pendingPath, { recursive: true });
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `✅ Skill "${name}" rejected and removed from pending/.`,
+        }],
+      };
+    } catch (err) {
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `Error rejecting skill: ${err instanceof Error ? err.message : String(err)}`,
+        }],
+        isError: true,
+      };
+    }
+  },
+);
+
 // ===========================================================================
 // SKILL CREATION TOOLS
 // ===========================================================================

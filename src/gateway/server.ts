@@ -412,6 +412,8 @@ function registerAgentRoutes(app: FastifyInstance, deps: GatewayDeps): void {
       description: a.config.description,
       model: a.config.model,
       toolPreset: a.config.toolPreset,
+      emoji: a.config.emoji,
+      admin: a.config.admin,
     }));
     return { agents };
   });
