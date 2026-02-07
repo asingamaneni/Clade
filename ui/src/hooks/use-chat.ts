@@ -80,7 +80,8 @@ export interface UseChatReturn {
   sendMessage: (
     agentId: string,
     text: string,
-    attachments?: ChatAttachment[]
+    attachments?: ChatAttachment[],
+    conversationId?: string
   ) => Promise<void>
   /** Switch the active conversation tab for an agent */
   switchConversation: (agentId: string, convId: string) => void
@@ -525,9 +526,10 @@ export function useChat(): UseChatReturn {
     async (
       agentId: string,
       text: string,
-      attachments?: ChatAttachment[]
+      attachments?: ChatAttachment[],
+      conversationId?: string
     ): Promise<void> => {
-      const activeConvId = activeConversationIds[agentId]
+      const activeConvId = conversationId ?? activeConversationIds[agentId]
 
       // If sending via WebSocket
       if (

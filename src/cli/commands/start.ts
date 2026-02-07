@@ -10,6 +10,7 @@ import { resolveAllowedTools } from '../../agents/presets.js';
 import { DEFAULT_SOUL, DEFAULT_HEARTBEAT, DEFAULT_USER_MD, DEFAULT_TOOLS_MD } from '../../config/defaults.js';
 import { runReflectionCycle } from '../../agents/reflection.js';
 import { saveVersion, getVersionHistory, getVersionContent } from '../../agents/versioning.js';
+import { type ActivityEvent, loadActivityLog, saveActivityLog, logActivity } from '../../utils/activity.js';
 
 interface StartOptions {
   port?: string;
@@ -1042,6 +1043,16 @@ async function startPlaceholderServer(
               // Send response
               socket.send(JSON.stringify({ type: 'message', message: assistantMsg, conversationId }));
 
+              // Log chat activity
+              const agentDisplayName = (agentCfg.name as string) || msg.agentId;
+              logActivityLocal({
+                type: 'chat',
+                agentId: msg.agentId,
+                title: `Chat with ${agentDisplayName}`,
+                description: msg.text.slice(0, 200),
+                metadata: { conversationId, userMessage: msg.text, assistantMessage: responseText },
+              });
+
               // Fire reflection cycle in background (non-blocking)
               if (msg.agentId) {
                 const reflCfg = (agentCfg.reflection ?? {}) as { enabled?: boolean };
@@ -1569,7 +1580,7 @@ async function startPlaceholderServer(
     const configPath = join(cladeHome, 'config.json');
     writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
 
-    logActivity({
+    logActivityLocal({
       type: 'agent',
       agentId: id,
       title: `Agent "${id}" deleted`,
@@ -1742,7 +1753,7 @@ async function startPlaceholderServer(
       mkdirSync(join(mcpDir, 'active'), { recursive: true });
       renameSync(pendingPath, activePath);
 
-      logActivity({
+      logActivityLocal({
         type: 'mcp',
         title: `MCP server "${name}" approved`,
         description: 'Approved and moved to active',
@@ -1770,7 +1781,7 @@ async function startPlaceholderServer(
     try {
       rmSync(pendingPath, { recursive: true, force: true });
 
-      logActivity({
+      logActivityLocal({
         type: 'mcp',
         title: `MCP server "${name}" rejected`,
         description: 'Rejected and removed',
@@ -1910,56 +1921,14 @@ async function startPlaceholderServer(
   // Activity Feed — append-only event log
   // ═══════════════════════════════════════════════════════════════════════
 
-  interface ActivityEvent {
-    id: string;
-    type: 'chat' | 'skill' | 'mcp' | 'reflection' | 'agent';
-    agentId?: string;
-    title: string;
-    description: string;
-    timestamp: string;
-    metadata?: Record<string, unknown>;
-  }
-
-  const activityHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
-  const activityFilePath = join(activityHome, 'data', 'activity.json');
-  const MAX_ACTIVITY_EVENTS = 1000;
-
-  function loadActivityLog(): ActivityEvent[] {
-    try {
-      if (!existsSync(activityFilePath)) return [];
-      const raw = readFileSync(activityFilePath, 'utf-8');
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }
-
-  function saveActivityLog(events: ActivityEvent[]): void {
-    mkdirSync(join(activityHome, 'data'), { recursive: true });
-    // Trim to max length
-    const trimmed = events.length > MAX_ACTIVITY_EVENTS
-      ? events.slice(events.length - MAX_ACTIVITY_EVENTS)
-      : events;
-    writeFileSync(activityFilePath, JSON.stringify(trimmed, null, 2), 'utf-8');
-  }
-
-  function logActivity(event: Omit<ActivityEvent, 'id' | 'timestamp'>): ActivityEvent {
-    const full: ActivityEvent = {
-      id: 'evt_' + randomUUID().slice(0, 12),
-      timestamp: new Date().toISOString(),
-      ...event,
-    };
-    const events = loadActivityLog();
-    events.push(full);
-    saveActivityLog(events);
-    broadcastAdmin({ type: 'activity:new', event: full });
-    return full;
+  // Wrapper that passes broadcastAdmin to the shared logger
+  function logActivityLocal(event: Omit<ActivityEvent, 'id' | 'timestamp'>): ActivityEvent {
+    return logActivity(event, broadcastAdmin);
   }
 
   // Load and trim activity log on startup
   const startupEvents = loadActivityLog();
-  if (startupEvents.length > MAX_ACTIVITY_EVENTS) {
+  if (startupEvents.length > 1000) {
     saveActivityLog(startupEvents);
   }
 
@@ -2169,7 +2138,7 @@ async function startPlaceholderServer(
 
       broadcastAdmin({ type: 'skill:approved', name, autoAssigned, timestamp: new Date().toISOString() });
 
-      logActivity({
+      logActivityLocal({
         type: 'skill',
         title: `Skill "${name}" approved`,
         description: autoAssigned ? `Approved and auto-assigned to ${autoAssigned}` : 'Approved and moved to active',
@@ -2216,7 +2185,7 @@ async function startPlaceholderServer(
 
       broadcastAdmin({ type: 'skill:rejected', name, timestamp: new Date().toISOString() });
 
-      logActivity({
+      logActivityLocal({
         type: 'skill',
         title: `Skill "${name}" rejected`,
         description: 'Rejected and moved to disabled',
@@ -2319,7 +2288,7 @@ async function startPlaceholderServer(
 
     broadcastAdmin({ type: 'skill:assigned', name, agentId, timestamp: new Date().toISOString() });
 
-    logActivity({
+    logActivityLocal({
       type: 'skill',
       agentId,
       title: `Skill "${name}" assigned to ${agentId}`,
@@ -2358,7 +2327,241 @@ async function startPlaceholderServer(
   fastify.get('/api/channels', async () => ({
     channels: Array.from(activeChannelNames).map((name) => ({ name, connected: true })),
   }));
-  fastify.get('/api/cron', async () => ({ jobs: [] }));
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Cron Jobs — file-based scheduler using the `cron` package
+  // ═══════════════════════════════════════════════════════════════════════
+
+  interface CronJobDef {
+    id: string;
+    name: string;
+    schedule: string;       // standard cron expression
+    agentId: string;
+    prompt: string;
+    timezone: string;       // IANA timezone
+    enabled: boolean;
+    lastRunAt: string | null;
+    createdAt: string;
+  }
+
+  const cronHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+  const cronDir = join(cronHome, 'cron');
+  mkdirSync(cronDir, { recursive: true });
+  const cronJobsPath = join(cronDir, 'jobs.json');
+
+  function loadCronJobs(): CronJobDef[] {
+    if (!existsSync(cronJobsPath)) return [];
+    try {
+      return JSON.parse(readFileSync(cronJobsPath, 'utf-8')) as CronJobDef[];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveCronJobs(jobs: CronJobDef[]): void {
+    writeFileSync(cronJobsPath, JSON.stringify(jobs, null, 2), 'utf-8');
+  }
+
+  // Active CronJob instances keyed by job id
+  const { CronJob: CronJobClass } = await import('cron');
+  const activeCronJobs = new Map<string, InstanceType<typeof CronJobClass>>();
+
+  function startCronJob(job: CronJobDef): void {
+    if (!job.enabled) return;
+    // Stop existing if re-scheduling
+    const existing = activeCronJobs.get(job.id);
+    if (existing) {
+      existing.stop();
+      activeCronJobs.delete(job.id);
+    }
+    try {
+      const cronInstance = new CronJobClass(
+        job.schedule,
+        async () => {
+          console.log(`  [cron] Executing "${job.name}" for agent ${job.agentId}`);
+          const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+          const agentConfig = agents[job.agentId];
+          if (!agentConfig) {
+            console.log(`  [cron] Agent "${job.agentId}" not found, skipping`);
+            return;
+          }
+          const soulPath = join(cronHome, 'agents', job.agentId, 'SOUL.md');
+          const toolPreset = (agentConfig.toolPreset as string) || 'full';
+          const browserCfg = (config.browser ?? {}) as { enabled?: boolean; userDataDir?: string; browser?: string; cdpEndpoint?: string; headless?: boolean };
+          try {
+            const result = await askClaude(
+              job.prompt,
+              existsSync(soulPath) ? soulPath : null,
+              undefined,     // agentContext
+              undefined,     // conversationId
+              job.agentId,
+              cronHome,
+              toolPreset,
+              browserCfg,
+            );
+            // Update lastRunAt
+            const jobs = loadCronJobs();
+            const idx = jobs.findIndex(j => j.id === job.id);
+            if (idx >= 0) {
+              jobs[idx]!.lastRunAt = new Date().toISOString();
+              saveCronJobs(jobs);
+            }
+            // Log to activity feed
+            logActivityLocal({
+              type: 'cron',
+              agentId: job.agentId,
+              title: `Cron: ${job.name}`,
+              description: result.text.slice(0, 200),
+              metadata: { action: 'executed', jobId: job.id, prompt: job.prompt, result: result.text, schedule: job.schedule, status: 'success' },
+            });
+            broadcastAdmin({ type: 'cron:executed', jobId: job.id, name: job.name, timestamp: new Date().toISOString() });
+            console.log(`  [cron] "${job.name}" completed`);
+          } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : String(err);
+            console.error(`  [cron] "${job.name}" failed:`, errorMsg);
+            logActivityLocal({
+              type: 'cron',
+              agentId: job.agentId,
+              title: `Cron: ${job.name} (failed)`,
+              description: errorMsg.slice(0, 200),
+              metadata: { action: 'executed', jobId: job.id, prompt: job.prompt, error: errorMsg, schedule: job.schedule, status: 'error' },
+            });
+          }
+        },
+        null,
+        true,
+        job.timezone || 'UTC',
+      );
+      activeCronJobs.set(job.id, cronInstance);
+      console.log(`  [cron] Scheduled "${job.name}" (${job.schedule} ${job.timezone})`);
+    } catch (err) {
+      console.error(`  [cron] Failed to schedule "${job.name}":`, err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function stopCronJob(id: string): void {
+    const existing = activeCronJobs.get(id);
+    if (existing) {
+      existing.stop();
+      activeCronJobs.delete(id);
+    }
+  }
+
+  // Start all enabled jobs on boot
+  for (const job of loadCronJobs()) {
+    startCronJob(job);
+  }
+
+  // GET /api/cron — list all cron jobs
+  fastify.get('/api/cron', async () => {
+    const jobs = loadCronJobs();
+    return {
+      jobs: jobs.map(j => ({
+        ...j,
+        active: activeCronJobs.has(j.id),
+      })),
+    };
+  });
+
+  // POST /api/cron — create a new cron job
+  fastify.post('/api/cron', async (req, reply) => {
+    const body = req.body as Record<string, unknown> | null;
+    if (!body || !body.name || !body.schedule || !body.agentId || !body.prompt) {
+      reply.status(400);
+      return { error: 'Missing required fields: name, schedule, agentId, prompt' };
+    }
+    const jobs = loadCronJobs();
+    if (jobs.some(j => j.name === body.name)) {
+      reply.status(409);
+      return { error: `Cron job "${body.name}" already exists` };
+    }
+    const newJob: CronJobDef = {
+      id: randomUUID().slice(0, 8),
+      name: body.name as string,
+      schedule: body.schedule as string,
+      agentId: body.agentId as string,
+      prompt: body.prompt as string,
+      timezone: (body.timezone as string) || Intl.DateTimeFormat().resolvedOptions().timeZone,
+      enabled: body.enabled !== false,
+      lastRunAt: null,
+      createdAt: new Date().toISOString(),
+    };
+    jobs.push(newJob);
+    saveCronJobs(jobs);
+    startCronJob(newJob);
+    broadcastAdmin({ type: 'cron:created', jobId: newJob.id, name: newJob.name, timestamp: new Date().toISOString() });
+    logActivityLocal({
+      type: 'cron',
+      agentId: newJob.agentId,
+      title: `Cron job "${newJob.name}" created`,
+      description: `Schedule: ${newJob.schedule}`,
+      metadata: { action: 'created', jobId: newJob.id, name: newJob.name, schedule: newJob.schedule, prompt: newJob.prompt, agentId: newJob.agentId },
+    });
+    reply.status(201);
+    return newJob;
+  });
+
+  // DELETE /api/cron/:id — delete a cron job
+  fastify.delete('/api/cron/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const jobs = loadCronJobs();
+    const idx = jobs.findIndex(j => j.id === id);
+    if (idx < 0) {
+      reply.status(404);
+      return { error: 'Cron job not found' };
+    }
+    const removed = jobs.splice(idx, 1)[0]!;
+    saveCronJobs(jobs);
+    stopCronJob(id);
+    broadcastAdmin({ type: 'cron:deleted', jobId: id, name: removed.name, timestamp: new Date().toISOString() });
+    logActivityLocal({
+      type: 'cron',
+      agentId: removed.agentId,
+      title: `Cron job "${removed.name}" deleted`,
+      description: 'Removed scheduled job',
+      metadata: { action: 'deleted', jobId: id, name: removed.name },
+    });
+    return { success: true };
+  });
+
+  // PATCH /api/cron/:id — update a cron job (enable/disable, change schedule, etc.)
+  fastify.patch('/api/cron/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as Record<string, unknown> | null;
+    if (!body) {
+      reply.status(400);
+      return { error: 'Request body required' };
+    }
+    const jobs = loadCronJobs();
+    const idx = jobs.findIndex(j => j.id === id);
+    if (idx < 0) {
+      reply.status(404);
+      return { error: 'Cron job not found' };
+    }
+    const job = jobs[idx]!;
+    if (typeof body.name === 'string') job.name = body.name;
+    if (typeof body.schedule === 'string') job.schedule = body.schedule;
+    if (typeof body.agentId === 'string') job.agentId = body.agentId;
+    if (typeof body.prompt === 'string') job.prompt = body.prompt;
+    if (typeof body.timezone === 'string') job.timezone = body.timezone;
+    if (typeof body.enabled === 'boolean') job.enabled = body.enabled;
+    saveCronJobs(jobs);
+    // Restart or stop based on enabled state
+    if (job.enabled) {
+      startCronJob(job);
+    } else {
+      stopCronJob(job.id);
+    }
+    broadcastAdmin({ type: 'cron:updated', jobId: id, name: job.name, timestamp: new Date().toISOString() });
+    logActivityLocal({
+      type: 'cron',
+      agentId: job.agentId,
+      title: `Cron job "${job.name}" updated`,
+      description: `Schedule: ${job.schedule}, Enabled: ${job.enabled}`,
+      metadata: { action: 'updated', jobId: id, changes: body },
+    });
+    return job;
+  });
 
   // ── Templates API ──────────────────────────────────────────
   fastify.get('/api/templates', async () => {
@@ -2473,7 +2676,7 @@ async function startPlaceholderServer(
 
     console.log(`  [ok] Created agent "${agentName}" (${isCustom ? 'custom' : 'template: ' + templateId})`);
 
-    logActivity({
+    logActivityLocal({
       type: 'agent',
       agentId: agentName,
       title: `Agent "${agentName}" created`,
@@ -2725,13 +2928,13 @@ async function startPlaceholderServer(
       return { error: 'type and title are required' };
     }
 
-    const validTypes = ['chat', 'skill', 'mcp', 'reflection', 'agent'];
+    const validTypes = ['chat', 'skill', 'mcp', 'reflection', 'agent', 'heartbeat', 'cron'];
     if (!validTypes.includes(eventType)) {
       reply.status(400);
       return { error: `type must be one of: ${validTypes.join(', ')}` };
     }
 
-    const event = logActivity({
+    const event = logActivityLocal({
       type: eventType as ActivityEvent['type'],
       agentId: (body.agentId as string) || undefined,
       title,
@@ -2851,6 +3054,8 @@ async function startPlaceholderServer(
           mcp: '#f0883e',
           agent: '#8b949e',
           chat: '#58a6ff',
+          heartbeat: '#3fb950',
+          cron: '#79c0ff',
         };
         calendarEvents.push({
           id: evt.id,

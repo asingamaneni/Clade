@@ -5,9 +5,16 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import { RefreshCw, Plus, Trash2, Clock, X } from "lucide-react"
+import { RefreshCw, Plus, Trash2, Clock, X, Pencil } from "lucide-react"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -19,6 +26,7 @@ export interface CronJob {
   schedule: string
   agentId?: string
   agent_id?: string
+  timezone?: string
   enabled?: boolean
   lastRun?: string
   last_run_at?: string
@@ -37,6 +45,40 @@ interface CronPageProps {
   agents: Agent[]
   onRefresh: () => void
 }
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const TIMEZONES = [
+  'UTC',
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Los_Angeles',
+  'America/Anchorage',
+  'Pacific/Honolulu',
+  'America/Toronto',
+  'America/Vancouver',
+  'America/Mexico_City',
+  'America/Sao_Paulo',
+  'America/Argentina/Buenos_Aires',
+  'Europe/London',
+  'Europe/Paris',
+  'Europe/Berlin',
+  'Europe/Moscow',
+  'Asia/Dubai',
+  'Asia/Kolkata',
+  'Asia/Shanghai',
+  'Asia/Tokyo',
+  'Asia/Seoul',
+  'Asia/Singapore',
+  'Australia/Sydney',
+  'Australia/Perth',
+  'Pacific/Auckland',
+]
+
+const selectClass = "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -62,8 +104,41 @@ export function CronPage({ cronJobs, agents, onRefresh }: CronPageProps) {
     schedule: '0 * * * *',
     agentId: '',
     prompt: '',
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   })
   const [creating, setCreating] = useState(false)
+
+  // Edit modal state
+  const [editingJob, setEditingJob] = useState<CronJob | null>(null)
+  const [editForm, setEditForm] = useState({ name: '', schedule: '', agentId: '', prompt: '', timezone: '' })
+  const [saving, setSaving] = useState(false)
+
+  const openEditModal = (job: CronJob) => {
+    setEditForm({
+      name: job.name,
+      schedule: job.schedule,
+      agentId: job.agentId || job.agent_id || '',
+      prompt: job.prompt || '',
+      timezone: job.timezone || 'UTC',
+    })
+    setEditingJob(job)
+  }
+
+  const saveEdit = async () => {
+    if (!editingJob) return
+    setSaving(true)
+    try {
+      await api('/cron/' + editingJob.id, {
+        method: 'PATCH',
+        body: editForm,
+      })
+      setEditingJob(null)
+      onRefresh()
+    } catch (e: any) {
+      console.error('Save failed:', e.message)
+    }
+    setSaving(false)
+  }
 
   const updateField = (key: string, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -77,7 +152,7 @@ export function CronPage({ cronJobs, agents, onRefresh }: CronPageProps) {
     setCreating(true)
     try {
       await api('/cron', { method: 'POST', body: form })
-      setForm({ name: '', schedule: '0 * * * *', agentId: '', prompt: '' })
+      setForm({ name: '', schedule: '0 * * * *', agentId: '', prompt: '', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone })
       setShowForm(false)
       onRefresh()
     } catch (e: any) {
@@ -89,7 +164,7 @@ export function CronPage({ cronJobs, agents, onRefresh }: CronPageProps) {
   const toggleJob = async (job: CronJob) => {
     try {
       await api('/cron/' + job.id, {
-        method: 'PUT',
+        method: 'PATCH',
         body: { enabled: !job.enabled },
       })
       onRefresh()
@@ -162,13 +237,25 @@ export function CronPage({ cronJobs, agents, onRefresh }: CronPageProps) {
                 <select
                   value={form.agentId}
                   onChange={(e) => updateField('agentId', e.target.value)}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  className={selectClass}
                 >
                   <option value="">Select agent...</option>
                   {agents.map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.name || a.id}
                     </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Timezone</Label>
+                <select
+                  value={form.timezone}
+                  onChange={(e) => updateField('timezone', e.target.value)}
+                  className={selectClass}
+                >
+                  {TIMEZONES.map((tz) => (
+                    <option key={tz} value={tz}>{tz}</option>
                   ))}
                 </select>
               </div>
@@ -215,6 +302,9 @@ export function CronPage({ cronJobs, agents, onRefresh }: CronPageProps) {
                     Schedule
                   </th>
                   <th className="text-left text-xs font-medium px-4 py-3 text-muted-foreground">
+                    Timezone
+                  </th>
+                  <th className="text-left text-xs font-medium px-4 py-3 text-muted-foreground">
                     Agent
                   </th>
                   <th className="text-left text-xs font-medium px-4 py-3 text-muted-foreground">
@@ -230,17 +320,24 @@ export function CronPage({ cronJobs, agents, onRefresh }: CronPageProps) {
               </thead>
               <tbody>
                 {cronJobs.map((job) => (
-                  <tr key={job.id} className="border-b">
+                  <tr
+                    key={job.id}
+                    className="border-b cursor-pointer hover:bg-secondary/30 transition-colors"
+                    onClick={() => openEditModal(job)}
+                  >
                     <td className="px-4 py-3 text-sm font-medium text-foreground">
                       {job.name}
                     </td>
                     <td className="px-4 py-3 text-xs font-mono text-muted-foreground">
                       {job.schedule}
                     </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                      {job.timezone || 'UTC'}
+                    </td>
                     <td className="px-4 py-3 text-sm text-muted-foreground">
                       {job.agentId || job.agent_id || '--'}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                       <Switch
                         checked={!!job.enabled}
                         onCheckedChange={() => toggleJob(job)}
@@ -249,7 +346,7 @@ export function CronPage({ cronJobs, agents, onRefresh }: CronPageProps) {
                     <td className="px-4 py-3 text-xs text-muted-foreground">
                       {formatDate(job.lastRun || job.last_run_at)}
                     </td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-4 py-3 text-right" onClick={e => e.stopPropagation()}>
                       <Button
                         variant="destructive"
                         size="sm"
@@ -267,6 +364,72 @@ export function CronPage({ cronJobs, agents, onRefresh }: CronPageProps) {
           </div>
         </Card>
       )}
+      {/* Edit modal */}
+      <Dialog open={!!editingJob} onOpenChange={(open) => { if (!open) setEditingJob(null) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Cron Job</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Name</Label>
+              <Input
+                value={editForm.name}
+                onChange={e => setEditForm(prev => ({ ...prev, name: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Schedule (cron)</Label>
+              <Input
+                value={editForm.schedule}
+                onChange={e => setEditForm(prev => ({ ...prev, schedule: e.target.value }))}
+                className="font-mono"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Timezone</Label>
+              <select
+                value={editForm.timezone}
+                onChange={e => setEditForm(prev => ({ ...prev, timezone: e.target.value }))}
+                className={selectClass}
+              >
+                {TIMEZONES.map((tz) => (
+                  <option key={tz} value={tz}>{tz}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Agent</Label>
+              <select
+                value={editForm.agentId}
+                onChange={e => setEditForm(prev => ({ ...prev, agentId: e.target.value }))}
+                className={selectClass}
+              >
+                <option value="">Select agent...</option>
+                {agents.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name || a.id}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Prompt</Label>
+              <Textarea
+                value={editForm.prompt}
+                onChange={e => setEditForm(prev => ({ ...prev, prompt: e.target.value }))}
+                className="min-h-[80px]"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingJob(null)}>Cancel</Button>
+            <Button onClick={saveEdit} disabled={saving}>
+              {saving ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -14,6 +14,7 @@ import type { AgentRegistry } from '../agents/registry.js';
 import type { ChannelAdapter } from '../channels/base.js';
 import { getAgentsDir } from '../config/index.js';
 import { createLogger } from '../utils/logger.js';
+import { logActivity } from '../utils/activity.js';
 
 const logger = createLogger('heartbeat');
 
@@ -213,6 +214,14 @@ export class HeartbeatManager {
           result.text,
         );
       }
+
+      // Log to activity feed
+      logActivity({
+        type: 'heartbeat',
+        agentId,
+        title: `Heartbeat: ${agentId}`,
+        description: isOk ? 'All clear' : result.text.slice(0, 200),
+      });
     } catch (err) {
       logger.error(`Heartbeat failed for "${agentId}":`, {
         error: err instanceof Error ? err.message : String(err),

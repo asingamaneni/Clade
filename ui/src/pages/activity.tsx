@@ -2,10 +2,17 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { api } from '@/lib/api'
 import {
-  MessageSquare, Puzzle, BookOpen, Bot, RefreshCw, Loader2, Zap, Search as SearchIcon
+  MessageSquare, Puzzle, BookOpen, Bot, RefreshCw, Loader2, Zap, Search as SearchIcon, Heart, Timer
 } from "lucide-react"
 
 // ---------------------------------------------------------------------------
@@ -14,7 +21,7 @@ import {
 
 interface ActivityEvent {
   id: string
-  type: 'chat' | 'skill' | 'mcp' | 'reflection' | 'agent'
+  type: 'chat' | 'skill' | 'mcp' | 'reflection' | 'agent' | 'heartbeat' | 'cron'
   agentId?: string
   title: string
   description: string
@@ -57,13 +64,219 @@ const EVENT_CONFIG: Record<string, { color: string; bg: string; border: string; 
   mcp:        { color: 'text-green-400',  bg: 'bg-green-500/10',  border: 'border-l-green-500',  icon: Puzzle,        label: 'MCP' },
   reflection: { color: 'text-amber-400',  bg: 'bg-amber-500/10',  border: 'border-l-amber-500',  icon: RefreshCw,     label: 'Reflection' },
   agent:      { color: 'text-cyan-400',   bg: 'bg-cyan-500/10',   border: 'border-l-cyan-500',   icon: Bot,           label: 'Agent' },
+  heartbeat:  { color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-l-emerald-500', icon: Heart,       label: 'Heartbeat' },
+  cron:       { color: 'text-sky-400',   bg: 'bg-sky-500/10',   border: 'border-l-sky-500',   icon: Timer,         label: 'Cron' },
 }
 
-const FILTER_TYPES = ['all', 'chat', 'skill', 'mcp', 'reflection', 'agent'] as const
+const FILTER_TYPES = ['all', 'chat', 'skill', 'mcp', 'reflection', 'agent', 'heartbeat', 'cron'] as const
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
+
+function DetailSection({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1">
+      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</span>
+      <div>{children}</div>
+    </div>
+  )
+}
+
+function CodeBlock({ text }: { text: string }) {
+  return (
+    <ScrollArea className="max-h-[300px]">
+      <pre className="text-xs bg-secondary/50 rounded-md p-3 whitespace-pre-wrap break-words font-mono">
+        {text}
+      </pre>
+    </ScrollArea>
+  )
+}
+
+function EventDetailContent({ event, agents }: { event: ActivityEvent; agents: Agent[] }) {
+  const meta = event.metadata || {}
+  const agent = agents.find(a => a.id === event.agentId)
+  const agentLabel = agent ? `${agent.emoji || ''} ${agent.name}` : event.agentId || 'Unknown'
+
+  const commonHeader = (
+    <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
+      <span>{agentLabel}</span>
+      <span>&middot;</span>
+      <span>{new Date(event.timestamp).toLocaleString()}</span>
+    </div>
+  )
+
+  switch (event.type) {
+    case 'chat':
+      return (
+        <div className="space-y-4">
+          {commonHeader}
+          {meta.userMessage && (
+            <DetailSection label="User Message">
+              <CodeBlock text={String(meta.userMessage)} />
+            </DetailSection>
+          )}
+          {meta.assistantMessage && (
+            <DetailSection label="Agent Response">
+              <CodeBlock text={String(meta.assistantMessage)} />
+            </DetailSection>
+          )}
+          {meta.conversationId && (
+            <DetailSection label="Conversation ID">
+              <span className="text-xs font-mono text-muted-foreground">{String(meta.conversationId)}</span>
+            </DetailSection>
+          )}
+        </div>
+      )
+
+    case 'cron':
+      return (
+        <div className="space-y-4">
+          {commonHeader}
+          {meta.action && (
+            <DetailSection label="Action">
+              <Badge variant="secondary" className="text-xs capitalize">{String(meta.action)}</Badge>
+            </DetailSection>
+          )}
+          {meta.schedule && (
+            <DetailSection label="Schedule">
+              <span className="text-xs font-mono">{String(meta.schedule)}</span>
+            </DetailSection>
+          )}
+          {meta.prompt && (
+            <DetailSection label="Prompt">
+              <CodeBlock text={String(meta.prompt)} />
+            </DetailSection>
+          )}
+          {meta.result && (
+            <DetailSection label="Response">
+              <CodeBlock text={String(meta.result)} />
+            </DetailSection>
+          )}
+          {meta.error && (
+            <DetailSection label="Error">
+              <CodeBlock text={String(meta.error)} />
+            </DetailSection>
+          )}
+          {meta.changes && (
+            <DetailSection label="Changes">
+              <CodeBlock text={JSON.stringify(meta.changes, null, 2)} />
+            </DetailSection>
+          )}
+        </div>
+      )
+
+    case 'agent':
+      return (
+        <div className="space-y-4">
+          {commonHeader}
+          {meta.action && (
+            <DetailSection label="Action">
+              <Badge variant="secondary" className="text-xs capitalize">{String(meta.action)}</Badge>
+            </DetailSection>
+          )}
+          {meta.template && (
+            <DetailSection label="Template">
+              <span className="text-sm">{String(meta.template)}</span>
+            </DetailSection>
+          )}
+          <DetailSection label="Description">
+            <p className="text-sm">{event.description}</p>
+          </DetailSection>
+        </div>
+      )
+
+    case 'skill':
+      return (
+        <div className="space-y-4">
+          {commonHeader}
+          {meta.action && (
+            <DetailSection label="Action">
+              <Badge variant="secondary" className="text-xs capitalize">{String(meta.action)}</Badge>
+            </DetailSection>
+          )}
+          {meta.skillName && (
+            <DetailSection label="Skill">
+              <span className="text-sm font-medium">{String(meta.skillName)}</span>
+            </DetailSection>
+          )}
+          <DetailSection label="Description">
+            <p className="text-sm">{event.description}</p>
+          </DetailSection>
+        </div>
+      )
+
+    case 'mcp':
+      return (
+        <div className="space-y-4">
+          {commonHeader}
+          {meta.action && (
+            <DetailSection label="Action">
+              <Badge variant="secondary" className="text-xs capitalize">{String(meta.action)}</Badge>
+            </DetailSection>
+          )}
+          {meta.serverName && (
+            <DetailSection label="Server">
+              <span className="text-sm font-medium">{String(meta.serverName)}</span>
+            </DetailSection>
+          )}
+          <DetailSection label="Description">
+            <p className="text-sm">{event.description}</p>
+          </DetailSection>
+        </div>
+      )
+
+    case 'heartbeat':
+      return (
+        <div className="space-y-4">
+          {commonHeader}
+          {meta.response && (
+            <DetailSection label="Response">
+              <CodeBlock text={String(meta.response)} />
+            </DetailSection>
+          )}
+          {meta.status && (
+            <DetailSection label="Status">
+              <Badge variant="secondary" className="text-xs capitalize">{String(meta.status)}</Badge>
+            </DetailSection>
+          )}
+          <DetailSection label="Description">
+            <p className="text-sm">{event.description}</p>
+          </DetailSection>
+        </div>
+      )
+
+    case 'reflection':
+      return (
+        <div className="space-y-4">
+          {commonHeader}
+          {meta.changes && (
+            <DetailSection label="Changes to SOUL.md">
+              <CodeBlock text={String(meta.changes)} />
+            </DetailSection>
+          )}
+          <DetailSection label="Description">
+            <p className="text-sm">{event.description}</p>
+          </DetailSection>
+        </div>
+      )
+
+    default:
+      return (
+        <div className="space-y-4">
+          {commonHeader}
+          <DetailSection label="Description">
+            <p className="text-sm">{event.description}</p>
+          </DetailSection>
+          {Object.keys(meta).length > 0 && (
+            <DetailSection label="Metadata">
+              <CodeBlock text={JSON.stringify(meta, null, 2)} />
+            </DetailSection>
+          )}
+        </div>
+      )
+  }
+}
 
 export function ActivityPage({ agents, wsRef }: ActivityPageProps) {
   const [events, setEvents] = useState<ActivityEvent[]>([])
@@ -72,6 +285,7 @@ export function ActivityPage({ agents, wsRef }: ActivityPageProps) {
   const [filter, setFilter] = useState<string>('all')
   const [agentFilter, setAgentFilter] = useState<string>('all')
   const [hasMore, setHasMore] = useState(true)
+  const [selectedEvent, setSelectedEvent] = useState<ActivityEvent | null>(null)
   const offsetRef = useRef(0)
 
   const fetchEvents = useCallback(async (offset = 0, append = false) => {
@@ -203,7 +417,8 @@ export function ActivityPage({ agents, wsRef }: ActivityPageProps) {
             return (
               <Card
                 key={evt.id}
-                className={cn("border-l-[3px] transition-colors", cfg.border)}
+                className={cn("border-l-[3px] transition-colors cursor-pointer hover:bg-secondary/30", cfg.border)}
+                onClick={() => setSelectedEvent(evt)}
               >
                 <CardContent className="p-4 flex items-start gap-3">
                   <div className={cn("mt-0.5 p-1.5 rounded-md", cfg.bg)}>
@@ -259,6 +474,28 @@ export function ActivityPage({ agents, wsRef }: ActivityPageProps) {
           )}
         </div>
       )}
+
+      {/* Detail modal */}
+      <Dialog open={!!selectedEvent} onOpenChange={(open) => { if (!open) setSelectedEvent(null) }}>
+        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+          {selectedEvent && (() => {
+            const cfg = EVENT_CONFIG[selectedEvent.type] || EVENT_CONFIG.agent
+            return (
+              <>
+                <DialogHeader>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className={cn("text-xs", cfg.color)}>
+                      {cfg.label}
+                    </Badge>
+                    <DialogTitle className="text-base">{selectedEvent.title}</DialogTitle>
+                  </div>
+                </DialogHeader>
+                <EventDetailContent event={selectedEvent} agents={agents} />
+              </>
+            )
+          })()}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

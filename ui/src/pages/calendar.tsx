@@ -1,7 +1,14 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import { api } from '@/lib/api'
 import { ChevronLeft, ChevronRight, Loader2, CalendarDays } from "lucide-react"
@@ -35,7 +42,7 @@ interface CalendarPageProps {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const HOURS = Array.from({ length: 18 }, (_, i) => i + 6) // 6 AM - 11 PM
+const HOURS = Array.from({ length: 24 }, (_, i) => i) // 12 AM - 11 PM
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 const AGENT_COLORS = [
@@ -89,6 +96,7 @@ export function CalendarPage({ agents }: CalendarPageProps) {
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
 
   const weekEnd = useMemo(() => getWeekEnd(weekStart), [weekStart])
 
@@ -117,6 +125,13 @@ export function CalendarPage({ agents }: CalendarPageProps) {
   }, [weekStart, weekEnd])
 
   useEffect(() => { fetchEvents() }, [fetchEvents])
+
+  // Auto-scroll to 8 AM on load
+  useEffect(() => {
+    if (!loading && scrollRef.current) {
+      scrollRef.current.scrollTop = 8 * 48 // 8 AM
+    }
+  }, [loading])
 
   const prevWeek = () => {
     setWeekStart(prev => {
@@ -156,7 +171,7 @@ export function CalendarPage({ agents }: CalendarPageProps) {
     const endHour = endDate.getHours() + endDate.getMinutes() / 60
     const duration = Math.max(endHour - startHour, 0.5)
 
-    const top = (startHour - 6) * 48 // 48px per hour
+    const top = startHour * 48 // 48px per hour
     const height = Math.max(duration * 48, 20)
 
     return { top: `${top}px`, height: `${height}px` }
@@ -252,7 +267,7 @@ export function CalendarPage({ agents }: CalendarPageProps) {
             </div>
 
             {/* Time grid */}
-            <div className="relative overflow-y-auto" style={{ maxHeight: '600px' }}>
+            <div ref={scrollRef} className="relative overflow-y-auto" style={{ maxHeight: '600px' }}>
               <div className="grid grid-cols-[60px_repeat(7,1fr)]" style={{ minHeight: `${HOURS.length * 48}px` }}>
                 {/* Hour labels */}
                 <div className="relative">
@@ -260,7 +275,7 @@ export function CalendarPage({ agents }: CalendarPageProps) {
                     <div
                       key={h}
                       className="absolute right-2 text-[10px] text-muted-foreground/60"
-                      style={{ top: `${(h - 6) * 48}px`, transform: 'translateY(-6px)' }}
+                      style={{ top: `${h * 48}px`, transform: 'translateY(-6px)' }}
                     >
                       {formatHour(h)}
                     </div>
@@ -275,7 +290,7 @@ export function CalendarPage({ agents }: CalendarPageProps) {
                       <div
                         key={h}
                         className="absolute w-full border-t border-border/30"
-                        style={{ top: `${(h - 6) * 48}px` }}
+                        style={{ top: `${h * 48}px` }}
                       />
                     ))}
 
@@ -296,7 +311,7 @@ export function CalendarPage({ agents }: CalendarPageProps) {
                             colors
                           )}
                           style={style}
-                          onClick={() => setSelectedEvent(selectedEvent?.id === evt.id ? null : evt)}
+                          onClick={() => setSelectedEvent(evt)}
                         >
                           <div className="text-[10px] font-medium truncate">
                             {evt.title}
@@ -317,30 +332,40 @@ export function CalendarPage({ agents }: CalendarPageProps) {
         </Card>
       )}
 
-      {/* Event detail popover */}
-      {selectedEvent && (
-        <Card className="border-primary/30">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-semibold text-foreground">{selectedEvent.title}</h3>
-              <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setSelectedEvent(null)}>
-                Close
-              </Button>
+      {/* Event detail dialog */}
+      <Dialog open={!!selectedEvent} onOpenChange={(open) => { if (!open) setSelectedEvent(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{selectedEvent?.title}</DialogTitle>
+            <DialogDescription>Event details</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            {selectedEvent?.agentId && (
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">Agent:</span>
+                <span className="text-foreground">{agents.find(a => a.id === selectedEvent.agentId)?.name || selectedEvent.agentId}</span>
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">Type:</span>
+              <Badge variant="secondary" className="text-xs">{selectedEvent?.type}</Badge>
             </div>
-            <div className="space-y-1.5 text-xs text-muted-foreground">
-              {selectedEvent.agentId && (
-                <div>Agent: <span className="text-foreground">{agents.find(a => a.id === selectedEvent.agentId)?.name || selectedEvent.agentId}</span></div>
-              )}
-              <div>Type: <Badge variant="secondary" className="text-[10px] h-4">{selectedEvent.type}</Badge></div>
-              <div>Start: <span className="text-foreground">{new Date(selectedEvent.start).toLocaleString()}</span></div>
-              {selectedEvent.end && (
-                <div>End: <span className="text-foreground">{new Date(selectedEvent.end).toLocaleString()}</span></div>
-              )}
-              {selectedEvent.recurring && <Badge variant="outline" className="text-[10px]">Recurring</Badge>}
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">Start:</span>
+              <span className="text-foreground">{selectedEvent ? new Date(selectedEvent.start).toLocaleString() : ''}</span>
             </div>
-          </CardContent>
-        </Card>
-      )}
+            {selectedEvent?.end && (
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">End:</span>
+                <span className="text-foreground">{new Date(selectedEvent.end).toLocaleString()}</span>
+              </div>
+            )}
+            {selectedEvent?.recurring && (
+              <Badge variant="outline" className="text-xs">Recurring</Badge>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {!loading && events.length === 0 && (
         <Card>

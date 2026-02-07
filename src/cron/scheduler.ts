@@ -11,6 +11,7 @@ import type { Store, CronJobRow } from '../store/sqlite.js';
 import type { SessionManager } from '../engine/manager.js';
 import type { ChannelAdapter } from '../channels/base.js';
 import { createLogger } from '../utils/logger.js';
+import { logActivity } from '../utils/activity.js';
 
 const logger = createLogger('cron');
 
@@ -121,6 +122,14 @@ export class CronScheduler {
 
       // Update last run timestamp
       this.store.updateCronJobLastRun(row.id);
+
+      // Log to activity feed
+      logActivity({
+        type: 'cron',
+        agentId: row.agent_id,
+        title: `Cron: ${row.name}`,
+        description: result.text.slice(0, 200),
+      });
 
       // Deliver result if a delivery target is configured
       if (row.deliver_to) {

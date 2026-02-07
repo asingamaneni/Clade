@@ -187,7 +187,7 @@ export function ChatPage({ agents }: ChatPageProps) {
       convId = await createConversation(selectedAgent)
     }
 
-    await sendMessage(selectedAgent, text, attachments)
+    await sendMessage(selectedAgent, text, attachments, convId || undefined)
   }, [
     selectedAgent,
     inputValue,

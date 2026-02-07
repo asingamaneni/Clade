@@ -2251,11 +2251,25 @@ export function AgentsPage({
 // Inline Welcome (for creating agents from agents page)
 // ---------------------------------------------------------------------------
 
+const TEMPLATES = [
+  { id: 'orchestrator', name: 'Personal Assistant', desc: 'General-purpose, delegates to specialists', icon: '\uD83E\uDDE0' },
+  { id: 'coding', name: 'Coding Partner', desc: 'Writes, reviews, and maintains code', icon: '\uD83D\uDCBB' },
+  { id: 'research', name: 'Research Analyst', desc: 'Gathers and synthesizes information', icon: '\uD83D\uDD0D' },
+  { id: 'ops', name: 'Ops Monitor', desc: 'Monitors systems and handles incidents', icon: '\uD83D\uDCE1' },
+  { id: 'pm', name: 'Project Manager', desc: 'Tracks tasks and coordinates work', icon: '\uD83D\uDCCB' },
+  { id: 'custom', name: 'Custom Agent', desc: 'Build from scratch with full control', icon: '\uD83D\uDD27' },
+] as const
+
 function WelcomeInline({ onCreated }: { onCreated: () => void }) {
   const [name, setName] = useState('')
-  const [template, setTemplate] = useState('coding')
+  const [template, setTemplate] = useState('orchestrator')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [agentDescription, setAgentDescription] = useState('')
+  const [toolPreset, setToolPreset] = useState('full')
+  const [heartbeatEnabled, setHeartbeatEnabled] = useState(true)
+  const [heartbeatInterval, setHeartbeatInterval] = useState('30m')
+  const [soulContent, setSoulContent] = useState('')
 
   const nameSlug = name
     .toLowerCase()
@@ -2271,10 +2285,14 @@ function WelcomeInline({ onCreated }: { onCreated: () => void }) {
     setCreating(true)
     setError(null)
     try {
-      await api('/agents', {
-        method: 'POST',
-        body: { name: nameSlug, template },
-      })
+      const body: Record<string, unknown> = { name: nameSlug, template }
+      if (template === 'custom') {
+        if (agentDescription) body.description = agentDescription
+        body.toolPreset = toolPreset
+        body.heartbeat = { enabled: heartbeatEnabled, interval: heartbeatInterval }
+        if (soulContent) body.soulContent = soulContent
+      }
+      await api('/agents', { method: 'POST', body })
       onCreated()
     } catch (e: any) {
       setError(e.message)
@@ -2283,7 +2301,7 @@ function WelcomeInline({ onCreated }: { onCreated: () => void }) {
   }
 
   return (
-    <Card className="max-w-md">
+    <Card className="max-w-xl">
       <CardContent className="p-5 space-y-4">
         <h3 className="text-sm font-semibold text-foreground">
           Create New Agent
@@ -2297,7 +2315,7 @@ function WelcomeInline({ onCreated }: { onCreated: () => void }) {
               setError(null)
             }}
             onKeyDown={(e) => e.key === 'Enter' && create()}
-            placeholder="e.g. jarvis, scout, oracle"
+            placeholder="e.g. jarvis, scout, atlas"
           />
           {nameSlug && nameSlug !== name && (
             <p className="text-xs text-muted-foreground/60">
@@ -2308,17 +2326,84 @@ function WelcomeInline({ onCreated }: { onCreated: () => void }) {
         </div>
         <div className="space-y-1.5">
           <Label className="text-xs text-muted-foreground">Template</Label>
-          <select
-            value={template}
-            onChange={(e) => setTemplate(e.target.value)}
-            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          >
-            <option value="coding">Coding Partner</option>
-            <option value="research">Research Analyst</option>
-            <option value="ops">Ops Monitor</option>
-            <option value="pm">Project Manager</option>
-          </select>
+          <div className="grid grid-cols-2 gap-2">
+            {TEMPLATES.map(t => (
+              <button
+                key={t.id}
+                onClick={() => setTemplate(t.id)}
+                className={cn(
+                  "text-left p-3 rounded-lg border-2 transition-all",
+                  template === t.id
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-muted-foreground/40"
+                )}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span>{t.icon}</span>
+                  <span className="text-sm font-medium text-foreground">{t.name}</span>
+                </div>
+                <p className="text-xs text-muted-foreground">{t.desc}</p>
+              </button>
+            ))}
+          </div>
         </div>
+        {template === 'custom' && (
+          <div className="space-y-3 p-3 rounded-lg border border-dashed bg-muted/20">
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Description</Label>
+              <Input
+                value={agentDescription}
+                onChange={(e) => setAgentDescription(e.target.value)}
+                placeholder="What should this agent do?"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Tool Preset</Label>
+              <select
+                value={toolPreset}
+                onChange={(e) => setToolPreset(e.target.value)}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              >
+                <option value="full">Full (all tools)</option>
+                <option value="coding">Coding (file + shell)</option>
+                <option value="messaging">Messaging (comms only)</option>
+                <option value="potato">Potato (no tools)</option>
+              </select>
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">Heartbeat</Label>
+                <p className="text-[11px] text-muted-foreground">Periodic check-ins</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={heartbeatInterval}
+                  onChange={(e) => setHeartbeatInterval(e.target.value)}
+                  disabled={!heartbeatEnabled}
+                  className="h-8 text-xs rounded-md border border-input bg-background px-2 text-foreground disabled:opacity-50"
+                >
+                  <option value="15m">15m</option>
+                  <option value="30m">30m</option>
+                  <option value="1h">1h</option>
+                  <option value="4h">4h</option>
+                </select>
+                <Switch
+                  checked={heartbeatEnabled}
+                  onCheckedChange={setHeartbeatEnabled}
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">SOUL.md (optional)</Label>
+              <Textarea
+                value={soulContent}
+                onChange={(e) => setSoulContent(e.target.value)}
+                placeholder="Custom personality and instructions..."
+                className="font-mono text-xs min-h-[80px] resize-y"
+              />
+            </div>
+          </div>
+        )}
         {error && (
           <div className="p-3 rounded-md text-sm bg-destructive/10 border border-destructive/30 text-destructive">
             {error}
