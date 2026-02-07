@@ -1568,6 +1568,15 @@ async function startPlaceholderServer(
     const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
     const configPath = join(cladeHome, 'config.json');
     writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+
+    logActivity({
+      type: 'agent',
+      agentId: id,
+      title: `Agent "${id}" deleted`,
+      description: `Agent removed from configuration`,
+      metadata: { action: 'delete' },
+    });
+
     return { success: true };
   });
 
@@ -1732,6 +1741,14 @@ async function startPlaceholderServer(
     try {
       mkdirSync(join(mcpDir, 'active'), { recursive: true });
       renameSync(pendingPath, activePath);
+
+      logActivity({
+        type: 'mcp',
+        title: `MCP server "${name}" approved`,
+        description: 'Approved and moved to active',
+        metadata: { action: 'approve', mcpName: name },
+      });
+
       return { success: true, message: `MCP server "${name}" approved and moved to active` };
     } catch (err) {
       reply.status(500);
@@ -1752,6 +1769,14 @@ async function startPlaceholderServer(
 
     try {
       rmSync(pendingPath, { recursive: true, force: true });
+
+      logActivity({
+        type: 'mcp',
+        title: `MCP server "${name}" rejected`,
+        description: 'Rejected and removed',
+        metadata: { action: 'reject', mcpName: name },
+      });
+
       return { success: true, message: `MCP server "${name}" rejected and removed` };
     } catch (err) {
       reply.status(500);
@@ -1881,6 +1906,63 @@ async function startPlaceholderServer(
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // Activity Feed — append-only event log
+  // ═══════════════════════════════════════════════════════════════════════
+
+  interface ActivityEvent {
+    id: string;
+    type: 'chat' | 'skill' | 'mcp' | 'reflection' | 'agent';
+    agentId?: string;
+    title: string;
+    description: string;
+    timestamp: string;
+    metadata?: Record<string, unknown>;
+  }
+
+  const activityHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+  const activityFilePath = join(activityHome, 'data', 'activity.json');
+  const MAX_ACTIVITY_EVENTS = 1000;
+
+  function loadActivityLog(): ActivityEvent[] {
+    try {
+      if (!existsSync(activityFilePath)) return [];
+      const raw = readFileSync(activityFilePath, 'utf-8');
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveActivityLog(events: ActivityEvent[]): void {
+    mkdirSync(join(activityHome, 'data'), { recursive: true });
+    // Trim to max length
+    const trimmed = events.length > MAX_ACTIVITY_EVENTS
+      ? events.slice(events.length - MAX_ACTIVITY_EVENTS)
+      : events;
+    writeFileSync(activityFilePath, JSON.stringify(trimmed, null, 2), 'utf-8');
+  }
+
+  function logActivity(event: Omit<ActivityEvent, 'id' | 'timestamp'>): ActivityEvent {
+    const full: ActivityEvent = {
+      id: 'evt_' + randomUUID().slice(0, 12),
+      timestamp: new Date().toISOString(),
+      ...event,
+    };
+    const events = loadActivityLog();
+    events.push(full);
+    saveActivityLog(events);
+    broadcastAdmin({ type: 'activity:new', event: full });
+    return full;
+  }
+
+  // Load and trim activity log on startup
+  const startupEvents = loadActivityLog();
+  if (startupEvents.length > MAX_ACTIVITY_EVENTS) {
+    saveActivityLog(startupEvents);
+  }
+
   const skillsCladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
   const skillsDir = join(skillsCladeHome, 'skills');
 
@@ -1892,43 +1974,91 @@ async function startPlaceholderServer(
     path: string;
     created_at: string;
     approved_at: string | null;
+    requestedBy: string | null;
   }
   const skillsMeta = new Map<string, SkillMeta>();
 
-  // Scan existing skills from disk on startup
-  for (const status of ['active', 'pending', 'disabled'] as const) {
-    const dir = join(skillsDir, status);
-    if (existsSync(dir)) {
-      for (const name of readdirSync(dir)) {
+  // Scan skills from disk and merge into the in-memory map.
+  // New skills found on disk (e.g. created by agent MCP subprocesses) are
+  // added and trigger a WebSocket broadcast so the UI updates in real-time.
+  function rescanSkillsFromDisk(broadcast = false): void {
+    for (const status of ['active', 'pending', 'disabled'] as const) {
+      const dir = join(skillsDir, status);
+      if (!existsSync(dir)) continue;
+
+      let entries: string[];
+      try { entries = readdirSync(dir); } catch { continue; }
+
+      for (const name of entries) {
         const skillPath = join(dir, name);
-        // Skip non-directories and hidden files
         try {
           const stat = require('fs').statSync(skillPath);
           if (!stat.isDirectory()) continue;
         } catch { continue; }
 
+        // Already tracked and status matches — skip
+        const existing = skillsMeta.get(name);
+        if (existing && existing.status === status) continue;
+
         let description = '';
-        const skillMdPath = join(skillPath, 'SKILL.md');
-        if (existsSync(skillMdPath)) {
-          const content = readFileSync(skillMdPath, 'utf-8');
-          const descMatch = content.match(/^#[^\n]*\n+([^\n]+)/);
-          if (descMatch) description = descMatch[1].trim();
+        let requestedBy: string | null = null;
+        let createdAt = new Date().toISOString();
+
+        // Read meta.json if present (written by agent skill_create tool)
+        const metaPath = join(skillPath, 'meta.json');
+        if (existsSync(metaPath)) {
+          try {
+            const meta = JSON.parse(readFileSync(metaPath, 'utf-8'));
+            if (meta.description) description = meta.description;
+            if (meta.createdBy) requestedBy = meta.createdBy;
+            if (meta.createdAt) createdAt = meta.createdAt;
+          } catch { /* ignore parse errors */ }
         }
 
+        // Fall back to parsing SKILL.md header for description
+        if (!description) {
+          const skillMdPath = join(skillPath, 'SKILL.md');
+          if (existsSync(skillMdPath)) {
+            try {
+              const content = readFileSync(skillMdPath, 'utf-8');
+              const descMatch = content.match(/^#[^\n]*\n+([^\n]+)/);
+              if (descMatch) description = descMatch[1].trim();
+            } catch { /* ignore */ }
+          }
+        }
+
+        const isNew = !existing;
         skillsMeta.set(name, {
           name,
           status,
           description,
           path: skillPath,
-          created_at: new Date().toISOString(),
+          created_at: createdAt,
           approved_at: status === 'active' ? new Date().toISOString() : null,
+          requestedBy,
         });
+
+        // Broadcast only for genuinely new skills discovered on disk
+        if (broadcast && isNew) {
+          broadcastAdmin({
+            type: 'skill:created',
+            name,
+            description,
+            requestedBy,
+            timestamp: new Date().toISOString(),
+          });
+        }
       }
     }
   }
 
+  // Initial scan at startup (no broadcast — nobody is connected yet)
+  rescanSkillsFromDisk(false);
+
   // ── List all skills ─────────────────────────────────────────
   fastify.get('/api/skills', async () => {
+    // Rescan disk to pick up skills created by agent MCP subprocesses
+    rescanSkillsFromDisk(true);
     const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
     const skillsList = Array.from(skillsMeta.values()).map(skill => {
       // Compute which agents have this skill assigned
@@ -1978,6 +2108,7 @@ async function startPlaceholderServer(
         path: skillDir,
         created_at: new Date().toISOString(),
         approved_at: null,
+        requestedBy: null,
       };
       skillsMeta.set(name, skill);
 
@@ -2022,8 +2153,30 @@ async function startPlaceholderServer(
       skill.path = activePath;
       skill.approved_at = new Date().toISOString();
 
-      broadcastAdmin({ type: 'skill:approved', name, timestamp: new Date().toISOString() });
-      return { success: true, skill };
+      // Auto-assign to the requesting agent if one exists
+      let autoAssigned: string | null = null;
+      if (skill.requestedBy) {
+        const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+        const agent = agents[skill.requestedBy];
+        if (agent) {
+          const currentSkills = (agent.skills as string[]) ?? [];
+          if (!currentSkills.includes(name)) {
+            agent.skills = [...currentSkills, name];
+            autoAssigned = skill.requestedBy;
+          }
+        }
+      }
+
+      broadcastAdmin({ type: 'skill:approved', name, autoAssigned, timestamp: new Date().toISOString() });
+
+      logActivity({
+        type: 'skill',
+        title: `Skill "${name}" approved`,
+        description: autoAssigned ? `Approved and auto-assigned to ${autoAssigned}` : 'Approved and moved to active',
+        metadata: { action: 'approve', skillName: name, autoAssigned },
+      });
+
+      return { success: true, skill, autoAssigned };
     } catch (err) {
       reply.status(500);
       return { error: `Failed to approve skill: ${err instanceof Error ? err.message : 'Unknown error'}` };
@@ -2062,6 +2215,14 @@ async function startPlaceholderServer(
       skill.path = disabledPath;
 
       broadcastAdmin({ type: 'skill:rejected', name, timestamp: new Date().toISOString() });
+
+      logActivity({
+        type: 'skill',
+        title: `Skill "${name}" rejected`,
+        description: 'Rejected and moved to disabled',
+        metadata: { action: 'reject', skillName: name },
+      });
+
       return { success: true };
     } catch (err) {
       reply.status(500);
@@ -2157,6 +2318,15 @@ async function startPlaceholderServer(
     }
 
     broadcastAdmin({ type: 'skill:assigned', name, agentId, timestamp: new Date().toISOString() });
+
+    logActivity({
+      type: 'skill',
+      agentId,
+      title: `Skill "${name}" assigned to ${agentId}`,
+      description: `Skill assigned to agent`,
+      metadata: { action: 'assign', skillName: name },
+    });
+
     return { success: true };
   });
 
@@ -2302,6 +2472,14 @@ async function startPlaceholderServer(
     writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
 
     console.log(`  [ok] Created agent "${agentName}" (${isCustom ? 'custom' : 'template: ' + templateId})`);
+
+    logActivity({
+      type: 'agent',
+      agentId: agentName,
+      title: `Agent "${agentName}" created`,
+      description: `Created from ${isCustom ? 'custom config' : 'template: ' + templateId}`,
+      metadata: { action: 'create', template: templateId },
+    });
 
     return {
       agent: {
@@ -2503,6 +2681,418 @@ async function startPlaceholderServer(
       reply.status(500);
       return { error: 'Failed to read history entry' };
     }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Activity Feed API — /api/activity
+  // ═══════════════════════════════════════════════════════════════════════
+
+  fastify.get('/api/activity', async (req) => {
+    const query = req.query as Record<string, string>;
+    const limit = Math.min(parseInt(query.limit || '50', 10) || 50, 200);
+    const offset = parseInt(query.offset || '0', 10) || 0;
+    const filterAgentId = query.agentId || undefined;
+    const filterType = query.type || undefined;
+
+    let events = loadActivityLog();
+
+    // Sort newest-first
+    events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    // Apply filters
+    if (filterAgentId) {
+      events = events.filter(e => e.agentId === filterAgentId);
+    }
+    if (filterType) {
+      const types = filterType.split(',');
+      events = events.filter(e => types.includes(e.type));
+    }
+
+    const totalEvents = events.length;
+    const paged = events.slice(offset, offset + limit);
+
+    return { events: paged, totalEvents, limit, offset };
+  });
+
+  // POST to manually log an activity event (for integrations)
+  fastify.post('/api/activity', async (req, reply) => {
+    const body = req.body as Record<string, unknown>;
+    const eventType = body.type as string;
+    const title = body.title as string;
+
+    if (!eventType || !title) {
+      reply.status(400);
+      return { error: 'type and title are required' };
+    }
+
+    const validTypes = ['chat', 'skill', 'mcp', 'reflection', 'agent'];
+    if (!validTypes.includes(eventType)) {
+      reply.status(400);
+      return { error: `type must be one of: ${validTypes.join(', ')}` };
+    }
+
+    const event = logActivity({
+      type: eventType as ActivityEvent['type'],
+      agentId: (body.agentId as string) || undefined,
+      title,
+      description: (body.description as string) || '',
+      metadata: (body.metadata as Record<string, unknown>) || undefined,
+    });
+
+    return { success: true, event };
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Calendar API — /api/calendar/events
+  // ═══════════════════════════════════════════════════════════════════════
+
+  fastify.get('/api/calendar/events', async (req) => {
+    const query = req.query as Record<string, string>;
+    const startStr = query.start;
+    const endStr = query.end;
+
+    // Default range: current month
+    const now = new Date();
+    const rangeStart = startStr ? new Date(startStr) : new Date(now.getFullYear(), now.getMonth(), 1);
+    const rangeEnd = endStr ? new Date(endStr) : new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+    const rangeStartMs = rangeStart.getTime();
+    const rangeEndMs = rangeEnd.getTime();
+
+    const calendarEvents: Array<{
+      id: string;
+      type: string;
+      agentId?: string;
+      title: string;
+      start: string;
+      end?: string;
+      recurring?: boolean;
+      color?: string;
+    }> = [];
+
+    const calHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+
+    // 1. Chat activity windows — group messages into time blocks per agent per day
+    for (const agentId of Object.keys(agents)) {
+      const chatData = loadAgentChatData(calHome, agentId);
+      // Gather all message timestamps for this agent
+      const msgTimestamps: number[] = [];
+      for (const convId of chatData.order) {
+        const conv = chatData.conversations[convId];
+        if (!conv) continue;
+        for (const msg of conv.messages) {
+          const ts = new Date(msg.timestamp).getTime();
+          if (ts >= rangeStartMs && ts <= rangeEndMs) {
+            msgTimestamps.push(ts);
+          }
+        }
+      }
+
+      if (msgTimestamps.length === 0) continue;
+
+      // Group timestamps into sessions (gaps > 30 min = new session)
+      msgTimestamps.sort((a, b) => a - b);
+      let sessionStart = msgTimestamps[0]!;
+      let sessionEnd = msgTimestamps[0]!;
+
+      for (let i = 1; i < msgTimestamps.length; i++) {
+        const ts = msgTimestamps[i]!;
+        if (ts - sessionEnd > 30 * 60 * 1000) {
+          // Save current session
+          calendarEvents.push({
+            id: `chat_${agentId}_${sessionStart}`,
+            type: 'chat',
+            agentId,
+            title: `Chat with ${agentId}`,
+            start: new Date(sessionStart).toISOString(),
+            end: new Date(sessionEnd).toISOString(),
+            color: '#58a6ff',
+          });
+          sessionStart = ts;
+        }
+        sessionEnd = ts;
+      }
+      // Save last session
+      calendarEvents.push({
+        id: `chat_${agentId}_${sessionStart}`,
+        type: 'chat',
+        agentId,
+        title: `Chat with ${agentId}`,
+        start: new Date(sessionStart).toISOString(),
+        end: new Date(sessionEnd).toISOString(),
+        color: '#58a6ff',
+      });
+    }
+
+    // 2. Heartbeat/cron schedules from agent configs as recurring events
+    for (const [agentId, agentCfg] of Object.entries(agents)) {
+      const hb = agentCfg.heartbeat as { enabled?: boolean; interval?: string } | undefined;
+      if (hb?.enabled) {
+        calendarEvents.push({
+          id: `heartbeat_${agentId}`,
+          type: 'heartbeat',
+          agentId,
+          title: `${agentId} heartbeat (${hb.interval || '30m'})`,
+          start: rangeStart.toISOString(),
+          recurring: true,
+          color: '#3fb950',
+        });
+      }
+    }
+
+    // 3. Activity events within range (reflection, skill, agent events)
+    const activityEvents = loadActivityLog();
+    for (const evt of activityEvents) {
+      const evtMs = new Date(evt.timestamp).getTime();
+      if (evtMs >= rangeStartMs && evtMs <= rangeEndMs) {
+        const colorMap: Record<string, string> = {
+          reflection: '#d2a8ff',
+          skill: '#f0883e',
+          mcp: '#f0883e',
+          agent: '#8b949e',
+          chat: '#58a6ff',
+        };
+        calendarEvents.push({
+          id: evt.id,
+          type: evt.type,
+          agentId: evt.agentId,
+          title: evt.title,
+          start: evt.timestamp,
+          color: colorMap[evt.type] || '#8b949e',
+        });
+      }
+    }
+
+    // Sort by start time
+    calendarEvents.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+
+    return { events: calendarEvents, range: { start: rangeStart.toISOString(), end: rangeEnd.toISOString() } };
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Global Search API — /api/search
+  // ═══════════════════════════════════════════════════════════════════════
+
+  fastify.post('/api/search', async (req, reply) => {
+    const body = req.body as Record<string, unknown>;
+    const query = body.query as string;
+    if (!query || typeof query !== 'string') {
+      reply.status(400);
+      return { error: 'query is required and must be a string' };
+    }
+
+    const requestedSources = (body.sources as string[]) || ['memories', 'conversations', 'skills', 'agents', 'config'];
+    const queryLower = query.toLowerCase();
+    const searchHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+    const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+
+    const results: Array<{
+      source: string;
+      agentId?: string;
+      title: string;
+      snippet: string;
+      matchCount: number;
+      path?: string;
+    }> = [];
+
+    // Helper: extract snippet around match
+    function extractSnippet(text: string, q: string): string {
+      const idx = text.toLowerCase().indexOf(q);
+      if (idx === -1) return text.slice(0, 150);
+      const start = Math.max(0, idx - 50);
+      const end = Math.min(text.length, idx + q.length + 100);
+      let snippet = text.slice(start, end).replace(/\n/g, ' ').trim();
+      if (start > 0) snippet = '...' + snippet;
+      if (end < text.length) snippet = snippet + '...';
+      return snippet;
+    }
+
+    // Helper: count occurrences
+    function countMatches(text: string, q: string): number {
+      const lower = text.toLowerCase();
+      let count = 0;
+      let pos = 0;
+      while ((pos = lower.indexOf(q, pos)) !== -1) {
+        count++;
+        pos += q.length;
+      }
+      return count;
+    }
+
+    // 1. Search memories
+    if (requestedSources.includes('memories')) {
+      for (const agentId of Object.keys(agents)) {
+        const baseDir = join(searchHome, 'agents', agentId);
+
+        // MEMORY.md
+        const memoryMdPath = join(baseDir, 'MEMORY.md');
+        if (existsSync(memoryMdPath)) {
+          try {
+            const content = readFileSync(memoryMdPath, 'utf-8');
+            if (content.toLowerCase().includes(queryLower)) {
+              results.push({
+                source: 'memories',
+                agentId,
+                title: `${agentId}/MEMORY.md`,
+                snippet: extractSnippet(content, queryLower),
+                matchCount: countMatches(content, queryLower),
+                path: memoryMdPath,
+              });
+            }
+          } catch {}
+        }
+
+        // Daily memory files
+        const memoryDir = join(baseDir, 'memory');
+        if (existsSync(memoryDir)) {
+          try {
+            const entries = readdirSync(memoryDir).filter(f => f.endsWith('.md'));
+            for (const entry of entries) {
+              try {
+                const content = readFileSync(join(memoryDir, entry), 'utf-8');
+                if (content.toLowerCase().includes(queryLower)) {
+                  results.push({
+                    source: 'memories',
+                    agentId,
+                    title: `${agentId}/memory/${entry}`,
+                    snippet: extractSnippet(content, queryLower),
+                    matchCount: countMatches(content, queryLower),
+                    path: join(memoryDir, entry),
+                  });
+                }
+              } catch {}
+            }
+          } catch {}
+        }
+      }
+    }
+
+    // 2. Search conversations
+    if (requestedSources.includes('conversations')) {
+      for (const agentId of Object.keys(agents)) {
+        const chatData = loadAgentChatData(searchHome, agentId);
+        for (const convId of chatData.order) {
+          const conv = chatData.conversations[convId];
+          if (!conv) continue;
+          let totalMatches = 0;
+          let firstSnippet = '';
+          for (const msg of conv.messages) {
+            if (msg.text.toLowerCase().includes(queryLower)) {
+              totalMatches += countMatches(msg.text, queryLower);
+              if (!firstSnippet) {
+                firstSnippet = extractSnippet(msg.text, queryLower);
+              }
+            }
+          }
+          if (totalMatches > 0) {
+            results.push({
+              source: 'conversations',
+              agentId,
+              title: `${agentId}: ${conv.label}`,
+              snippet: firstSnippet,
+              matchCount: totalMatches,
+            });
+          }
+        }
+      }
+    }
+
+    // 3. Search skills
+    if (requestedSources.includes('skills')) {
+      const skillsDirs = ['active', 'pending', 'disabled'];
+      const sDir = join(searchHome, 'skills');
+      for (const status of skillsDirs) {
+        const statusDir = join(sDir, status);
+        if (!existsSync(statusDir)) continue;
+        try {
+          const entries = readdirSync(statusDir);
+          for (const skillName of entries) {
+            // Check skill name
+            if (skillName.toLowerCase().includes(queryLower)) {
+              results.push({
+                source: 'skills',
+                title: `Skill: ${skillName} (${status})`,
+                snippet: `Skill name matches query`,
+                matchCount: 1,
+                path: join(statusDir, skillName),
+              });
+            }
+            // Check SKILL.md content
+            const skillMdPath = join(statusDir, skillName, 'SKILL.md');
+            if (existsSync(skillMdPath)) {
+              try {
+                const content = readFileSync(skillMdPath, 'utf-8');
+                if (content.toLowerCase().includes(queryLower)) {
+                  results.push({
+                    source: 'skills',
+                    title: `Skill: ${skillName}/SKILL.md (${status})`,
+                    snippet: extractSnippet(content, queryLower),
+                    matchCount: countMatches(content, queryLower),
+                    path: skillMdPath,
+                  });
+                }
+              } catch {}
+            }
+          }
+        } catch {}
+      }
+    }
+
+    // 4. Search agents (name, description, SOUL.md)
+    if (requestedSources.includes('agents')) {
+      for (const [agentId, agentCfg] of Object.entries(agents)) {
+        const name = (agentCfg.name as string) || agentId;
+        const desc = (agentCfg.description as string) || '';
+        const combined = `${name} ${desc} ${agentId}`;
+
+        if (combined.toLowerCase().includes(queryLower)) {
+          results.push({
+            source: 'agents',
+            agentId,
+            title: `Agent: ${name}`,
+            snippet: desc || `Agent ID: ${agentId}`,
+            matchCount: countMatches(combined, queryLower),
+          });
+        }
+
+        // SOUL.md
+        const soulPath = join(searchHome, 'agents', agentId, 'SOUL.md');
+        if (existsSync(soulPath)) {
+          try {
+            const content = readFileSync(soulPath, 'utf-8');
+            if (content.toLowerCase().includes(queryLower)) {
+              results.push({
+                source: 'agents',
+                agentId,
+                title: `${agentId}/SOUL.md`,
+                snippet: extractSnippet(content, queryLower),
+                matchCount: countMatches(content, queryLower),
+                path: soulPath,
+              });
+            }
+          } catch {}
+        }
+      }
+    }
+
+    // 5. Search config
+    if (requestedSources.includes('config')) {
+      const configStr = JSON.stringify(config, null, 2);
+      if (configStr.toLowerCase().includes(queryLower)) {
+        results.push({
+          source: 'config',
+          title: 'config.json',
+          snippet: extractSnippet(configStr, queryLower),
+          matchCount: countMatches(configStr, queryLower),
+          path: join(searchHome, 'config.json'),
+        });
+      }
+    }
+
+    // Sort by match count descending
+    results.sort((a, b) => b.matchCount - a.matchCount);
+
+    return { results, totalResults: results.length, query };
   });
 
   // ── Admin dashboard ───────────────────────────────────────────

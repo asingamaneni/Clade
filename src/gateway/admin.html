@@ -721,6 +721,9 @@
       { id: 'skills',    label: 'Skills',      icon: '\u{1F4DA}' },
       { id: 'channels',  label: 'Channels',   icon: '\u{1F4E1}' },
       { id: 'cron',      label: 'Cron',       icon: '\u{23F0}'  },
+      { id: 'activity',  label: 'Activity',   icon: '\u{26A1}'  },
+      { id: 'calendar',  label: 'Calendar',   icon: '\u{1F4C5}' },
+      { id: 'search',    label: 'Search',     icon: '\u{1F50D}' },
       { id: 'config',    label: 'Config',     icon: '\u{2699}\u{FE0F}' },
     ];
 
@@ -2361,6 +2364,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
         { id: 'identity',  label: 'Identity' },
         { id: 'tools',     label: 'Tools' },
         { id: 'tools-md',  label: 'TOOLS.md' },
+        { id: 'user-md',   label: 'USER.md' },
         { id: 'memory',    label: 'Memory' },
         { id: 'heartbeat', label: 'Heartbeat' },
       ];
@@ -2424,6 +2428,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
             ${tab === 'identity'  && html`<${IdentityTab} agentId=${agent.id} />`}
             ${tab === 'tools'     && html`<${ToolsTab} agent=${agent} onRefresh=${onRefresh} />`}
             ${tab === 'tools-md'  && html`<${ToolsMdTab} agentId=${agent.id} refreshTick=${refreshTick} />`}
+            ${tab === 'user-md'   && html`<${UserMdTab} refreshTick=${refreshTick} />`}
             ${tab === 'memory'    && html`<${MemoryTab} agentId=${agent.id} refreshTick=${refreshTick} />`}
             ${tab === 'heartbeat' && html`<${HeartbeatTab} agentId=${agent.id} refreshTick=${refreshTick} />`}
           </div>
@@ -2642,6 +2647,123 @@ If nothing needs attention, respond with: HEARTBEAT_OK
                 <span class="text-xs" style="color:#484f58">${content.length} characters</span>
                 <button class="btn btn-primary" onClick=${save} disabled=${saving}>
                   ${saving ? 'Saving...' : 'Save TOOLS.md'}
+                </button>
+              </div>
+            </div>
+
+            <div style="min-width:160px">
+              <${VersionHistoryViewer}
+                entries=${history}
+                selectedDate=${selectedDate}
+                onSelect=${setSelectedDate}
+                onViewContent=${viewVersion}
+              />
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // ── USER.md Tab (global, shared across all agents) ──────────────
+
+    function UserMdTab({ refreshTick }) {
+      const [content, setContent] = useState('');
+      const [loading, setLoading] = useState(true);
+      const [saving, setSaving] = useState(false);
+      const [history, setHistory] = useState([]);
+      const [selectedDate, setSelectedDate] = useState(null);
+      const [viewingVersion, setViewingVersion] = useState(null);
+
+      const loadUserMd = () => {
+        setLoading(true);
+        Promise.all([
+          api('/user').catch(() => ({ content: '' })),
+          api('/user/history').catch(() => ({ entries: [] })),
+        ]).then(([userData, historyData]) => {
+          setContent(userData.content || '');
+          setHistory(historyData.entries || []);
+        }).finally(() => setLoading(false));
+      };
+
+      useEffect(() => { loadUserMd(); }, [refreshTick]);
+
+      const save = async () => {
+        setSaving(true);
+        try {
+          await api('/user', { method: 'PUT', body: { content } });
+          showToast('USER.md saved successfully', 'success');
+          api('/user/history').then(d => setHistory(d.entries || [])).catch(() => {});
+        } catch (e) { showToast('Save failed: ' + e.message, 'error'); }
+        setSaving(false);
+      };
+
+      const viewVersion = async (date) => {
+        try {
+          const d = await api('/user/history/' + date);
+          setViewingVersion({ date, content: d.content });
+        } catch (e) {
+          showToast('Failed to load version: ' + e.message, 'error');
+        }
+      };
+
+      const restoreVersion = () => {
+        if (viewingVersion) {
+          setContent(viewingVersion.content);
+          setViewingVersion(null);
+          setSelectedDate(null);
+          showToast('Version restored (not saved yet)', 'info');
+        }
+      };
+
+      if (loading) return html`<${LoadingState} text="Loading USER.md..." />`;
+
+      return html`
+        <div>
+          <div class="mb-4 p-3 rounded-lg" style="background:rgba(88,166,255,0.08);border:1px solid rgba(88,166,255,0.3)">
+            <div class="flex items-center gap-2 text-xs" style="color:#58a6ff">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              Global — shared across all agents
+            </div>
+          </div>
+
+          ${viewingVersion && html`
+            <div class="mb-4 p-4 rounded-lg" style="background:rgba(88,166,255,0.1);border:1px solid rgba(88,166,255,0.3)">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-sm font-medium" style="color:#58a6ff">Viewing version: ${viewingVersion.date}</span>
+                <div class="flex gap-2">
+                  <button
+                    class="text-xs px-3 py-1 rounded"
+                    style="background:#238636;color:#fff;border:none;cursor:pointer"
+                    onClick=${restoreVersion}
+                  >Restore this version</button>
+                  <button
+                    class="text-xs px-3 py-1 rounded"
+                    style="background:#21262d;color:#8b949e;border:1px solid #30363d;cursor:pointer"
+                    onClick=${() => { setViewingVersion(null); setSelectedDate(null); }}
+                  >Cancel</button>
+                </div>
+              </div>
+              <pre
+                class="p-3 rounded text-sm overflow-auto"
+                style="background:#0f1117;border:1px solid #30363d;color:#e6edf3;max-height:200px;white-space:pre-wrap;margin:0"
+              >${viewingVersion.content}</pre>
+            </div>
+          `}
+
+          <div class="flex gap-6">
+            <div class="flex-1">
+              <textarea
+                class="mono-editor w-full"
+                style="min-height:380px;max-height:70vh"
+                value=${content}
+                onInput=${e => setContent(e.target.value)}
+                placeholder="# USER.md - User-level instructions..."
+                spellcheck="false"
+              />
+              <div class="flex items-center justify-between mt-3">
+                <span class="text-xs" style="color:#484f58">${content.length} characters</span>
+                <button class="btn btn-primary" onClick=${save} disabled=${saving}>
+                  ${saving ? 'Saving...' : 'Save USER.md'}
                 </button>
               </div>
             </div>
@@ -4066,6 +4188,596 @@ If nothing needs attention, respond with: HEARTBEAT_OK
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    //  PAGE 10: Activity Feed
+    // ═══════════════════════════════════════════════════════════════════
+
+    const ACTIVITY_TYPES = [
+      { id: 'all',        label: 'All' },
+      { id: 'chat',       label: 'Chat',       color: '#58a6ff', icon: '\u{1F4AC}' },
+      { id: 'skill',      label: 'Skill',      color: '#bc8cff', icon: '\u{1F4DA}' },
+      { id: 'mcp',        label: 'MCP',        color: '#3fb950', icon: '\u{1F9E9}' },
+      { id: 'reflection', label: 'Reflection', color: '#d29922', icon: '\u{1F4AD}' },
+      { id: 'agent',      label: 'Agent',      color: '#39d2c0', icon: '\u{1F916}' },
+    ];
+
+    function timeAgo(dateStr) {
+      if (!dateStr) return '';
+      const now = Date.now();
+      const then = new Date(dateStr).getTime();
+      const diff = Math.max(0, now - then);
+      const secs = Math.floor(diff / 1000);
+      if (secs < 60) return 'just now';
+      const mins = Math.floor(secs / 60);
+      if (mins < 60) return mins + (mins === 1 ? ' minute ago' : ' minutes ago');
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24) return hrs + (hrs === 1 ? ' hour ago' : ' hours ago');
+      const days = Math.floor(hrs / 24);
+      return days + (days === 1 ? ' day ago' : ' days ago');
+    }
+
+    function ActivityPage({ agents, wsRef }) {
+      const [events, setEvents] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [filter, setFilter] = useState('all');
+      const [agentFilter, setAgentFilter] = useState('all');
+      const [offset, setOffset] = useState(0);
+      const [hasMore, setHasMore] = useState(true);
+      const [loadingMore, setLoadingMore] = useState(false);
+
+      const loadEvents = () => {
+        setLoading(true);
+        api('/activity?limit=50&offset=0')
+          .then(d => {
+            setEvents(d.events || []);
+            setOffset(d.events ? d.events.length : 0);
+            setHasMore(d.hasMore !== false);
+          })
+          .catch(() => setEvents([]))
+          .finally(() => setLoading(false));
+      };
+
+      useEffect(() => { loadEvents(); }, []);
+
+      // Listen for real-time activity events via WebSocket
+      useEffect(() => {
+        const ws = wsRef && wsRef.current;
+        if (!ws) return;
+        const handler = (e) => {
+          try {
+            const msg = JSON.parse(e.data);
+            if (msg.type === 'activity:new' && msg.event) {
+              setEvents(prev => [msg.event, ...prev]);
+            }
+          } catch (_) {}
+        };
+        ws.addEventListener('message', handler);
+        return () => ws.removeEventListener('message', handler);
+      }, [wsRef]);
+
+      const loadMore = () => {
+        setLoadingMore(true);
+        api('/activity?limit=50&offset=' + offset)
+          .then(d => {
+            const more = d.events || [];
+            setEvents(prev => [...prev, ...more]);
+            setOffset(prev => prev + more.length);
+            setHasMore(d.hasMore !== false && more.length > 0);
+          })
+          .catch(() => {})
+          .finally(() => setLoadingMore(false));
+      };
+
+      const filtered = events.filter(ev => {
+        if (filter !== 'all' && ev.type !== filter) return false;
+        if (agentFilter !== 'all' && ev.agentId !== agentFilter) return false;
+        return true;
+      });
+
+      const typeColor = (type) => {
+        const t = ACTIVITY_TYPES.find(a => a.id === type);
+        return t ? t.color : '#8b949e';
+      };
+
+      const typeIcon = (type) => {
+        const t = ACTIVITY_TYPES.find(a => a.id === type);
+        return t ? t.icon : '\u{26A1}';
+      };
+
+      if (loading) return html\`<div class="page-enter p-6"><\${LoadingState} text="Loading activity..." /></div>\`;
+
+      return html\`
+        <div class="page-enter p-6">
+          <div class="flex items-center justify-between mb-5">
+            <div>
+              <h2 class="text-xl font-semibold" style="color:#e6edf3">Activity</h2>
+              <p class="text-xs mt-1" style="color:#484f58">Real-time activity feed across all agents</p>
+            </div>
+            <button class="btn btn-secondary" onClick=\${loadEvents}>Refresh</button>
+          </div>
+
+          <!-- Filter bar -->
+          <div class="flex items-center gap-3 mb-5 flex-wrap">
+            <div class="flex gap-1.5">
+              \${ACTIVITY_TYPES.map(t => html\`
+                <button
+                  key=\${t.id}
+                  class="px-3 py-1.5 rounded-full text-xs font-medium transition-all cursor-pointer"
+                  style=\${{
+                    background: filter === t.id ? (t.color ? t.color + '26' : 'rgba(88,166,255,0.15)') : '#21262d',
+                    color: filter === t.id ? (t.color || '#58a6ff') : '#8b949e',
+                    border: '1px solid ' + (filter === t.id ? (t.color ? t.color + '66' : 'rgba(88,166,255,0.4)') : '#30363d'),
+                  }}
+                  onClick=\${() => setFilter(t.id)}
+                >\${t.label}</button>
+              \`)}
+            </div>
+            <select
+              style="width:auto;padding:6px 12px;font-size:13px;border-radius:9999px"
+              value=\${agentFilter}
+              onChange=\${e => setAgentFilter(e.target.value)}
+            >
+              <option value="all">All agents</option>
+              \${agents.map(a => html\`<option key=\${a.id} value=\${a.id}>\${a.name || a.id}</option>\`)}
+            </select>
+          </div>
+
+          <!-- Events list -->
+          \${filtered.length === 0
+            ? html\`<\${EmptyState} icon="\u{26A1}" title="No activity yet" subtitle="Events will appear as agents work" />\`
+            : html\`
+              <div class="space-y-2">
+                \${filtered.map((ev, i) => html\`
+                  <div key=\${ev.id || i} class="flex gap-3 rounded-lg p-3 transition-colors" style="background:#1c2128;border:1px solid #30363d;border-left:3px solid \${typeColor(ev.type)}">
+                    <div class="text-lg flex-shrink-0 mt-0.5" style="width:28px;text-align:center">\${typeIcon(ev.type)}</div>
+                    <div class="flex-1 min-w-0">
+                      <div class="flex items-center gap-2 mb-0.5">
+                        <span class="text-sm font-medium" style="color:#e6edf3">\${ev.agentName || ev.agentId || 'System'}</span>
+                        <span class="badge badge-gray" style="font-size:11px">\${ev.type}</span>
+                      </div>
+                      <div class="text-sm" style="color:#8b949e">\${ev.description || ev.message || ''}</div>
+                    </div>
+                    <div class="text-xs flex-shrink-0 mt-1" style="color:#484f58;white-space:nowrap">\${timeAgo(ev.timestamp)}</div>
+                  </div>
+                \`)}
+              </div>
+              \${hasMore && html\`
+                <div class="flex justify-center mt-4">
+                  <button class="btn btn-secondary" onClick=\${loadMore} disabled=\${loadingMore}>
+                    \${loadingMore ? html\`<\${Spinner} size=\${14} /> Loading...\` : 'Load more'}
+                  </button>
+                </div>
+              \`}
+            \`
+          }
+        </div>
+      \`;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  PAGE 11: Calendar
+    // ═══════════════════════════════════════════════════════════════════
+
+    const AGENT_COLORS = ['#58a6ff','#3fb950','#bc8cff','#d29922','#f85149','#39d2c0','#f0883e','#db61a2'];
+    const HOUR_START = 6;
+    const HOUR_END = 23;
+
+    function CalendarPage({ agents }) {
+      const [weekStart, setWeekStart] = useState(() => {
+        const now = new Date();
+        const day = now.getDay();
+        const mon = new Date(now);
+        mon.setDate(now.getDate() - ((day + 6) % 7));
+        mon.setHours(0, 0, 0, 0);
+        return mon;
+      });
+      const [events, setEvents] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [viewMode, setViewMode] = useState('week');
+      const [popover, setPopover] = useState(null);
+
+      const agentColorMap = useMemo(() => {
+        const map = {};
+        agents.forEach((a, i) => { map[a.id] = AGENT_COLORS[i % AGENT_COLORS.length]; });
+        return map;
+      }, [agents]);
+
+      const weekEnd = useMemo(() => {
+        const end = new Date(weekStart);
+        end.setDate(end.getDate() + 7);
+        return end;
+      }, [weekStart]);
+
+      const days = useMemo(() => {
+        const arr = [];
+        for (let i = 0; i < 7; i++) {
+          const d = new Date(weekStart);
+          d.setDate(d.getDate() + i);
+          arr.push(d);
+        }
+        return arr;
+      }, [weekStart]);
+
+      const hours = useMemo(() => {
+        const arr = [];
+        for (let h = HOUR_START; h <= HOUR_END; h++) arr.push(h);
+        return arr;
+      }, []);
+
+      const loadEvents = () => {
+        setLoading(true);
+        const start = weekStart.toISOString();
+        const end = weekEnd.toISOString();
+        api('/calendar/events?start=' + encodeURIComponent(start) + '&end=' + encodeURIComponent(end))
+          .then(d => setEvents(d.events || []))
+          .catch(() => setEvents([]))
+          .finally(() => setLoading(false));
+      };
+
+      useEffect(() => { loadEvents(); }, [weekStart]);
+
+      const prevWeek = () => {
+        const d = new Date(weekStart);
+        d.setDate(d.getDate() - 7);
+        setWeekStart(d);
+      };
+
+      const nextWeek = () => {
+        const d = new Date(weekStart);
+        d.setDate(d.getDate() + 7);
+        setWeekStart(d);
+      };
+
+      const goToday = () => {
+        const now = new Date();
+        const day = now.getDay();
+        const mon = new Date(now);
+        mon.setDate(now.getDate() - ((day + 6) % 7));
+        mon.setHours(0, 0, 0, 0);
+        setWeekStart(mon);
+      };
+
+      const fmtWeekRange = () => {
+        const endDay = new Date(weekStart);
+        endDay.setDate(endDay.getDate() + 6);
+        const opts = { month: 'short', day: 'numeric' };
+        const s = weekStart.toLocaleDateString('en-US', opts);
+        const e = endDay.toLocaleDateString('en-US', { ...opts, year: 'numeric' });
+        return s + ' - ' + e;
+      };
+
+      const isToday = (d) => {
+        const now = new Date();
+        return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+      };
+
+      const dayName = (d) => d.toLocaleDateString('en-US', { weekday: 'short' });
+      const dayNum = (d) => d.getDate();
+
+      const getEventsForDayHour = (day, hour) => {
+        return events.filter(ev => {
+          const evStart = new Date(ev.start);
+          return evStart.getFullYear() === day.getFullYear()
+            && evStart.getMonth() === day.getMonth()
+            && evStart.getDate() === day.getDate()
+            && evStart.getHours() === hour;
+        });
+      };
+
+      const fmtTime = (dateStr) => {
+        const d = new Date(dateStr);
+        return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      };
+
+      return html\`
+        <div class="page-enter p-6">
+          <div class="flex items-center justify-between mb-5">
+            <div>
+              <h2 class="text-xl font-semibold" style="color:#e6edf3">Calendar</h2>
+              <p class="text-xs mt-1" style="color:#484f58">Agent activity and scheduled events</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="flex rounded-lg overflow-hidden" style="border:1px solid #30363d">
+                <button
+                  class="px-3 py-1.5 text-xs font-medium cursor-pointer"
+                  style=\${{ background: viewMode === 'week' ? 'rgba(88,166,255,0.15)' : '#21262d', color: viewMode === 'week' ? '#58a6ff' : '#8b949e', border: 'none' }}
+                  onClick=\${() => setViewMode('week')}
+                >Week</button>
+                <button
+                  class="px-3 py-1.5 text-xs font-medium cursor-pointer"
+                  style=\${{ background: viewMode === 'day' ? 'rgba(88,166,255,0.15)' : '#21262d', color: viewMode === 'day' ? '#58a6ff' : '#8b949e', border: 'none', borderLeft: '1px solid #30363d' }}
+                  onClick=\${() => setViewMode('day')}
+                >Day</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Week navigation -->
+          <div class="flex items-center justify-between mb-4 rounded-lg p-3" style="background:#1c2128;border:1px solid #30363d">
+            <button class="btn btn-secondary" style="padding:6px 12px;font-size:13px" onClick=\${prevWeek}>\u{276E} Prev</button>
+            <div class="flex items-center gap-3">
+              <span class="text-sm font-semibold" style="color:#e6edf3">\${fmtWeekRange()}</span>
+              <button class="px-2.5 py-1 rounded text-xs font-medium cursor-pointer" style="background:rgba(88,166,255,0.1);color:#58a6ff;border:1px solid rgba(88,166,255,0.3)" onClick=\${goToday}>Today</button>
+            </div>
+            <button class="btn btn-secondary" style="padding:6px 12px;font-size:13px" onClick=\${nextWeek}>Next \u{276F}</button>
+          </div>
+
+          <!-- Agent legend -->
+          \${agents.length > 0 && html\`
+            <div class="flex items-center gap-3 mb-4 flex-wrap">
+              \${agents.map(a => html\`
+                <div key=\${a.id} class="flex items-center gap-1.5 text-xs" style="color:#8b949e">
+                  <span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:\${agentColorMap[a.id] || '#8b949e'}"></span>
+                  \${a.name || a.id}
+                </div>
+              \`)}
+            </div>
+          \`}
+
+          \${loading ? html\`<\${LoadingState} text="Loading events..." />\` : html\`
+            <!-- Calendar grid -->
+            <div class="rounded-lg overflow-hidden" style="border:1px solid #30363d">
+              <!-- Day headers -->
+              <div class="grid" style="grid-template-columns:60px repeat(\${viewMode === 'day' ? 1 : 7},1fr)">
+                <div style="background:#161b22;border-bottom:1px solid #30363d;border-right:1px solid #30363d;padding:8px" />
+                \${(viewMode === 'day' ? [days.find(d => isToday(d)) || days[0]] : days).map(d => html\`
+                  <div
+                    key=\${d.toISOString()}
+                    class="text-center py-2"
+                    style=\${{ background: '#161b22', borderBottom: '1px solid #30363d', borderRight: '1px solid #30363d' }}
+                  >
+                    <div class="text-xs font-medium" style="color:#8b949e">\${dayName(d)}</div>
+                    <div
+                      class="text-sm font-bold mt-0.5 mx-auto flex items-center justify-center"
+                      style=\${{
+                        color: isToday(d) ? '#fff' : '#e6edf3',
+                        background: isToday(d) ? '#58a6ff' : 'transparent',
+                        width: '28px',
+                        height: '28px',
+                        borderRadius: '50%',
+                      }}
+                    >\${dayNum(d)}</div>
+                  </div>
+                \`)}
+              </div>
+
+              <!-- Hour rows -->
+              <div style="max-height:600px;overflow-y:auto">
+                \${hours.map(hour => html\`
+                  <div key=\${hour} class="grid" style="grid-template-columns:60px repeat(\${viewMode === 'day' ? 1 : 7},1fr);min-height:48px">
+                    <div class="text-right pr-2 py-1 text-xs" style="color:#484f58;background:#161b22;border-right:1px solid #30363d;border-bottom:1px solid #1c2128">
+                      \${hour === 0 ? '12 AM' : hour < 12 ? hour + ' AM' : hour === 12 ? '12 PM' : (hour - 12) + ' PM'}
+                    </div>
+                    \${(viewMode === 'day' ? [days.find(d => isToday(d)) || days[0]] : days).map(d => {
+                      const cellEvents = getEventsForDayHour(d, hour);
+                      return html\`
+                        <div
+                          key=\${d.toISOString() + '-' + hour}
+                          class="relative"
+                          style="border-right:1px solid #1c2128;border-bottom:1px solid #1c2128;min-height:48px;padding:2px"
+                        >
+                          \${cellEvents.map(ev => html\`
+                            <div
+                              key=\${ev.id}
+                              class="rounded px-1.5 py-0.5 text-xs mb-0.5 cursor-pointer truncate transition-opacity"
+                              style=\${{
+                                background: (agentColorMap[ev.agentId] || '#8b949e') + '26',
+                                color: agentColorMap[ev.agentId] || '#8b949e',
+                                borderLeft: '2px solid ' + (agentColorMap[ev.agentId] || '#8b949e'),
+                              }}
+                              onClick=\${(e) => {
+                                e.stopPropagation();
+                                setPopover(popover && popover.id === ev.id ? null : { ...ev, x: e.clientX, y: e.clientY });
+                              }}
+                              title=\${ev.title || ev.description || ''}
+                            >\${ev.title || ev.description || 'Event'}</div>
+                          \`)}
+                        </div>
+                      \`;
+                    })}
+                  </div>
+                \`)}
+              </div>
+            </div>
+          \`}
+
+          <!-- Popover -->
+          \${popover && html\`
+            <div
+              class="fixed z-50 rounded-lg p-4 shadow-xl"
+              style=\${{
+                background: '#1c2128',
+                border: '1px solid #30363d',
+                left: Math.min(popover.x, window.innerWidth - 300) + 'px',
+                top: Math.min(popover.y + 10, window.innerHeight - 200) + 'px',
+                minWidth: '260px',
+                maxWidth: '340px',
+              }}
+            >
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-sm font-semibold" style="color:#e6edf3">\${popover.title || 'Event'}</span>
+                <button
+                  class="text-xs cursor-pointer"
+                  style="background:transparent;border:none;color:#8b949e;padding:2px 6px"
+                  onClick=\${() => setPopover(null)}
+                >\u{2715}</button>
+              </div>
+              <div class="text-xs space-y-1" style="color:#8b949e">
+                \${popover.agentId && html\`<div>Agent: <span style="color:#e6edf3">\${popover.agentName || popover.agentId}</span></div>\`}
+                \${popover.start && html\`<div>Start: <span style="color:#e6edf3">\${fmtTime(popover.start)}</span></div>\`}
+                \${popover.end && html\`<div>End: <span style="color:#e6edf3">\${fmtTime(popover.end)}</span></div>\`}
+                \${popover.type && html\`<div>Type: <span class="badge badge-blue" style="font-size:11px">\${popover.type}</span></div>\`}
+                \${popover.description && html\`<div class="mt-2 pt-2" style="border-top:1px solid #30363d;color:#e6edf3">\${popover.description}</div>\`}
+              </div>
+            </div>
+          \`}
+        </div>
+      \`;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  PAGE 12: Global Search
+    // ═══════════════════════════════════════════════════════════════════
+
+    const SEARCH_SOURCES = [
+      { id: 'memories',      label: 'Memories',      color: '#d29922' },
+      { id: 'conversations', label: 'Conversations', color: '#58a6ff' },
+      { id: 'skills',        label: 'Skills',        color: '#bc8cff' },
+      { id: 'agents',        label: 'Agents',        color: '#3fb950' },
+      { id: 'config',        label: 'Config',        color: '#8b949e' },
+    ];
+
+    function SearchPage({ onNavigate }) {
+      const [query, setQuery] = useState('');
+      const [results, setResults] = useState(null);
+      const [loading, setLoading] = useState(false);
+      const [sources, setSources] = useState(() => {
+        const m = {};
+        SEARCH_SOURCES.forEach(s => { m[s.id] = true; });
+        return m;
+      });
+      const timerRef = useRef(null);
+
+      const doSearch = useCallback((q) => {
+        if (!q.trim()) { setResults(null); return; }
+        setLoading(true);
+        const enabledSources = Object.entries(sources).filter(([, v]) => v).map(([k]) => k);
+        api('/search', { method: 'POST', body: { query: q, sources: enabledSources } })
+          .then(d => setResults(d))
+          .catch(() => setResults({ groups: [] }))
+          .finally(() => setLoading(false));
+      }, [sources]);
+
+      const handleInput = (e) => {
+        const v = e.target.value;
+        setQuery(v);
+        clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(() => doSearch(v), 300);
+      };
+
+      const toggleSource = (id) => {
+        setSources(prev => ({ ...prev, [id]: !prev[id] }));
+      };
+
+      // Re-search when sources change (if there's a query)
+      useEffect(() => {
+        if (query.trim()) {
+          clearTimeout(timerRef.current);
+          timerRef.current = setTimeout(() => doSearch(query), 300);
+        }
+      }, [sources]);
+
+      const totalResults = results ? (results.groups || []).reduce((sum, g) => sum + (g.results || []).length, 0) : 0;
+
+      const sourceColor = (id) => {
+        const s = SEARCH_SOURCES.find(x => x.id === id);
+        return s ? s.color : '#8b949e';
+      };
+
+      const handleResultClick = (result) => {
+        if (!onNavigate) return;
+        if (result.source === 'agents') onNavigate('agents');
+        else if (result.source === 'conversations') onNavigate('chat');
+        else if (result.source === 'skills') onNavigate('skills');
+        else if (result.source === 'config') onNavigate('config');
+      };
+
+      return html\`
+        <div class="page-enter p-6">
+          <div class="mb-6">
+            <h2 class="text-xl font-semibold" style="color:#e6edf3">Search</h2>
+            <p class="text-xs mt-1" style="color:#484f58">Search across all agents, memories, conversations, and skills</p>
+          </div>
+
+          <!-- Search input -->
+          <div class="relative mb-5">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-base" style="color:#484f58;pointer-events:none">\u{1F50D}</span>
+            <input
+              type="text"
+              class="w-full"
+              style="padding:12px 16px 12px 40px;font-size:16px;border-radius:10px"
+              placeholder="Search agents, memories, conversations, skills..."
+              value=\${query}
+              onInput=\${handleInput}
+              autofocus
+            />
+            \${loading && html\`<span class="absolute right-3 top-1/2 -translate-y-1/2"><\${Spinner} size=\${16} /></span>\`}
+          </div>
+
+          <!-- Source filters -->
+          <div class="flex items-center gap-3 mb-5 flex-wrap">
+            <span class="text-xs font-medium" style="color:#484f58">Sources:</span>
+            \${SEARCH_SOURCES.map(s => html\`
+              <label key=\${s.id} class="flex items-center gap-1.5 cursor-pointer text-xs" style="color:\${sources[s.id] ? s.color : '#484f58'}">
+                <input
+                  type="checkbox"
+                  checked=\${sources[s.id]}
+                  onChange=\${() => toggleSource(s.id)}
+                  style="accent-color:\${s.color}"
+                />
+                \${s.label}
+              </label>
+            \`)}
+          </div>
+
+          <!-- Results -->
+          \${!results && !loading && html\`
+            <\${EmptyState}
+              icon="\u{1F50D}"
+              title="Search across all your data"
+              subtitle="Find agents, memories, conversations, skills, and configuration"
+            />
+          \`}
+
+          \${results && totalResults === 0 && !loading && html\`
+            <\${EmptyState}
+              icon="\u{1F50E}"
+              title="No results found"
+              subtitle=\${'No matches for "' + query + '"'}
+            />
+          \`}
+
+          \${results && totalResults > 0 && html\`
+            <div class="text-xs mb-4" style="color:#484f58">\${totalResults} result\${totalResults !== 1 ? 's' : ''} found</div>
+            <div class="space-y-6">
+              \${(results.groups || []).filter(g => g.results && g.results.length > 0).map(group => html\`
+                <div key=\${group.source}>
+                  <div class="flex items-center gap-2 mb-2">
+                    <span class="text-sm font-semibold" style="color:\${sourceColor(group.source)}">\${group.label || group.source}</span>
+                    <span class="text-xs px-1.5 rounded" style="background:#282e36;color:#8b949e">\${group.results.length}</span>
+                  </div>
+                  <div class="space-y-1.5">
+                    \${group.results.map((r, i) => html\`
+                      <div
+                        key=\${i}
+                        class="flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors"
+                        style="background:#1c2128;border:1px solid #30363d"
+                        onClick=\${() => handleResultClick(r)}
+                        onMouseEnter=\${(e) => e.currentTarget.style.borderColor = '#484f58'}
+                        onMouseLeave=\${(e) => e.currentTarget.style.borderColor = '#30363d'}
+                      >
+                        <span
+                          class="badge mt-0.5 flex-shrink-0"
+                          style=\${{ background: sourceColor(group.source) + '26', color: sourceColor(group.source), fontSize: '11px' }}
+                        >\${group.source}</span>
+                        <div class="flex-1 min-w-0">
+                          <div class="text-sm font-medium truncate" style="color:#e6edf3">\${r.title || 'Untitled'}</div>
+                          \${r.snippet && html\`<div class="text-xs mt-1 line-clamp-2" style="color:#8b949e;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">\${r.snippet}</div>\`}
+                        </div>
+                        \${r.agentName && html\`
+                          <span class="text-xs flex-shrink-0 mt-0.5" style="color:#484f58">\${r.agentName}</span>
+                        \`}
+                      </div>
+                    \`)}
+                  </div>
+                </div>
+              \`)}
+            </div>
+          \`}
+        </div>
+      \`;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     // App Root
     // ═══════════════════════════════════════════════════════════════════
 
@@ -4189,6 +4901,12 @@ If nothing needs attention, respond with: HEARTBEAT_OK
             return html`<${ChannelsPage} channels=${channels} onRefresh=${fetchChannels} />`;
           case 'cron':
             return html`<${CronPage} cronJobs=${cronJobs} agents=${agents} onRefresh=${() => { fetchCron(); fetchAgents(); }} />`;
+          case 'activity':
+            return html`<${ActivityPage} agents=${agents} wsRef=${wsRef} />`;
+          case 'calendar':
+            return html`<${CalendarPage} agents=${agents} />`;
+          case 'search':
+            return html`<${SearchPage} onNavigate=${setPage} />`;
           case 'config':
             return html`<${ConfigPage} />`;
           default:

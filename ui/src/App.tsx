@@ -16,6 +16,9 @@ import { CronPage } from '@/pages/cron'
 import { ConfigPage } from '@/pages/config'
 import { UserProfilePage } from '@/pages/user'
 import { WelcomePage, OnboardingPage } from '@/pages/welcome'
+import { ActivityPage } from '@/pages/activity'
+import { CalendarPage } from '@/pages/calendar'
+import { SearchPage } from '@/pages/search'
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -296,6 +299,12 @@ export default function App() {
             onRefresh={() => { fetchCron(); fetchAgents() }}
           />
         )
+      case 'activity':
+        return <ActivityPage agents={agents} wsRef={wsRef} />
+      case 'calendar':
+        return <CalendarPage agents={agents} />
+      case 'search':
+        return <SearchPage onNavigate={setPage} />
       case 'config':
         return <ConfigPage />
       default:
