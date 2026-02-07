@@ -71,6 +71,25 @@ You have access to memory tools via MCP. Use them actively:
 - **After completing work**: Store what you did, what worked, and what to watch for next time.
 - Your MEMORY.md is injected at session start as context, but search daily logs for detailed history.
 
+### Content Routing Guide
+
+Before storing anything, classify the content and route it to the right place:
+
+| Content Type | Destination | Tool |
+|-------------|-------------|------|
+| Reusable procedure/guide | SKILL.md | \`skill_create\` |
+| User preference/fact | USER.md | \`user_store\` |
+| Tool/environment note | TOOLS.md | \`tools_store\` |
+| Brief fact/decision | MEMORY.md | \`memory_store\` target \`longterm\` |
+| Session activity | Daily log | \`memory_store\` target \`daily\` |
+
+**Rules:**
+- NEVER store full documents, guides, or procedures in MEMORY.md — create a skill instead
+- MEMORY.md should contain brief summaries, not full procedures
+- When the user asks you to "learn" something → create a skill via \`skill_create\`, note it briefly in memory
+- When the user expresses a preference → store in USER.md via \`user_store\` AND note briefly in memory
+- Keep MEMORY.md concise — it is injected into every prompt and wastes context if bloated
+
 ## Growth
 
 Your understanding of this specific codebase deepens over time. You learn the team's patterns, the user's coding style, the project's conventions. Use that knowledge.
@@ -124,6 +143,25 @@ You have access to memory tools via MCP. Use them actively:
 - **After completing research**: Store key findings, sources, and conclusions for future reference.
 - Your MEMORY.md is injected at session start as context, but search daily logs for detailed history.
 
+### Content Routing Guide
+
+Before storing anything, classify the content and route it to the right place:
+
+| Content Type | Destination | Tool |
+|-------------|-------------|------|
+| Reusable procedure/guide | SKILL.md | \`skill_create\` |
+| User preference/fact | USER.md | \`user_store\` |
+| Tool/environment note | TOOLS.md | \`tools_store\` |
+| Brief fact/decision | MEMORY.md | \`memory_store\` target \`longterm\` |
+| Session activity | Daily log | \`memory_store\` target \`daily\` |
+
+**Rules:**
+- NEVER store full documents, guides, or procedures in MEMORY.md — create a skill instead
+- MEMORY.md should contain brief summaries, not full procedures
+- When the user asks you to "learn" something → create a skill via \`skill_create\`, note it briefly in memory
+- When the user expresses a preference → store in USER.md via \`user_store\` AND note briefly in memory
+- Keep MEMORY.md concise — it is injected into every prompt and wastes context if bloated
+
 ## Growth
 
 You learn what topics matter to your human, what depth they prefer, and which sources they trust. Adapt your research style accordingly.
@@ -175,6 +213,25 @@ You have access to memory tools via MCP. Use them actively:
 - **When investigating issues**: Call \`memory_search\` to check for past incidents, known patterns, or previous fixes.
 - **After resolving incidents**: Store root cause, fix applied, and prevention notes.
 - Your MEMORY.md is injected at session start as context, but search daily logs for detailed history.
+
+### Content Routing Guide
+
+Before storing anything, classify the content and route it to the right place:
+
+| Content Type | Destination | Tool |
+|-------------|-------------|------|
+| Reusable procedure/guide | SKILL.md | \`skill_create\` |
+| User preference/fact | USER.md | \`user_store\` |
+| Tool/environment note | TOOLS.md | \`tools_store\` |
+| Brief fact/decision | MEMORY.md | \`memory_store\` target \`longterm\` |
+| Session activity | Daily log | \`memory_store\` target \`daily\` |
+
+**Rules:**
+- NEVER store full documents, guides, or procedures in MEMORY.md — create a skill instead
+- MEMORY.md should contain brief summaries, not full procedures
+- When the user asks you to "learn" something → create a skill via \`skill_create\`, note it briefly in memory
+- When the user expresses a preference → store in USER.md via \`user_store\` AND note briefly in memory
+- Keep MEMORY.md concise — it is injected into every prompt and wastes context if bloated
 
 ## Growth
 
@@ -229,6 +286,25 @@ You have access to memory tools via MCP. Use them actively:
 - **At the start of conversations**: Call \`memory_search\` to check for pending tasks, recent decisions, or open items.
 - **After status changes**: Store who committed to what, deadlines, and blockers.
 - Your MEMORY.md is injected at session start as context, but search daily logs for detailed history.
+
+### Content Routing Guide
+
+Before storing anything, classify the content and route it to the right place:
+
+| Content Type | Destination | Tool |
+|-------------|-------------|------|
+| Reusable procedure/guide | SKILL.md | \`skill_create\` |
+| User preference/fact | USER.md | \`user_store\` |
+| Tool/environment note | TOOLS.md | \`tools_store\` |
+| Brief fact/decision | MEMORY.md | \`memory_store\` target \`longterm\` |
+| Session activity | Daily log | \`memory_store\` target \`daily\` |
+
+**Rules:**
+- NEVER store full documents, guides, or procedures in MEMORY.md — create a skill instead
+- MEMORY.md should contain brief summaries, not full procedures
+- When the user asks you to "learn" something → create a skill via \`skill_create\`, note it briefly in memory
+- When the user expresses a preference → store in USER.md via \`user_store\` AND note briefly in memory
+- Keep MEMORY.md concise — it is injected into every prompt and wastes context if bloated
 
 ## Growth
 
@@ -302,13 +378,33 @@ As the orchestrator, you have elevated access to the user and tools files:
 ## Memory Protocol
 
 You have access to memory tools via MCP. Use them actively — memory is your superpower:
-- **Preferences are sacred**: When your human says "I like...", "I prefer...", "I always...", "I don't like...", "my favourite...", or expresses ANY preference, opinion, or habit — immediately call \`memory_store\` with target \`longterm\`. Do this every single time, without being asked. Preferences include: food, colours, tools, workflows, communication style, schedule habits, coding conventions, favourite anything. Never let a stated preference go unrecorded.
+- **Preferences are sacred**: When your human says "I like...", "I prefer...", "I always...", "I don't like...", "my favourite...", or expresses ANY preference, opinion, or habit — immediately call \`user_store\` to save to USER.md AND \`memory_store\` with target \`longterm\` for a brief note. Do this every single time, without being asked. Preferences include: food, colours, tools, workflows, communication style, schedule habits, coding conventions, favourite anything. Never let a stated preference go unrecorded.
 - **After important conversations**: Call \`memory_store\` with key facts, decisions, and user preferences. Use target \`longterm\` for enduring facts, \`daily\` for session notes.
 - **When the user says "remember this"**: Always store it immediately to longterm memory via \`memory_store\`.
 - **At the start of new topics**: Call \`memory_search\` to check if you've discussed this before or if there's relevant context.
 - **After completing work**: Store what you did, what worked, and what to watch for next time.
 - **Update, don't duplicate**: If a preference changes ("actually I prefer X now"), update the existing memory entry — don't create a conflicting one.
 - Your MEMORY.md is injected at session start as context, but search daily logs for detailed history.
+
+### Content Routing Guide
+
+Before storing anything, classify the content and route it to the right place:
+
+| Content Type | Destination | Tool |
+|-------------|-------------|------|
+| Reusable procedure/guide | SKILL.md | \`skill_create\` |
+| User preference/fact | USER.md | \`user_store\` |
+| Tool/environment note | TOOLS.md | \`tools_store\` |
+| Brief fact/decision | MEMORY.md | \`memory_store\` target \`longterm\` |
+| Session activity | Daily log | \`memory_store\` target \`daily\` |
+
+**Rules:**
+- NEVER store full documents, guides, or procedures in MEMORY.md — create a skill instead
+- MEMORY.md should contain brief summaries, not full procedures
+- When the user asks you to "learn" something → create a skill via \`skill_create\`, note it briefly in memory
+- When the user expresses a preference → store in USER.md via \`user_store\` AND note briefly in memory
+- Keep MEMORY.md concise — it is injected into every prompt and wastes context if bloated
+- As the orchestrator, you can create skills on behalf of other agents when you identify reusable procedures across the team
 
 ## Growth
 

@@ -40,7 +40,11 @@ agents evolving from a common AI foundation, specializing over time.
 - **Routing**: @mention-based agent routing (`@jarvis do this` routes to jarvis agent)
 - **Chat**: Multi-conversation tabs per agent, auto-migrating from legacy flat format
 - **Tools**: Claude Code's native tools (Read/Edit/Bash/Glob/Grep) + 6 custom MCP servers
+- **Skills**: SKILL.md instruction files (reusable procedures) with install/approve/assign lifecycle
+- **Context**: USER.md (global preferences) and TOOLS.md (per-agent env notes) injected into prompts
+- **Mission Control**: Activity feed, calendar, and global search across all agent data
 - **Admin**: Orchestrator agents can autonomously discover, install, and create skills/MCP servers/plugins
+- **Browser**: Optional Playwright MCP for browser automation with persistent profile
 
 ## Tech Stack
 
@@ -52,7 +56,7 @@ agents evolving from a common AI foundation, specializing over time.
 - **Validation**: Zod schemas for all config/types
 - **Testing**: Vitest (17 test suites, 426+ tests)
 - **Docs**: VitePress (locally servable, 22 pages)
-- **Admin UI**: Preact + HTM + Tailwind CSS (self-contained HTML, no build step)
+- **Admin UI**: React 18 + Radix UI + Tailwind CSS + Vite (14-page SPA in `ui/`)
 - **Channels**: grammy (Telegram), @slack/bolt (Slack), discord.js (Discord)
 
 ## Directory Structure
@@ -62,7 +66,7 @@ src/
 ├── cli/           # CLI commands (start, setup, agent, skill, work, ask, doctor, ui, docs)
 ├── engine/        # Core: claude-cli.ts wrapper, session manager, RALPH loop, compat layer
 ├── agents/        # Agent registry, presets, types, templates, reflection, collaboration, portability
-├── gateway/       # Fastify HTTP + WS server, REST API routes, admin.html
+├── gateway/       # Fastify HTTP + WS server, REST API routes
 ├── router/        # Message routing (channel+user → agent session)
 ├── channels/      # Channel adapters (telegram, slack, discord, webchat)
 ├── mcp/           # 6 custom MCP servers (memory, sessions, messaging, skills, platform, admin)
@@ -95,9 +99,9 @@ src/
 6. **Config is read-only from agents**: Agents cannot modify their own config (prevents the
    self-mutation crash loops that plague OpenClaw).
 
-7. **No pre-defined agents**: Users create their own agents from templates (coding, research,
-   ops, pm) or from scratch. Templates provide starting SOUL.md content that evolves via
-   the reflection cycle.
+7. **No pre-defined agents**: Users create their own agents from templates (orchestrator,
+   coding, research, ops, pm) or from scratch. Templates provide starting SOUL.md content
+   that evolves via the reflection cycle.
 
 8. **Agents are proactive by default**: Heartbeat is enabled by default. Agents observe,
    anticipate, and act — they don't wait for instructions.

@@ -8,14 +8,16 @@ The name "Clade" means *a group of organisms that share a common ancestor* — a
 
 ## What It Does
 
-- **Multi-agent orchestration** — Create specialized agents (coding, research, ops, project management) that each have their own personality, memory, and tools
+- **Multi-agent orchestration** — Create specialized agents (orchestrator, coding, research, ops, project management) that each have their own personality, memory, and tools
 - **Proactive, not reactive** — Agents wake up on a configurable heartbeat, check for issues, and act before you ask
 - **Multi-channel** — Talk to your agents via Slack, Telegram, Discord, or the built-in web chat
 - **Persistent memory** — Agents remember across conversations with a two-layer memory system (daily logs + curated knowledge) and full-text search
+- **Skills system** — Reusable SKILL.md instruction files that agents can create, install, and share. Agents route knowledge to the right place automatically
 - **Autonomous work loops** — RALPH loop: give an agent a task list, it works through each task, verifies its work, and reports back
 - **Self-improving** — Agents reflect on interactions and evolve their SOUL.md personality over time (core principles stay locked)
 - **Native platform integration** — Agents can send system notifications, read your clipboard, open URLs, take screenshots
-- **Admin dashboard** — Web UI at `localhost:7890/admin` for managing agents, sessions, MCP servers, and configuration
+- **Admin dashboard** — React SPA at `localhost:7890/admin` with Mission Control (activity feed, calendar, global search), agent management, skills, and configuration
+- **Admin MCP for orchestrators** — Orchestrator agents can autonomously discover, install, and create skills, MCP servers, and plugins
 
 ## Quick Start
 
@@ -75,6 +77,7 @@ No agents ship pre-built. You create your own from templates:
 
 | Template | Focus | Default Heartbeat |
 |----------|-------|-------------------|
+| `orchestrator` | General-purpose assistant, delegates to specialists | Every 30 minutes |
 | `coding` | Code quality, testing, codebase ownership | Every 30 minutes |
 | `research` | Information gathering, source verification | Every 4 hours |
 | `ops` | System monitoring, incident response | Every 15 minutes |
@@ -191,15 +194,48 @@ Agents can work together:
 | `clade agent export <name>` | Export agent as portable bundle |
 | `clade agent import <file>` | Import agent from bundle |
 | `clade work --agent <name> --plan <path>` | Start RALPH autonomous loop |
+| `clade skill list` | List installed skills |
+| `clade skill install <name>` | Install a skill |
+| `clade skill approve <name>` | Approve a pending skill |
 | `clade mcp list` | List installed MCP servers |
 | `clade mcp approve <name>` | Approve a pending MCP server |
 | `clade doctor` | Health check |
+
+## Skills
+
+Skills are SKILL.md instruction files — reusable procedures, guides, and knowledge injected into agent prompts. They follow Claude Code's native skill format.
+
+```bash
+# List skills
+clade skill list
+
+# Install a skill (goes to pending, needs approval)
+clade skill install my-skill
+
+# Approve and activate
+clade skill approve my-skill
+```
+
+Agents automatically route knowledge to the right place: reusable procedures go to skills, user preferences go to USER.md, brief facts go to MEMORY.md. Orchestrator agents with admin privileges can autonomously discover and install skills from GitHub, npm, or the web.
+
+## Admin Dashboard
+
+The admin UI at `localhost:7890/admin` is a React SPA with 14 pages:
+
+- **Dashboard** — Agent overview and quick actions
+- **Chat** — Multi-conversation tabs per agent with real-time messaging
+- **Agents** — Create, configure, and manage agents (with skills and tools tabs)
+- **Skills** — Install, approve/reject, assign skills to agents, view contents
+- **User Profile** — Edit USER.md (global preferences shared across agents)
+- **Mission Control** — Activity feed, calendar view, and global search across all agent data
 
 ## Configuration
 
 Config lives at `~/.clade/config.json` (override with `CLADE_HOME` env var).
 
 Agent state lives at `~/.clade/agents/<name>/` — plain markdown files that are never touched by `npm update`.
+
+Key config sections: `agents`, `channels`, `gateway`, `routing`, `mcp`, `skills`, `browser`.
 
 ## Architecture
 

@@ -43,6 +43,7 @@ import {
   Eye,
   Wrench,
   BookOpen,
+  Info,
 } from "lucide-react"
 
 // ---------------------------------------------------------------------------
@@ -1514,6 +1515,191 @@ function ToolsMdTab({ agentId }: { agentId: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// Sub: USER.md Tab (global, shared across all agents)
+// ---------------------------------------------------------------------------
+
+interface UserMdVersionEntry {
+  date: string
+  summary: string
+}
+
+function UserMdTab() {
+  const [content, setContent] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [history, setHistory] = useState<UserMdVersionEntry[]>([])
+  const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  const [selectedContent, setSelectedContent] = useState<string | null>(null)
+  const [loadingEntry, setLoadingEntry] = useState(false)
+
+  const loadData = async () => {
+    setLoading(true)
+    try {
+      const [userRes, historyRes] = await Promise.all([
+        api<{ content: string }>('/user'),
+        api<{ entries: UserMdVersionEntry[] }>('/user/history'),
+      ])
+      setContent(userRes.content || '')
+      setHistory(historyRes.entries || [])
+    } catch (e: any) {
+      console.error('Failed to load USER.md:', e.message)
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    loadData()
+  }, [])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await api('/user', {
+        method: 'PUT',
+        body: { content },
+      })
+      console.log('USER.md saved successfully')
+      const historyRes = await api<{ entries: UserMdVersionEntry[] }>('/user/history')
+      setHistory(historyRes.entries || [])
+    } catch (e: any) {
+      console.error('Save failed:', e.message)
+    }
+    setSaving(false)
+  }
+
+  const viewHistoryEntry = async (date: string) => {
+    setSelectedDate(date)
+    setSelectedContent(null)
+    setLoadingEntry(true)
+    try {
+      const res = await api<{ content: string }>('/user/history/' + date)
+      setSelectedContent(res.content)
+    } catch (e: any) {
+      setSelectedContent('Error loading entry: ' + e.message)
+    }
+    setLoadingEntry(false)
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        <span className="text-sm">Loading USER.md...</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Editor */}
+      <div className="lg:col-span-2 space-y-3">
+        <div className="flex items-center gap-2 mb-1">
+          <Badge variant="secondary" className="text-xs gap-1">
+            <Info className="h-3 w-3" />
+            Global — shared across all agents
+          </Badge>
+        </div>
+        <Textarea
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          placeholder="# USER.md — User-level instructions..."
+          spellCheck={false}
+          className="font-mono text-[13px] leading-relaxed min-h-[420px] max-h-[70vh] resize-y"
+        />
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground/60">
+            {content.length} characters
+          </span>
+          <Button size="sm" onClick={save} disabled={saving}>
+            {saving ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              <>
+                <Save className="h-3.5 w-3.5 mr-1.5" />
+                Save USER.md
+              </>
+            )}
+          </Button>
+        </div>
+      </div>
+
+      {/* Version History */}
+      <div>
+        <h4 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+          <Clock className="h-4 w-4" />
+          Version History
+          {history.length > 0 && (
+            <span className="text-xs font-normal text-muted-foreground">
+              ({history.length} snapshot{history.length !== 1 ? 's' : ''})
+            </span>
+          )}
+        </h4>
+        {history.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-4">
+            No version history yet. Versions are saved when USER.md is updated.
+          </p>
+        ) : (
+          <ScrollArea className="max-h-[360px]">
+            <div className="space-y-1.5 pr-3">
+              {history.map((entry) => (
+                <button
+                  key={entry.date}
+                  onClick={() => viewHistoryEntry(entry.date)}
+                  className="w-full text-left group"
+                >
+                  <Card className="transition-colors hover:bg-accent/50 cursor-pointer">
+                    <CardContent className="p-3 flex items-center gap-3">
+                      <Eye className="h-3.5 w-3.5 text-muted-foreground group-hover:text-primary shrink-0" />
+                      <div className="text-xs font-mono text-primary whitespace-nowrap">
+                        {entry.date}
+                      </div>
+                      <div className="text-sm text-muted-foreground truncate flex-1">
+                        {entry.summary || '(snapshot)'}
+                      </div>
+                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-foreground shrink-0" />
+                    </CardContent>
+                  </Card>
+                </button>
+              ))}
+            </div>
+          </ScrollArea>
+        )}
+      </div>
+
+      {/* History entry viewer dialog */}
+      <Dialog open={selectedDate !== null} onOpenChange={(open) => { if (!open) setSelectedDate(null) }}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Clock className="h-4 w-4" />
+              USER.md snapshot — {selectedDate}
+            </DialogTitle>
+            <DialogDescription>
+              This is a snapshot of the global USER.md from {selectedDate}.
+            </DialogDescription>
+          </DialogHeader>
+          {loadingEntry ? (
+            <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-sm">Loading snapshot...</span>
+            </div>
+          ) : (
+            <div className="overflow-y-auto min-h-0 flex-1">
+              <pre className="text-sm font-mono whitespace-pre-wrap text-foreground p-4 bg-muted/30 rounded-md">
+                {selectedContent}
+              </pre>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Sub: Reflection Tab
 // ---------------------------------------------------------------------------
 
@@ -1890,6 +2076,7 @@ function AgentDetail({
           <TabsTrigger value="mcp">MCP</TabsTrigger>
           <TabsTrigger value="skills">Skills</TabsTrigger>
           <TabsTrigger value="tools-md">TOOLS.md</TabsTrigger>
+          <TabsTrigger value="user-md">USER.md</TabsTrigger>
           <TabsTrigger value="memory">Memory</TabsTrigger>
           <TabsTrigger value="heartbeat">Heartbeat</TabsTrigger>
           <TabsTrigger value="reflection">Reflection</TabsTrigger>
@@ -1911,6 +2098,9 @@ function AgentDetail({
         </TabsContent>
         <TabsContent value="tools-md">
           <ToolsMdTab agentId={agent.id} />
+        </TabsContent>
+        <TabsContent value="user-md">
+          <UserMdTab />
         </TabsContent>
         <TabsContent value="memory">
           <MemoryTab agentId={agent.id} />

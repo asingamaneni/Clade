@@ -47,22 +47,17 @@ channel routing, proactive scheduling, and autonomous work loops.
 │     └────────────────┘ └────────────────┘ └────────────────┘    │
 │                                                                    │
 │  ┌──────────────────────────────────────────────────────────────┐ │
-│  │                    MCP Server Layer                           │ │
-│  │  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌─────────────┐ │ │
-│  │  │  Memory   │ │ Sessions  │ │ Messaging │ │ MCP Manager │ │ │
-│  │  │  MCP      │ │ MCP       │ │ MCP       │ │   MCP       │ │ │
-│  │  │           │ │           │ │           │ │             │ │ │
-│  │  │memory_    │ │sessions_  │ │send_      │ │skills_      │ │ │
-│  │  │ store     │ │ list      │ │ message   │ │ search      │ │ │
-│  │  │memory_    │ │sessions_  │ │send_      │ │skills_      │ │ │
-│  │  │ search    │ │ spawn     │ │ typing    │ │ install     │ │ │
-│  │  │memory_    │ │sessions_  │ │get_       │ │skills_      │ │ │
-│  │  │ get       │ │ send      │ │ channel_  │ │ create      │ │ │
-│  │  │memory_    │ │session_   │ │ info      │ │skills_      │ │ │
-│  │  │ list      │ │ status    │ │           │ │ list        │ │ │
-│  │  │           │ │agents_    │ │           │ │skills_      │ │ │
-│  │  │           │ │ list      │ │           │ │ remove      │ │ │
-│  │  └───────────┘ └───────────┘ └───────────┘ └─────────────┘ │ │
+│  │                    MCP Server Layer (6 servers)              │ │
+│  │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────────┐      │ │
+│  │  │ Memory  │ │Sessions │ │Messaging│ │ MCP Manager │      │ │
+│  │  │ (10)    │ │ (5)     │ │ (3)     │ │ (5)         │      │ │
+│  │  └─────────┘ └─────────┘ └─────────┘ └─────────────┘      │ │
+│  │  ┌─────────┐ ┌──────────────────────────────────────┐      │ │
+│  │  │Platform │ │ Admin MCP (24 tools, orchestrators)  │      │ │
+│  │  │ (6)     │ │ skill discovery/install/create/manage│      │ │
+│  │  └─────────┘ │ MCP server management, agent mgmt   │      │ │
+│  │              │ plugin management                    │      │ │
+│  │              └──────────────────────────────────────┘      │ │
 │  └──────────────────────────────────────────────────────────────┘ │
 │                                                                    │
 │  ┌──────────────────────────────────────────────────────────────┐ │
@@ -79,7 +74,10 @@ channel routing, proactive scheduling, and autonomous work loops.
 │  └──────────────────────────────────────────────────────────────┘ │
 │                                                                    │
 │  ┌──────────────────────────────────────────────────────────────┐ │
-│  │  Admin Dashboard (Preact + HTM + Tailwind, served at /admin) │ │
+│  │  Admin UI (React + Radix UI + Tailwind + Vite, /admin)      │ │
+│  │  14 pages: Dashboard, Chat, Agents, Sessions, MCP, Skills,  │ │
+│  │  Channels, Cron, Config, User, Welcome, Activity, Calendar, │ │
+│  │  Search  (Mission Control: Activity Feed + Calendar + Search)│ │
 │  └──────────────────────────────────────────────────────────────┘ │
 └────────────────────────────────────────────────────────────────────┘
 ```
@@ -187,14 +185,17 @@ or from scratch. Each agent is a directory under `~/.clade/agents/<name>/`:
 - `IDENTITY.md` — Metadata: name, description, creation date
 - `HEARTBEAT.md` — What to check on each heartbeat cycle
 - `MEMORY.md` — Curated long-term memory
+- `TOOLS.md` — Environment and tool notes (injected into system prompt)
 - `memory/` — Daily logs (YYYY-MM-DD.md)
 - `soul-history/` — Snapshots of SOUL.md before each reflection
+- `tools-history/` — Snapshots of TOOLS.md before each update
 - `PLAN.md` — (optional) RALPH loop task list
 - `progress.md` — (optional) RALPH accumulated learnings
 
 #### Templates (src/agents/templates.ts)
 
-Four starting templates — users pick one and customize:
+Five starting templates — users pick one and customize:
+- **orchestrator** — General-purpose personal assistant, delegates to specialists, manages the platform
 - **coding** — Development-focused, owns code quality, runs tests
 - **research** — Information gathering, source verification, tracking topics
 - **ops** — System monitoring, incident response, automated remediation
@@ -202,7 +203,9 @@ Four starting templates — users pick one and customize:
 
 Templates provide `soulSeed` (starting SOUL.md) and `heartbeatSeed` (starting
 HEARTBEAT.md). These evolve through the reflection cycle as the agent learns
-the user's preferences.
+the user's preferences. All templates include a Content Routing Guide that
+directs agents to store information in the right place (SKILL.md for procedures,
+USER.md for preferences, TOOLS.md for environment notes, MEMORY.md for brief facts).
 
 #### Reflection (src/agents/reflection.ts)
 
@@ -263,56 +266,115 @@ Tool presets map to `--allowedTools` arrays:
 
 ### 3. MCP Servers (src/mcp/)
 
-Five custom MCP servers, each a stdio process:
+Six custom MCP servers, each a stdio process:
 
-#### Memory MCP (src/mcp/memory/)
+#### Memory MCP (src/mcp/memory/) -- 10 tools
+- `memory_store`, `memory_search`, `memory_get`, `memory_list` -- Core memory operations
+- `user_get`, `user_store` -- Read/write the global USER.md (user preferences/facts)
+- `tools_get`, `tools_store` -- Read/write per-agent TOOLS.md (environment/tool notes)
+- `skill_create`, `skill_list` -- Create and list SKILL.md instruction files
 - Stores in `~/.clade/agents/<agentId>/MEMORY.md` and `memory/*.md`
 - SQLite FTS5 index for full-text search
 - Chunks files at ~400 tokens with 80-token overlap for search
 - Auto-creates daily log files
 
-#### Sessions MCP (src/mcp/sessions/)
+#### Sessions MCP (src/mcp/sessions/) -- 5 tools
+- `sessions_list`, `sessions_spawn`, `sessions_send`, `session_status`, `agents_list`
 - Communicates with the session manager via IPC (Unix socket or named pipe)
 - Can spawn sub-agent sessions (different agent personality)
 - Can send messages between agent sessions
 
-#### Messaging MCP (src/mcp/messaging/)
+#### Messaging MCP (src/mcp/messaging/) -- 3 tools
+- `send_message`, `send_typing`, `get_channel_info`
 - Communicates with channel adapters via IPC
 - Agents can proactively send messages to any configured channel
 - Routing is deterministic (agent specifies channel + recipient)
 
-#### MCP Manager (src/mcp/skills/)
+#### MCP Manager (src/mcp/mcp-manager/) -- 5 tools
+- `mcp_search`, `mcp_install`, `mcp_create`, `mcp_list`, `mcp_remove`
 - Searches npm registry for MCP server packages
 - Stages new MCP servers in `~/.clade/mcp/pending/`
 - Requires human approval before activation
 - Can create custom MCP server configs (agent writes MCP server config)
 
-#### Platform MCP (src/mcp/platform/)
+#### Platform MCP (src/mcp/platform/) -- 6 tools
+- `platform_notify`, `platform_clipboard_read`, `platform_clipboard_write`, `platform_open`, `platform_screenshot`, `platform_info`
 - Native OS interactions: notifications, clipboard, open URLs, screenshots
 - Auto-detects macOS vs Linux and uses appropriate commands
 - Graceful fallback when commands are unavailable
 - System info: OS, hostname, shell, terminal, uptime
 
-### 4. Gateway (src/gateway/)
+#### Admin MCP (src/mcp/admin/) -- 24 tools
+- **Skill Discovery** (5): `admin_skill_search_local`, `admin_skill_search_github`, `admin_skill_search_npm`, `admin_skill_search_web`, `admin_skill_search_all`
+- **Skill Installation** (6): `admin_skill_install_github`, `admin_skill_install_url`, `admin_skill_install_npm`, `admin_skill_remove`, `admin_skill_approve`, `admin_skill_reject`
+- **Skill Creation** (5): `admin_skill_create`, `admin_skill_create_with_scripts`, `admin_skill_create_from_template`, `admin_skill_list_templates`, `admin_skill_update`
+- **MCP Management** (4): `admin_mcp_list`, `admin_mcp_install`, `admin_mcp_remove`, `admin_mcp_search_npm`
+- **Agent Management** (2): `admin_agent_list`, `admin_agent_assign_mcp`
+- **Plugin Management** (2): `admin_plugin_list`, `admin_plugin_install_github`
+- Only injected into agents with `admin.enabled: true` in their config
+- Enables orchestrator agents to autonomously discover, install, create, and manage skills, MCP servers, and plugins
 
-Fastify server on port 7890 (configurable).
+### 4. Gateway (src/cli/commands/start.ts)
+
+Fastify server on port 7890 (configurable). All routes are defined in `startPlaceholderServer()`
+within `start.ts`, using file-system-based operations (no SQLite store required).
 
 Routes:
+
+**Core:**
 - `GET /` — Redirect to admin UI
-- `GET /admin/*` — Serve React admin dashboard
-- `WS /ws` — WebSocket for WebChat + real-time admin updates
-- `POST /api/agents` — CRUD agents
-- `GET /api/agents/:id/memory` — Browse memory
-- `POST /api/agents/:id/memory/search` — Search memory
-- `GET /api/sessions` — List sessions
-- `POST /api/sessions/:id/send` — Send message to session
-- `GET /api/mcp` — List MCP servers (active + pending)
-- `POST /api/mcp/:name/approve` — Approve pending MCP server
-- `GET /api/cron` — List cron jobs
-- `POST /api/cron` — Create cron job
+- `GET /admin` — Serve admin UI (React SPA built by Vite)
+- `GET /health` — Health check endpoint
+- `WS /ws` — WebSocket for WebChat messaging
+- `WS /ws/admin` — WebSocket for real-time admin UI updates
+
+**Agents:**
+- `GET /api/agents` — List all agents
+- `POST /api/agents` — Create a new agent (from template or custom)
+- `GET /api/templates` — List available agent templates
+
+**Chat & Sessions:**
+- `GET /api/sessions` — List active sessions (derived from chat data)
+
+**Config:**
 - `GET /api/config` — Get global config
+- `GET /api/config/full` — Get full raw config
 - `PUT /api/config` — Update global config
-- `POST /api/webhook/:agent` — Webhook trigger for agent
+
+**MCP Servers:**
+- `GET /api/mcp` — List MCP servers (active + pending from `~/.clade/mcp/`)
+
+**Skills (SKILL.md):**
+- `GET /api/skills` — List all skills (active, pending, disabled)
+- `POST /api/skills/install` — Create/install a new skill
+- `POST /api/skills/:name/approve` — Approve pending skill (move to active)
+- `POST /api/skills/:name/reject` — Reject pending skill (move to disabled)
+- `DELETE /api/skills/:name` — Delete a skill permanently
+- `GET /api/skills/:status/:name` — Get skill detail (file contents)
+- `POST /api/skills/:name/assign` — Assign skill to an agent
+- `POST /api/skills/:name/unassign` — Unassign skill from an agent
+
+**USER.md (global):**
+- `GET /api/user` — Get USER.md content
+- `PUT /api/user` — Update USER.md (with version history)
+- `GET /api/user/history` — Get USER.md version history
+- `GET /api/user/history/:date` — Get specific USER.md version
+
+**TOOLS.md (per-agent):**
+- `GET /api/agents/:id/tools-md` — Get agent's TOOLS.md content
+- `PUT /api/agents/:id/tools-md` — Update agent's TOOLS.md (with version history)
+- `GET /api/agents/:id/tools-md/history` — Get TOOLS.md version history
+- `GET /api/agents/:id/tools-md/history/:date` — Get specific TOOLS.md version
+
+**Mission Control:**
+- `GET /api/activity` — Activity feed (filterable by agent, type; paginated)
+- `POST /api/activity` — Log a custom activity event
+- `GET /api/calendar/events` — Calendar events (chat sessions, heartbeats, activity)
+- `POST /api/search` — Global search across memories, conversations, skills, agents, config
+
+**Other:**
+- `GET /api/channels` — List connected channel adapters
+- `GET /api/cron` — List cron jobs
 
 ### 5. Router (src/router/)
 
@@ -533,20 +595,75 @@ CREATE VIRTUAL TABLE memory_fts USING fts5(
   concurrent writes to the same session.
 - MCP servers run as long-lived stdio processes, not spawned per-request.
 - SQLite is synchronous (better-sqlite3) — no async overhead for simple queries.
-- Admin UI is a self-contained HTML file — no build step, no SSR overhead.
+- Admin UI is a Vite-built React SPA — `npm run build` includes the UI build step.
 
-## Future: Admin UI Evolution
+## Admin UI (ui/)
 
-The current admin UI is a self-contained HTML file using Preact + HTM + Tailwind CDN.
-This ships inside the npm package with zero build step — ideal for easy installation.
+The admin UI is a React SPA built with Vite, served at `/admin`. Tech stack:
+- **React 18** + TypeScript
+- **Radix UI** primitives (dialog, tabs, select, tooltip, etc.)
+- **Tailwind CSS** + tailwindcss-animate
+- **Lucide React** icons
+- **Vite 6** build, outputs to `dist/ui/`
 
-When the UI needs more sophistication (drag-and-drop, rich editors, charts), the
-planned upgrade path is:
-1. Add a `ui/` directory with React + shadcn/ui + Tailwind
-2. Vite build outputs to `dist/ui/`
-3. Gateway serves built files from `dist/ui/`
-4. `npm run build` includes the UI build step
+14 pages (state-based routing in `App.tsx`):
+- **Dashboard** — Agent overview, session status, quick actions
+- **Chat** — Multi-conversation tabs per agent, real-time WebSocket messaging
+- **Agents** — Agent list, create from templates, per-agent skills/tools tabs
+- **Sessions** — Active sessions derived from conversation data
+- **MCP** — MCP server management (active/pending)
+- **Skills** — Skill management (install, approve/reject, assign to agents, detail view)
+- **Channels** — Connected channel adapters
+- **Cron** — Cron job listing
+- **Config** — Global config editor
+- **User** — USER.md editor with version history
+- **Welcome/Onboarding** — First-run setup wizard, agent creation flow
+- **Activity** — Activity feed with filtering by agent/type (Mission Control)
+- **Calendar** — Calendar view of chat sessions, heartbeats, events (Mission Control)
+- **Search** — Global search across memories, conversations, skills, agents, config (Mission Control)
 
-shadcn/ui is the preferred component library for this evolution — it provides
-accessible, well-designed components that work with Tailwind. But it requires
-a React build pipeline, so the tradeoff is simplicity vs. polish.
+## Skills System
+
+Skills are SKILL.md instruction files — reusable procedures, guides, and knowledge
+that get injected into agent system prompts. They follow Claude Code's native skill
+format.
+
+- **Storage**: `~/.clade/skills/{active,pending,disabled}/<name>/SKILL.md`
+- **Lifecycle**: Created (pending) -> Approved (active) or Rejected (disabled) -> Deleted
+- **Assignment**: Skills are assigned to agents via config (`agent.skills: ["skill-name"]`)
+- **Creation**: Via admin UI, `clade skill` CLI, Memory MCP (`skill_create`), or Admin MCP
+- **Content Routing**: Agent templates include routing guides that direct agents to create
+  skills for reusable procedures (rather than storing in MEMORY.md)
+
+## USER.md and TOOLS.md
+
+Two additional per-session context files injected into agent system prompts:
+
+- **USER.md** (`~/.clade/USER.md`) — Global user preferences, facts, and habits.
+  Shared across all agents. Editable via admin UI or Memory MCP (`user_get`/`user_store`).
+  Version history stored in `~/.clade/user-history/`.
+
+- **TOOLS.md** (`~/.clade/agents/<name>/TOOLS.md`) — Per-agent environment and tool notes.
+  Each agent has its own. Editable via admin UI or Memory MCP (`tools_get`/`tools_store`).
+  Version history stored in `~/.clade/agents/<name>/tools-history/`.
+
+## Browser Configuration
+
+Optional Playwright MCP integration for browser automation. Configured in
+`config.json` under the `browser` key:
+
+```json
+{
+  "browser": {
+    "enabled": false,
+    "browser": "chromium",
+    "headless": false,
+    "userDataDir": "~/.clade/browser-profile",
+    "cdpEndpoint": "ws://127.0.0.1:9222"
+  }
+}
+```
+
+When enabled, agents get a Playwright MCP server with a persistent browser profile
+(cookies, localStorage survive restarts). Supports chromium, chrome, msedge, firefox.
+Can connect to an already-running browser via CDP endpoint.

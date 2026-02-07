@@ -610,6 +610,194 @@ server.tool(
 );
 
 // ---------------------------------------------------------------------------
+// Skills directory
+// ---------------------------------------------------------------------------
+
+const skillsDir = join(baseDir, 'skills');
+
+// ---------------------------------------------------------------------------
+// Tool: skill_create
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'skill_create',
+  'Create a new skill (SKILL.md) for reusable procedures, guides, or checklists. Skills go to pending/ and require human approval before becoming active.',
+  {
+    name: z
+      .string()
+      .describe(
+        'Skill name (lowercase letters, numbers, hyphens, underscores only)',
+      ),
+    description: z
+      .string()
+      .describe('Brief description of what this skill teaches or does'),
+    content: z
+      .string()
+      .describe('The full SKILL.md markdown content'),
+  },
+  async ({ name, description, content }) => {
+    try {
+      // Validate name
+      if (!/^[a-z0-9_-]+$/.test(name)) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'Invalid skill name. Use only lowercase letters, numbers, hyphens, and underscores.',
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const skillDir = join(skillsDir, 'pending', name);
+
+      // Check if skill already exists in any status directory
+      for (const status of ['active', 'pending', 'disabled']) {
+        if (existsSync(join(skillsDir, status, name))) {
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `Skill "${name}" already exists (status: ${status}).`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      }
+
+      mkdirSync(skillDir, { recursive: true });
+      writeFileSync(join(skillDir, 'SKILL.md'), content, 'utf-8');
+
+      // Write a metadata file so the server can identify who created it
+      const meta = {
+        name,
+        description,
+        createdBy: agentId,
+        createdAt: new Date().toISOString(),
+      };
+      writeFileSync(
+        join(skillDir, 'meta.json'),
+        JSON.stringify(meta, null, 2),
+        'utf-8',
+      );
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Skill "${name}" created in pending/. Awaiting human approval before it becomes active.`,
+          },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error creating skill: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Tool: skill_list
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'skill_list',
+  'List all skills across active, pending, and disabled directories.',
+  {},
+  async () => {
+    try {
+      const results: Array<{ name: string; status: string; description: string }> = [];
+
+      for (const status of ['active', 'pending', 'disabled'] as const) {
+        const dir = join(skillsDir, status);
+        if (!existsSync(dir)) continue;
+
+        let entries: string[];
+        try {
+          entries = readdirSync(dir);
+        } catch {
+          continue;
+        }
+
+        for (const entry of entries) {
+          const entryPath = join(dir, entry);
+          try {
+            if (!statSync(entryPath).isDirectory()) continue;
+          } catch {
+            continue;
+          }
+
+          let description = '';
+          // Try meta.json first, then parse SKILL.md header
+          const metaPath = join(entryPath, 'meta.json');
+          const skillMdPath = join(entryPath, 'SKILL.md');
+
+          if (existsSync(metaPath)) {
+            try {
+              const meta = JSON.parse(readFileSync(metaPath, 'utf-8'));
+              description = meta.description ?? '';
+            } catch { /* ignore parse errors */ }
+          }
+
+          if (!description && existsSync(skillMdPath)) {
+            try {
+              const content = readFileSync(skillMdPath, 'utf-8');
+              const match = content.match(/^#[^\n]*\n+([^\n]+)/);
+              if (match) description = match[1].trim();
+            } catch { /* ignore read errors */ }
+          }
+
+          results.push({ name: entry, status, description });
+        }
+      }
+
+      if (results.length === 0) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'No skills found.',
+            },
+          ],
+        };
+      }
+
+      const lines = results.map(
+        (s) => `- **${s.name}** [${s.status}] — ${s.description || '(no description)'}`,
+      );
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `## Skills\n\n${lines.join('\n')}`,
+          },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error listing skills: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
 // Start server
 // ---------------------------------------------------------------------------
 
