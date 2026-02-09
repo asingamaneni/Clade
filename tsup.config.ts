@@ -10,6 +10,7 @@ export default defineConfig({
     'mcp/mcp-manager-server': 'src/mcp/mcp-manager/server.ts',
     'mcp/platform-server': 'src/mcp/platform/server.ts',
     'mcp/admin-server': 'src/mcp/admin/server.ts',
+    'mcp/collaboration-server': 'src/mcp/collaboration/server.ts',
   },
   format: ['esm'],
   target: 'node20',

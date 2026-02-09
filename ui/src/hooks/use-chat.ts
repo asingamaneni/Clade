@@ -85,6 +85,8 @@ export interface UseChatReturn {
   ) => Promise<void>
   /** Switch the active conversation tab for an agent */
   switchConversation: (agentId: string, convId: string) => void
+  /** Clear the current message list (used when switching agents) */
+  clearCurrentMessages: () => void
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -628,6 +630,11 @@ export function useChat(): UseChatReturn {
     [loadConversationMessages]
   )
 
+  const clearCurrentMessages = useCallback(() => {
+    setCurrentMessages([])
+    setTyping(false)
+  }, [])
+
   // ── Derived: sidebar previews ────────────────────────────────────
 
   const conversationPreviews: Record<string, ConversationPreview> = {}
@@ -660,5 +667,6 @@ export function useChat(): UseChatReturn {
     clearAllConversations,
     sendMessage,
     switchConversation,
+    clearCurrentMessages,
   }
 }

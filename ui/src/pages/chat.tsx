@@ -91,6 +91,7 @@ export function ChatPage({ agents }: ChatPageProps) {
     clearAllConversations,
     sendMessage,
     switchConversation,
+    clearCurrentMessages,
   } = useChat()
 
   // ── Derived state ────────────────────────────────────────────────
@@ -116,9 +117,15 @@ export function ChatPage({ agents }: ChatPageProps) {
       setSelectedAgent(agentId)
       setInputValue('')
       setPendingAttachments([])
+      clearCurrentMessages()
       await loadConversations(agentId)
+      // If this agent already had an active conversation, reload its messages
+      const existingActiveId = activeConversationIds[agentId]
+      if (existingActiveId) {
+        loadConversationMessages(agentId, existingActiveId)
+      }
     },
-    [loadConversations]
+    [loadConversations, clearCurrentMessages, activeConversationIds, loadConversationMessages]
   )
 
   // When conversations load, auto-select the first one if none active

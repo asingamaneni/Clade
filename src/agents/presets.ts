@@ -40,6 +40,7 @@ const MCP_SESSIONS = 'mcp__sessions__*';
 const MCP_MESSAGING = 'mcp__messaging__*';
 const MCP_MCP_MANAGER = 'mcp__mcp-manager__*';
 const MCP_PLATFORM = 'mcp__platform__*';
+const MCP_COLLABORATION = 'mcp__collaboration__*';
 
 // ---------------------------------------------------------------------------
 // Grouped tool sets
@@ -55,7 +56,7 @@ const EXTENDED_TOOLS = [WEB_FETCH, WEB_SEARCH, TASK, TODO_WRITE] as const;
 const ALL_NATIVE_TOOLS = [...CODING_TOOLS, ...EXTENDED_TOOLS] as const;
 
 /** All custom MCP server tool wildcards. */
-const ALL_MCP_TOOLS = [MCP_MEMORY, MCP_SESSIONS, MCP_MESSAGING, MCP_MCP_MANAGER, MCP_PLATFORM] as const;
+const ALL_MCP_TOOLS = [MCP_MEMORY, MCP_SESSIONS, MCP_COLLABORATION, MCP_MESSAGING, MCP_MCP_MANAGER, MCP_PLATFORM] as const;
 
 // ---------------------------------------------------------------------------
 // Preset definitions
@@ -81,12 +82,14 @@ const PRESET_MAP: Record<ToolPreset, readonly string[]> = {
     ...CODING_TOOLS,
     MCP_MEMORY,
     MCP_SESSIONS,
+    MCP_COLLABORATION,
     MCP_MCP_MANAGER,
   ],
 
   messaging: [
     MCP_MEMORY,
     MCP_SESSIONS,
+    MCP_COLLABORATION,
     MCP_MESSAGING,
     MCP_MCP_MANAGER,
   ],

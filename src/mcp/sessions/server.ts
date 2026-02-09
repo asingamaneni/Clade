@@ -2,12 +2,33 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { createConnection } from 'node:net';
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 
 // ---------------------------------------------------------------------------
 // Environment
 // ---------------------------------------------------------------------------
 
-const socketPath = process.env['CLADE_IPC_SOCKET'] ?? '';
+function discoverIpcSocket(): string {
+  // First try the explicit env var
+  const explicit = process.env['CLADE_IPC_SOCKET'];
+  if (explicit) return explicit;
+
+  // Fallback: scan CLADE_HOME for ipc-*.sock files
+  const home = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+  try {
+    const entries = readdirSync(home);
+    for (const entry of entries) {
+      if (entry.startsWith('ipc-') && entry.endsWith('.sock')) {
+        return join(home, entry);
+      }
+    }
+  } catch { /* CLADE_HOME may not exist */ }
+  return '';
+}
+
+const socketPath = discoverIpcSocket();
 const currentSessionId = process.env['CLADE_SESSION_ID'] ?? '';
 
 // ---------------------------------------------------------------------------

@@ -1,9 +1,10 @@
-import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, readdirSync, watch, renameSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, readdirSync, statSync, watch, renameSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { createServer as createNetServer } from 'node:net';
 import type { Command } from 'commander';
 import { listTemplates, getTemplate, configFromTemplate } from '../../agents/templates.js';
 import { resolveAllowedTools } from '../../agents/presets.js';
@@ -12,6 +13,7 @@ import { runReflectionCycle } from '../../agents/reflection.js';
 import { saveVersion, getVersionHistory, getVersionContent } from '../../agents/versioning.js';
 import { type ActivityEvent, loadActivityLog, saveActivityLog, logActivity } from '../../utils/activity.js';
 import { performBackup, getBackupStatus, getBackupHistory, isBackupInProgress } from '../../backup/backup.js';
+import { createDelegation, updateDelegation, getDelegations, publishMessage, subscribe, unsubscribe, getMessages, getSubscriptions, getSharedMemory } from '../../agents/collaboration.js';
 import { MemoryStore } from '../../mcp/memory/store.js';
 import { embeddingProvider } from '../../mcp/memory/embeddings.js';
 
@@ -456,10 +458,10 @@ function buildMcpConfigForAgent(
   // Determine which MCP servers this preset needs
   const MCP_SERVERS_BY_PRESET: Record<string, string[]> = {
     potato: [],
-    coding: ['memory', 'sessions', 'mcp-manager'],
-    messaging: ['memory', 'sessions', 'messaging', 'mcp-manager'],
-    full: ['memory', 'sessions', 'messaging', 'mcp-manager'],
-    custom: ['memory', 'sessions'],
+    coding: ['memory', 'sessions', 'collaboration', 'mcp-manager'],
+    messaging: ['memory', 'sessions', 'collaboration', 'messaging', 'mcp-manager'],
+    full: ['memory', 'sessions', 'collaboration', 'messaging', 'mcp-manager'],
+    custom: ['memory', 'sessions', 'collaboration'],
   };
 
   const servers = MCP_SERVERS_BY_PRESET[toolPreset] ?? ['memory', 'sessions'];
@@ -3528,6 +3530,216 @@ async function startPlaceholderServer(
     }
   });
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // Collaboration API — /api/collaborations
+  // ═══════════════════════════════════════════════════════════════════════
+
+  const collabHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+
+  // 1. GET /api/collaborations/delegations — List delegations
+  fastify.get('/api/collaborations/delegations', async (req) => {
+    try {
+      const query = req.query as Record<string, string>;
+      const agentId = query.agentId;
+      const role = query.role as 'from' | 'to' | undefined;
+
+      if (agentId) {
+        return { delegations: getDelegations(agentId, role) };
+      }
+
+      // No agentId — read all delegation files
+      const dir = join(collabHome, 'collaborations', 'delegations');
+      if (!existsSync(dir)) return { delegations: [] };
+      const files = readdirSync(dir).filter(f => f.endsWith('.json'));
+      const delegations = files.map(f => JSON.parse(readFileSync(join(dir, f), 'utf-8')));
+      return { delegations };
+    } catch (err) {
+      return { delegations: [], error: err instanceof Error ? err.message : 'Unknown error' };
+    }
+  });
+
+  // 2. POST /api/collaborations/delegations — Create delegation
+  fastify.post('/api/collaborations/delegations', async (req, reply) => {
+    try {
+      const body = req.body as Record<string, unknown>;
+      const fromAgent = body.fromAgent as string;
+      const toAgent = body.toAgent as string;
+      const task = body.task as string;
+      const context = body.context as string;
+      const constraints = body.constraints as string | undefined;
+
+      if (!fromAgent || !toAgent || !task || !context) {
+        reply.status(400);
+        return { error: 'Missing required fields: fromAgent, toAgent, task, context' };
+      }
+
+      const delegation = createDelegation(fromAgent, toAgent, task, context, constraints);
+      broadcastAdmin({ type: 'collaboration:delegation_created', delegation, timestamp: new Date().toISOString() });
+      return { delegation };
+    } catch (err) {
+      reply.status(500);
+      return { error: err instanceof Error ? err.message : 'Unknown error' };
+    }
+  });
+
+  // 3. PUT /api/collaborations/delegations/:id — Update delegation status
+  fastify.put('/api/collaborations/delegations/:id', async (req, reply) => {
+    try {
+      const { id } = req.params as { id: string };
+      const body = req.body as Record<string, unknown>;
+      const status = body.status as string;
+      const result = body.result as string | undefined;
+
+      if (!status) {
+        reply.status(400);
+        return { error: 'Missing required field: status' };
+      }
+
+      const delegation = updateDelegation(id, status as 'pending' | 'accepted' | 'in_progress' | 'completed' | 'failed', result);
+      broadcastAdmin({ type: 'collaboration:delegation_updated', delegation, timestamp: new Date().toISOString() });
+      return { delegation };
+    } catch (err) {
+      reply.status(err instanceof Error && err.message.includes('not found') ? 404 : 500);
+      return { error: err instanceof Error ? err.message : 'Unknown error' };
+    }
+  });
+
+  // 4. GET /api/collaborations/topics — List all topics
+  fastify.get('/api/collaborations/topics', async () => {
+    try {
+      const topicsDir = join(collabHome, 'collaborations', 'topics');
+      if (!existsSync(topicsDir)) return { topics: [] };
+      const topicNames = readdirSync(topicsDir).filter(name => {
+        try { return statSync(join(topicsDir, name)).isDirectory(); } catch { return false; }
+      });
+      const topics = topicNames.map(name => {
+        const topicPath = join(topicsDir, name);
+        const messageCount = readdirSync(topicPath).filter(f => f.endsWith('.json')).length;
+        return { name, messageCount };
+      });
+      return { topics };
+    } catch (err) {
+      return { topics: [], error: err instanceof Error ? err.message : 'Unknown error' };
+    }
+  });
+
+  // 5. POST /api/collaborations/topics/:topic/publish — Publish to topic
+  fastify.post('/api/collaborations/topics/:topic/publish', async (req, reply) => {
+    try {
+      const { topic } = req.params as { topic: string };
+      const body = req.body as Record<string, unknown>;
+      const fromAgent = body.fromAgent as string;
+      const payload = body.payload as string;
+
+      if (!fromAgent || !payload) {
+        reply.status(400);
+        return { error: 'Missing required fields: fromAgent, payload' };
+      }
+
+      const message = publishMessage(topic, fromAgent, payload);
+      broadcastAdmin({ type: 'collaboration:message_published', topic, message, timestamp: new Date().toISOString() });
+      return { message };
+    } catch (err) {
+      reply.status(500);
+      return { error: err instanceof Error ? err.message : 'Unknown error' };
+    }
+  });
+
+  // 6. GET /api/collaborations/messages/:topic — Get messages for topic
+  fastify.get('/api/collaborations/messages/:topic', async (req) => {
+    try {
+      const { topic } = req.params as { topic: string };
+      const query = req.query as Record<string, string>;
+      const since = query.since || undefined;
+      return { messages: getMessages(topic, since) };
+    } catch (err) {
+      return { messages: [], error: err instanceof Error ? err.message : 'Unknown error' };
+    }
+  });
+
+  // 7. GET /api/collaborations/subscriptions — List subscriptions
+  fastify.get('/api/collaborations/subscriptions', async (req) => {
+    try {
+      const query = req.query as Record<string, string>;
+      const agentId = query.agentId;
+
+      if (agentId) {
+        const topics = getSubscriptions(agentId);
+        return { subscriptions: topics.map(topic => ({ agentId, topic })) };
+      }
+
+      // No agentId — return all subscriptions
+      const subsPath = join(collabHome, 'collaborations', 'subscriptions.json');
+      if (!existsSync(subsPath)) return { subscriptions: [] };
+      const subs = JSON.parse(readFileSync(subsPath, 'utf-8'));
+      return { subscriptions: subs };
+    } catch (err) {
+      return { subscriptions: [], error: err instanceof Error ? err.message : 'Unknown error' };
+    }
+  });
+
+  // 8. POST /api/collaborations/subscriptions — Subscribe
+  fastify.post('/api/collaborations/subscriptions', async (req, reply) => {
+    try {
+      const body = req.body as Record<string, unknown>;
+      const agentId = body.agentId as string;
+      const topic = body.topic as string;
+
+      if (!agentId || !topic) {
+        reply.status(400);
+        return { error: 'Missing required fields: agentId, topic' };
+      }
+
+      subscribe(agentId, topic);
+      broadcastAdmin({ type: 'collaboration:subscribed', agentId, topic, timestamp: new Date().toISOString() });
+      return { success: true };
+    } catch (err) {
+      reply.status(500);
+      return { error: err instanceof Error ? err.message : 'Unknown error' };
+    }
+  });
+
+  // 9. DELETE /api/collaborations/subscriptions — Unsubscribe
+  fastify.delete('/api/collaborations/subscriptions', async (req, reply) => {
+    try {
+      const body = req.body as Record<string, unknown>;
+      const agentId = body.agentId as string;
+      const topic = body.topic as string;
+
+      if (!agentId || !topic) {
+        reply.status(400);
+        return { error: 'Missing required fields: agentId, topic' };
+      }
+
+      unsubscribe(agentId, topic);
+      broadcastAdmin({ type: 'collaboration:unsubscribed', agentId, topic, timestamp: new Date().toISOString() });
+      return { success: true };
+    } catch (err) {
+      reply.status(500);
+      return { error: err instanceof Error ? err.message : 'Unknown error' };
+    }
+  });
+
+  // 10. GET /api/collaborations/shared-memory/:agentId — Read agent's shared MEMORY.md
+  fastify.get('/api/collaborations/shared-memory/:agentId', async (req, reply) => {
+    try {
+      const { agentId } = req.params as { agentId: string };
+      const query = req.query as Record<string, string>;
+      const requestingAgent = query.requestingAgent;
+
+      if (!requestingAgent) {
+        reply.status(400);
+        return { error: 'Missing required query parameter: requestingAgent' };
+      }
+
+      const content = getSharedMemory(requestingAgent, agentId);
+      return { content };
+    } catch (err) {
+      reply.status(500);
+      return { error: err instanceof Error ? err.message : 'Unknown error' };
+    }
+  });
+
   // ── Root redirects to admin ───────────────────────────────────
   fastify.get('/', async (_req, reply) => {
     reply.redirect('/admin');
@@ -3538,6 +3750,70 @@ async function startPlaceholderServer(
   const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
   const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
   const agentCount = Object.keys(agents).length;
+
+  // ── Lightweight IPC server for agent-to-agent communication ────────
+  // This allows MCP servers (sessions, messaging) running inside agent
+  // subprocesses to communicate back to the main Clade process.
+  const ipcSocketPath = join(cladeHome, `ipc-${process.pid}.sock`);
+
+  // Clean up stale IPC sockets from previous runs
+  try {
+    const entries = readdirSync(cladeHome);
+    for (const entry of entries) {
+      if (entry.startsWith('ipc-') && entry.endsWith('.sock')) {
+        try { unlinkSync(join(cladeHome, entry)); } catch { /* in use */ }
+      }
+    }
+  } catch { /* cladeHome may not exist yet */ }
+
+  // Remove leftover socket at our specific path
+  if (existsSync(ipcSocketPath)) {
+    try { unlinkSync(ipcSocketPath); } catch { /* ignore */ }
+  }
+
+  const ipcServer = createNetServer({ allowHalfOpen: true }, (conn) => {
+    let data = '';
+    conn.on('data', (chunk) => { data += chunk.toString(); });
+    conn.on('end', () => {
+      (async () => {
+        try {
+          const msg = JSON.parse(data) as { type: string; [key: string]: unknown };
+          console.log(`  [ipc] Received: ${msg.type}${msg.agentId ? ` (agent: ${msg.agentId})` : ''}`);
+          const response = await handleIpcMessage(msg, agents, config, cladeHome);
+          console.log(`  [ipc] Response for ${msg.type}: ok=${response.ok}`);
+          conn.write(JSON.stringify(response));
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err);
+          console.log(`  [ipc] Error handling message: ${error}`);
+          conn.write(JSON.stringify({ ok: false, error }));
+        } finally {
+          conn.end();
+        }
+      })();
+    });
+    conn.on('error', () => { /* ignore connection errors */ });
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    ipcServer.on('error', reject);
+    ipcServer.listen(ipcSocketPath, () => {
+      ipcServer.removeListener('error', reject);
+      resolve();
+    });
+  });
+
+  // Set env so all child processes (agent subprocesses) inherit it
+  process.env['CLADE_IPC_SOCKET'] = ipcSocketPath;
+  console.log(`  [ok] IPC server listening at ${ipcSocketPath}`);
+
+  // Clean up IPC socket on exit
+  const cleanupIpc = () => {
+    try { ipcServer.close(); } catch { /* ignore */ }
+    try { if (existsSync(ipcSocketPath)) unlinkSync(ipcSocketPath); } catch { /* ignore */ }
+  };
+  process.on('exit', cleanupIpc);
+  process.on('SIGINT', cleanupIpc);
+  process.on('SIGTERM', cleanupIpc);
 
   // ── Launch shared Chrome with CDP for agent browser tools ──────────
   const browserConfig = (config.browser ?? {}) as { enabled?: boolean; userDataDir?: string; browser?: string; cdpEndpoint?: string; headless?: boolean };
@@ -3654,6 +3930,185 @@ async function startPlaceholderServer(
   console.log(`\n  Press Ctrl+C to stop.\n`);
 
   await new Promise(() => {});
+}
+
+// ---------------------------------------------------------------------------
+// IPC message handler — lightweight, no Store/SessionManager needed
+// ---------------------------------------------------------------------------
+
+async function handleIpcMessage(
+  msg: { type: string; [key: string]: unknown },
+  agents: Record<string, Record<string, unknown>>,
+  config: Record<string, unknown>,
+  cladeHome: string,
+): Promise<{ ok: boolean; [key: string]: unknown }> {
+  switch (msg.type) {
+    case 'agents.list': {
+      const agentList = Object.entries(agents).map(([id, a]) => ({
+        id,
+        name: (a.name as string) || id,
+        description: (a.description as string) || '',
+        toolPreset: (a.toolPreset as string) || 'coding',
+      }));
+      return { ok: true, agents: agentList };
+    }
+
+    case 'sessions.list': {
+      // Return active sessions from session-map
+      const map = (() => {
+        try {
+          return JSON.parse(readFileSync(join(cladeHome, 'data', 'session-map.json'), 'utf-8'));
+        } catch { return {}; }
+      })() as Record<string, string>;
+      const sessions = Object.entries(map).map(([convId, sessionId]) => ({
+        sessionId,
+        conversationId: convId,
+        status: 'active',
+      }));
+      return { ok: true, sessions };
+    }
+
+    case 'sessions.spawn': {
+      const agentId = msg.agentId as string | undefined;
+      const prompt = msg.prompt as string | undefined;
+      if (!agentId || typeof agentId !== 'string') return { ok: false, error: 'agentId is required' };
+      if (!prompt || typeof prompt !== 'string') return { ok: false, error: 'prompt is required' };
+      if (!agents[agentId]) return { ok: false, error: `Agent "${agentId}" not found` };
+
+      const agentCfg = agents[agentId] ?? {};
+      const toolPreset = (agentCfg.toolPreset as string) || 'coding';
+      const soulPath = join(cladeHome, 'agents', agentId, 'SOUL.md');
+      const agentContext = buildAgentContext(agentId, agents);
+      const sessionKey = `ipc:${agentId}:${randomUUID().slice(0, 8)}`;
+
+      const browserCfg = { ...(config.browser ?? {}) } as { enabled?: boolean; userDataDir?: string; browser?: string; cdpEndpoint?: string; headless?: boolean };
+      if (typeof cdpEndpointUrl === 'string') browserCfg.cdpEndpoint = cdpEndpointUrl;
+
+      try {
+        const result = await askClaude(
+          prompt,
+          existsSync(soulPath) ? soulPath : null,
+          agentContext,
+          sessionKey,
+          agentId,
+          cladeHome,
+          toolPreset,
+          browserCfg,
+        );
+        return { ok: true, sessionId: result.sessionId, response: result.text };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+
+    case 'sessions.send': {
+      const sessionId = msg.sessionId as string | undefined;
+      const message = msg.message as string | undefined;
+      if (!sessionId) return { ok: false, error: 'sessionId is required' };
+      if (!message) return { ok: false, error: 'message is required' };
+
+      // Find agent for this session by looking up session map
+      const map = (() => {
+        try {
+          return JSON.parse(readFileSync(join(cladeHome, 'data', 'session-map.json'), 'utf-8'));
+        } catch { return {}; }
+      })() as Record<string, string>;
+
+      // Find conversation that maps to this session
+      let agentId: string | undefined;
+      for (const [convId, sid] of Object.entries(map)) {
+        if (sid === sessionId) {
+          // Extract agent from convId pattern like "ipc:agentId:xxx" or "ch:webchat:agentId:xxx"
+          const parts = convId.split(':');
+          if (parts.length >= 2) {
+            agentId = parts[1] === 'webchat' ? parts[2] : parts[1];
+          }
+          break;
+        }
+      }
+
+      if (!agentId || !agents[agentId]) {
+        return { ok: false, error: `Could not resolve agent for session "${sessionId}"` };
+      }
+
+      const agentCfg = agents[agentId] ?? {};
+      const toolPreset = (agentCfg.toolPreset as string) || 'coding';
+      const soulPath = join(cladeHome, 'agents', agentId, 'SOUL.md');
+      const agentContext = buildAgentContext(agentId, agents);
+      const sessionKey = `ipc:resume:${sessionId}`;
+
+      const browserCfg = { ...(config.browser ?? {}) } as { enabled?: boolean; userDataDir?: string; browser?: string; cdpEndpoint?: string; headless?: boolean };
+      if (typeof cdpEndpointUrl === 'string') browserCfg.cdpEndpoint = cdpEndpointUrl;
+
+      try {
+        const result = await askClaude(
+          message,
+          existsSync(soulPath) ? soulPath : null,
+          agentContext,
+          sessionKey,
+          agentId,
+          cladeHome,
+          toolPreset,
+          browserCfg,
+        );
+        return { ok: true, sessionId: result.sessionId, response: result.text };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+
+    case 'sessions.status': {
+      const sessionId = msg.sessionId as string | undefined;
+      if (!sessionId) return { ok: false, error: 'sessionId is required' };
+      return { ok: true, sessionId, status: 'active' };
+    }
+
+    case 'messaging.send': {
+      const channel = msg.channel as string | undefined;
+      const to = msg.to as string | undefined;
+      const text = msg.text as string | undefined;
+      if (!channel || !to || !text) return { ok: false, error: 'channel, to, and text are required' };
+
+      const adapter = channelAdapters.get(channel);
+      if (!adapter) return { ok: false, error: `Channel "${channel}" not found or not connected` };
+
+      try {
+        await adapter.sendMessage(to, text, msg.threadId ? { threadId: msg.threadId as string } : undefined);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+
+    case 'messaging.typing': {
+      const channel = msg.channel as string | undefined;
+      const to = msg.to as string | undefined;
+      if (!channel || !to) return { ok: false, error: 'channel and to are required' };
+
+      const adapter = channelAdapters.get(channel);
+      if (!adapter) return { ok: false, error: `Channel "${channel}" not found` };
+
+      try {
+        await adapter.sendTyping(to);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+
+    case 'messaging.channel_info': {
+      const channel = msg.channel as string | undefined;
+      if (!channel) return { ok: false, error: 'channel is required' };
+
+      const adapter = channelAdapters.get(channel);
+      if (!adapter) return { ok: false, error: `Channel "${channel}" not found` };
+
+      return { ok: true, connected: adapter.isConnected(), type: adapter.name };
+    }
+
+    default:
+      return { ok: false, error: `Unknown IPC message type: ${msg.type}` };
+  }
 }
 
 // ---------------------------------------------------------------------------
