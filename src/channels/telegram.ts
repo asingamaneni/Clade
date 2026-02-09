@@ -46,16 +46,10 @@ export class TelegramAdapter extends BaseChannelAdapter {
 
     // bot.start() begins polling in the background.  It does not return
     // a promise that resolves on "connected" -- it resolves immediately.
-    // We mark connected optimistically here; errors surface via the
-    // bot.catch handler above.
-    this.bot.start({
-      onStart: () => {
-        this.connected = true;
-        this.started = true;
-      },
-    });
+    // We set connected/started after a short delay to give the polling
+    // loop time to spin up; errors surface via the bot.catch handler above.
+    this.bot.start();
 
-    // Give the polling loop a moment to spin up.
     await new Promise<void>((resolve) => setTimeout(resolve, 200));
     this.connected = true;
     this.started = true;

@@ -230,6 +230,9 @@ const chatCache = new Map<string, AgentChatData>();
 /** Track connected channel adapter names (populated after server starts) */
 const activeChannelNames = new Set<string>();
 
+/** Track adapter instances so we can connect/disconnect via API */
+const channelAdapters = new Map<string, import('../../channels/base.js').ChannelAdapter>();
+
 /** Track in-flight claude processes for cancellation, keyed by conversationId */
 const inflightProcesses = new Map<string, AbortController>();
 
@@ -2324,9 +2327,96 @@ async function startPlaceholderServer(
     return { success: true };
   });
 
-  fastify.get('/api/channels', async () => ({
-    channels: Array.from(activeChannelNames).map((name) => ({ name, connected: true })),
-  }));
+  // ═══════════════════════════════════════════════════════════════════════
+  // Channels API — connect/disconnect/status
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /** Check which env vars are set for each channel */
+  function channelHasToken(name: string): boolean {
+    switch (name) {
+      case 'telegram': return !!process.env['TELEGRAM_BOT_TOKEN'];
+      case 'slack': return !!process.env['SLACK_BOT_TOKEN'] && !!process.env['SLACK_APP_TOKEN'];
+      case 'discord': return !!process.env['DISCORD_BOT_TOKEN'];
+      case 'webchat': return true; // no token needed
+      default: return false;
+    }
+  }
+
+  fastify.get('/api/channels', async () => {
+    const channelsCfg = (config.channels ?? {}) as Record<string, { enabled?: boolean }>;
+    const allNames = ['telegram', 'slack', 'discord', 'webchat'];
+    return {
+      channels: allNames.map((name) => {
+        const adapter = channelAdapters.get(name);
+        return {
+          name,
+          connected: adapter ? adapter.isConnected() : false,
+          configured: channelsCfg[name]?.enabled !== false,
+          hasToken: channelHasToken(name),
+        };
+      }),
+    };
+  });
+
+  fastify.post<{ Params: { name: string } }>('/api/channels/:name/connect', async (req, reply) => {
+    const { name } = req.params;
+    const adapter = channelAdapters.get(name);
+
+    if (!adapter) {
+      // Try to create a new adapter instance if token is now available
+      const channelsCfg = (config.channels ?? {}) as Record<string, { enabled?: boolean }>;
+      const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+      const created = await createChannelAdapter(name, channelsCfg, agents, config, cladeHome);
+      if (!created) {
+        reply.status(400);
+        return { error: `Channel "${name}" cannot be connected — missing token or unsupported` };
+      }
+    }
+
+    const target = channelAdapters.get(name)!;
+    if (target.isConnected()) {
+      return { success: true, message: 'Already connected' };
+    }
+
+    try {
+      await target.connect();
+      activeChannelNames.add(name);
+      broadcastAdmin({ type: 'channel:connected', name, timestamp: new Date().toISOString() });
+      logActivityLocal({ category: 'channel', action: `${name} connected`, agent: 'system' });
+      return { success: true };
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      broadcastAdmin({ type: 'channel:error', name, error: errMsg, timestamp: new Date().toISOString() });
+      reply.status(500);
+      return { error: errMsg };
+    }
+  });
+
+  fastify.post<{ Params: { name: string } }>('/api/channels/:name/disconnect', async (req, reply) => {
+    const { name } = req.params;
+    const adapter = channelAdapters.get(name);
+
+    if (!adapter) {
+      reply.status(404);
+      return { error: `Channel "${name}" not found` };
+    }
+
+    if (!adapter.isConnected()) {
+      return { success: true, message: 'Already disconnected' };
+    }
+
+    try {
+      await adapter.disconnect();
+      activeChannelNames.delete(name);
+      broadcastAdmin({ type: 'channel:disconnected', name, timestamp: new Date().toISOString() });
+      logActivityLocal({ category: 'channel', action: `${name} disconnected`, agent: 'system' });
+      return { success: true };
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      reply.status(500);
+      return { error: errMsg };
+    }
+  });
 
   // ═══════════════════════════════════════════════════════════════════════
   // Cron Jobs — file-based scheduler using the `cron` package
@@ -3413,6 +3503,7 @@ async function startPlaceholderServer(
     agents,
     config,
     cladeHome,
+    broadcastAdmin,
   );
 
   const channelList = [
@@ -3466,23 +3557,20 @@ function parseChannelMention(
  * wire message handlers to askClaude(), and connect.
  * Returns array of connected channel names.
  */
-async function connectChannelAdapters(
-  channels: Record<string, { enabled?: boolean }>,
+/** Build the shared channel message handler (needs runtime context) */
+function buildChannelMessageHandler(
   agents: Record<string, Record<string, unknown>>,
   config: Record<string, unknown>,
   cladeHome: string,
-): Promise<string[]> {
-  const connected: string[] = [];
+) {
   const routing = (config.routing ?? {}) as { defaultAgent?: string; rules?: unknown[] };
   const defaultAgentId = routing.defaultAgent || Object.keys(agents)[0] || '';
   const agentIds = Object.keys(agents);
 
-  // Helper: handle an inbound message from any channel adapter
-  const handleChannelMessage = async (
+  return async (
     adapter: { sendMessage: (to: string, text: string, opts?: { threadId?: string }) => Promise<void>; sendTyping: (to: string) => Promise<void> },
     msg: { channel: string; userId: string; chatId?: string; text: string; threadId?: string },
   ): Promise<void> => {
-    // Route: @mention > default agent
     const { agentId: mentionedAgent, strippedText } = parseChannelMention(msg.text, agentIds);
     const agentId = mentionedAgent || defaultAgentId;
 
@@ -3496,16 +3584,12 @@ async function connectChannelAdapters(
     const soulPath = join(cladeHome, 'agents', agentId, 'SOUL.md');
     const agentContext = buildAgentContext(agentId, agents);
 
-    // Build a persistent session key for this channel user/chat
     const sessionKey = `ch:${msg.channel}:${agentId}:${msg.chatId || msg.userId}`;
-
-    // Show typing indicator
     const replyTo = msg.chatId || msg.userId;
     try { await adapter.sendTyping(replyTo); } catch { /* not all channels support this */ }
 
     console.log(`  [${msg.channel}] ${msg.userId} → ${agentId}: ${msg.text.slice(0, 80)}${msg.text.length > 80 ? '...' : ''}`);
 
-    // Cancel any existing in-flight request for this session
     const existingController = inflightProcesses.get(sessionKey);
     if (existingController) {
       existingController.abort();
@@ -3530,10 +3614,7 @@ async function connectChannelAdapters(
         abortController.signal,
       );
 
-      // If cancelled, don't send a response
-      if (result.cancelled) {
-        return;
-      }
+      if (result.cancelled) return;
 
       await adapter.sendMessage(replyTo, result.text, { threadId: msg.threadId });
       console.log(`  [${msg.channel}] ${agentId} → ${msg.userId}: ${result.text.slice(0, 80)}${result.text.length > 80 ? '...' : ''}`);
@@ -3547,74 +3628,133 @@ async function connectChannelAdapters(
       inflightProcesses.delete(sessionKey);
     }
   };
+}
+
+/**
+ * Create a single channel adapter by name, wire its message handler,
+ * and store it in channelAdapters. Does NOT call connect().
+ * Returns true if the adapter was created.
+ */
+async function createChannelAdapter(
+  name: string,
+  channels: Record<string, { enabled?: boolean }>,
+  agents: Record<string, Record<string, unknown>>,
+  config: Record<string, unknown>,
+  cladeHome: string,
+): Promise<boolean> {
+  if (channelAdapters.has(name)) return true;
+
+  const handleChannelMessage = buildChannelMessageHandler(agents, config, cladeHome);
+
+  switch (name) {
+    case 'slack': {
+      const botToken = process.env['SLACK_BOT_TOKEN'];
+      const appToken = process.env['SLACK_APP_TOKEN'];
+      if (!botToken || !appToken) return false;
+      const { SlackAdapter } = await import('../../channels/slack.js');
+      const slack = new SlackAdapter(botToken, appToken);
+      slack.onMessage(async (msg) => handleChannelMessage(slack, msg));
+      channelAdapters.set('slack', slack);
+      return true;
+    }
+    case 'telegram': {
+      const token = process.env['TELEGRAM_BOT_TOKEN'];
+      if (!token) return false;
+      const { TelegramAdapter } = await import('../../channels/telegram.js');
+      const telegram = new TelegramAdapter(token);
+      telegram.onMessage(async (msg) => handleChannelMessage(telegram, msg));
+      channelAdapters.set('telegram', telegram);
+      return true;
+    }
+    case 'discord': {
+      const token = process.env['DISCORD_BOT_TOKEN'];
+      if (!token) return false;
+      const { DiscordAdapter } = await import('../../channels/discord.js');
+      const discord = new DiscordAdapter(token);
+      discord.onMessage(async (msg) => handleChannelMessage(discord, msg));
+      channelAdapters.set('discord', discord);
+      return true;
+    }
+    case 'webchat': {
+      const { WebChatAdapter } = await import('../../channels/webchat.js');
+      const webchat = new WebChatAdapter();
+      webchat.onMessage(async (msg) => handleChannelMessage(webchat, msg));
+      channelAdapters.set('webchat', webchat);
+      return true;
+    }
+    default:
+      return false;
+  }
+}
+
+async function connectChannelAdapters(
+  channels: Record<string, { enabled?: boolean }>,
+  agents: Record<string, Record<string, unknown>>,
+  config: Record<string, unknown>,
+  cladeHome: string,
+  broadcastAdmin: (msg: Record<string, unknown>) => void,
+): Promise<string[]> {
+  const connected: string[] = [];
+
+  // ── WebChat (always available) ───────────────────────────────────
+  try {
+    await createChannelAdapter('webchat', channels, agents, config, cladeHome);
+    const webchat = channelAdapters.get('webchat')!;
+    await webchat.connect();
+    connected.push('webchat');
+    activeChannelNames.add('webchat');
+    console.log('  [ok] WebChat adapter ready');
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error(`  [!!] WebChat adapter failed: ${errMsg}`);
+    broadcastAdmin({ type: 'channel:error', name: 'webchat', error: errMsg, timestamp: new Date().toISOString() });
+  }
 
   // ── Slack ────────────────────────────────────────────────────────
-  const slackBotToken = process.env['SLACK_BOT_TOKEN'];
-  const slackAppToken = process.env['SLACK_APP_TOKEN'];
   const slackEnabled = channels.slack?.enabled !== false;
-
-  if (slackBotToken && slackAppToken && slackEnabled) {
+  if (process.env['SLACK_BOT_TOKEN'] && process.env['SLACK_APP_TOKEN'] && slackEnabled) {
     try {
-      const { SlackAdapter } = await import('../../channels/slack.js');
-      const slack = new SlackAdapter(slackBotToken, slackAppToken);
-
-      slack.onMessage(async (msg) => {
-        await handleChannelMessage(slack, msg);
-      });
-
-      await slack.connect();
+      await createChannelAdapter('slack', channels, agents, config, cladeHome);
+      await channelAdapters.get('slack')!.connect();
       connected.push('slack');
       activeChannelNames.add('slack');
       console.log('  [ok] Slack adapter connected (Socket Mode)');
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error(`  [!!] Slack adapter failed to connect: ${errMsg}`);
+      broadcastAdmin({ type: 'channel:error', name: 'slack', error: errMsg, timestamp: new Date().toISOString() });
     }
   }
 
   // ── Telegram ─────────────────────────────────────────────────────
-  const telegramToken = process.env['TELEGRAM_BOT_TOKEN'];
   const telegramEnabled = channels.telegram?.enabled !== false;
-
-  if (telegramToken && telegramEnabled) {
+  if (process.env['TELEGRAM_BOT_TOKEN'] && telegramEnabled) {
     try {
-      const { TelegramAdapter } = await import('../../channels/telegram.js');
-      const telegram = new TelegramAdapter(telegramToken);
-
-      telegram.onMessage(async (msg) => {
-        await handleChannelMessage(telegram, msg);
-      });
-
-      await telegram.connect();
+      await createChannelAdapter('telegram', channels, agents, config, cladeHome);
+      await channelAdapters.get('telegram')!.connect();
       connected.push('telegram');
       activeChannelNames.add('telegram');
       console.log('  [ok] Telegram adapter connected');
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error(`  [!!] Telegram adapter failed to connect: ${errMsg}`);
+      broadcastAdmin({ type: 'channel:error', name: 'telegram', error: errMsg, timestamp: new Date().toISOString() });
     }
   }
 
   // ── Discord ──────────────────────────────────────────────────────
-  const discordToken = process.env['DISCORD_BOT_TOKEN'];
   const discordEnabled = channels.discord?.enabled !== false;
-
-  if (discordToken && discordEnabled) {
+  if (process.env['DISCORD_BOT_TOKEN'] && discordEnabled) {
     try {
-      const { DiscordAdapter } = await import('../../channels/discord.js');
-      const discord = new DiscordAdapter(discordToken);
-
-      discord.onMessage(async (msg) => {
-        await handleChannelMessage(discord, msg);
-      });
-
-      await discord.connect();
+      await createChannelAdapter('discord', channels, agents, config, cladeHome);
+      await channelAdapters.get('discord')!.connect();
       connected.push('discord');
       activeChannelNames.add('discord');
       console.log('  [ok] Discord adapter connected');
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error(`  [!!] Discord adapter failed to connect: ${errMsg}`);
+      broadcastAdmin({ type: 'channel:error', name: 'discord', error: errMsg, timestamp: new Date().toISOString() });
     }
   }
 

@@ -1,12 +1,11 @@
 import { useState } from 'react'
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import { RefreshCw, Radio } from "lucide-react"
+import { RefreshCw, ExternalLink, CheckCircle2, XCircle } from "lucide-react"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -15,6 +14,8 @@ import { RefreshCw, Radio } from "lucide-react"
 export interface Channel {
   name: string
   connected: boolean
+  configured?: boolean
+  hasToken?: boolean
 }
 
 interface ChannelsPageProps {
@@ -26,36 +27,69 @@ interface ChannelsPageProps {
 // Channel metadata
 // ---------------------------------------------------------------------------
 
+interface TokenInfo {
+  label: string
+  envVar: string
+}
+
 interface ChannelMeta {
   icon: string
   label: string
-  tokenLabel: string | null
+  tokens: TokenInfo[]
   desc: string
+  setupUrl?: string
+  setupSteps?: string[]
 }
 
 const CHANNEL_META: Record<string, ChannelMeta> = {
   telegram: {
     icon: '\u2708\uFE0F',
     label: 'Telegram',
-    tokenLabel: 'TELEGRAM_BOT_TOKEN',
+    tokens: [{ label: 'Bot Token', envVar: 'TELEGRAM_BOT_TOKEN' }],
     desc: 'Bot API via grammy',
+    setupUrl: 'https://t.me/BotFather',
+    setupSteps: [
+      'Message @BotFather on Telegram',
+      'Send /newbot and follow the prompts',
+      'Set TELEGRAM_BOT_TOKEN env var',
+      'Restart the server',
+    ],
   },
   slack: {
     icon: '\uD83D\uDCAC',
     label: 'Slack',
-    tokenLabel: 'SLACK_BOT_TOKEN',
+    tokens: [
+      { label: 'Bot Token', envVar: 'SLACK_BOT_TOKEN' },
+      { label: 'App Token', envVar: 'SLACK_APP_TOKEN' },
+    ],
     desc: 'Socket Mode via @slack/bolt',
+    setupUrl: 'https://api.slack.com/apps',
+    setupSteps: [
+      'Create a new app at api.slack.com/apps',
+      'Enable Socket Mode and get an App Token (xapp-...)',
+      'Add bot scopes and install to workspace',
+      'Set both SLACK_BOT_TOKEN and SLACK_APP_TOKEN env vars',
+      'Restart the server',
+    ],
   },
   discord: {
     icon: '\uD83C\uDFAE',
     label: 'Discord',
-    tokenLabel: 'DISCORD_BOT_TOKEN',
+    tokens: [{ label: 'Bot Token', envVar: 'DISCORD_BOT_TOKEN' }],
     desc: 'Bot integration via discord.js',
+    setupUrl: 'https://discord.com/developers/applications',
+    setupSteps: [
+      'Create an app at discord.com/developers/applications',
+      'Add a Bot and copy the token',
+      'Enable MESSAGE CONTENT intent in Bot settings',
+      'Set DISCORD_BOT_TOKEN env var',
+      'Restart the server',
+    ],
   },
   webchat: {
     icon: '\uD83C\uDF10',
     label: 'WebChat',
-    tokenLabel: null,
+    tokens: [],
     desc: 'Built-in browser WebSocket chat',
   },
 }
@@ -65,23 +99,36 @@ const CHANNEL_META: Record<string, ChannelMeta> = {
 // ---------------------------------------------------------------------------
 
 export function ChannelsPage({ channels, onRefresh }: ChannelsPageProps) {
-  const [tokens, setTokens] = useState<Record<string, string>>({})
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [loading, setLoading] = useState<Record<string, boolean>>({})
 
   // Build the full list, filling in any channels not returned from API
   const allChannels = Object.keys(CHANNEL_META).map((name) => {
     const found = channels.find((c) => c.name === name)
-    return { name, connected: found ? found.connected : false }
+    return {
+      name,
+      connected: found?.connected ?? false,
+      configured: found?.configured ?? false,
+      hasToken: found?.hasToken ?? (name === 'webchat'),
+    }
   })
 
   const toggleConnect = async (name: string, connect: boolean) => {
+    setErrors((prev) => ({ ...prev, [name]: '' }))
+    setLoading((prev) => ({ ...prev, [name]: true }))
     try {
-      await api(
+      const res = await api(
         '/channels/' + name + '/' + (connect ? 'connect' : 'disconnect'),
         { method: 'POST' },
       )
+      if (res.error) {
+        setErrors((prev) => ({ ...prev, [name]: res.error }))
+      }
       onRefresh()
     } catch (e: any) {
-      console.error('Channel toggle failed:', e.message)
+      setErrors((prev) => ({ ...prev, [name]: e.message || 'Connection failed' }))
+    } finally {
+      setLoading((prev) => ({ ...prev, [name]: false }))
     }
   }
 
@@ -99,6 +146,34 @@ export function ChannelsPage({ channels, onRefresh }: ChannelsPageProps) {
         {allChannels.map((ch) => {
           const meta = CHANNEL_META[ch.name]
           if (!meta) return null
+
+          // Determine status
+          const status = ch.connected
+            ? 'connected'
+            : ch.hasToken
+              ? 'disconnected'
+              : 'not_configured'
+
+          const statusConfig = {
+            connected: {
+              dotClass: 'bg-[hsl(var(--success))]',
+              textClass: 'text-[hsl(var(--success))]',
+              label: 'Connected',
+            },
+            disconnected: {
+              dotClass: 'bg-yellow-500',
+              textClass: 'text-yellow-500',
+              label: 'Disconnected',
+            },
+            not_configured: {
+              dotClass: 'bg-muted-foreground/40',
+              textClass: 'text-muted-foreground/60',
+              label: 'Not configured',
+            },
+          }[status]
+
+          const error = errors[ch.name]
+
           return (
             <Card key={ch.name}>
               <CardContent className="p-5 space-y-4">
@@ -116,23 +191,9 @@ export function ChannelsPage({ channels, onRefresh }: ChannelsPageProps) {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div
-                      className={cn(
-                        "h-2 w-2 rounded-full",
-                        ch.connected
-                          ? "bg-[hsl(var(--success))]"
-                          : "bg-destructive",
-                      )}
-                    />
-                    <span
-                      className={cn(
-                        "text-xs",
-                        ch.connected
-                          ? "text-[hsl(var(--success))]"
-                          : "text-muted-foreground",
-                      )}
-                    >
-                      {ch.connected ? 'Connected' : 'Disconnected'}
+                    <div className={cn("h-2 w-2 rounded-full", statusConfig.dotClass)} />
+                    <span className={cn("text-xs", statusConfig.textClass)}>
+                      {statusConfig.label}
                     </span>
                   </div>
                 </div>
@@ -140,32 +201,69 @@ export function ChannelsPage({ channels, onRefresh }: ChannelsPageProps) {
                 {/* Enable toggle */}
                 <div className="flex items-center gap-3">
                   <Label htmlFor={`channel-toggle-${ch.name}`} className="text-xs text-muted-foreground">
-                    Enable
+                    {ch.connected ? 'Disconnect' : 'Connect'}
                   </Label>
                   <Switch
                     id={`channel-toggle-${ch.name}`}
                     checked={ch.connected}
+                    disabled={loading[ch.name] || (!ch.hasToken && !ch.connected)}
                     onCheckedChange={(checked) => toggleConnect(ch.name, checked)}
                   />
                 </div>
 
-                {/* Token input (if applicable) */}
-                {meta.tokenLabel && (
-                  <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">
-                      {meta.tokenLabel}
-                    </Label>
-                    <Input
-                      type="password"
-                      value={tokens[ch.name] || ''}
-                      onChange={(e) =>
-                        setTokens((prev) => ({
-                          ...prev,
-                          [ch.name]: e.target.value,
-                        }))
-                      }
-                      placeholder="Enter token..."
-                    />
+                {/* Error message */}
+                {error && (
+                  <div className="text-xs text-destructive bg-destructive/10 rounded px-2.5 py-1.5">
+                    {error}
+                  </div>
+                )}
+
+                {/* Token / env var status */}
+                {meta.tokens.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="text-xs font-medium text-muted-foreground">
+                      Required environment variables
+                    </div>
+                    {meta.tokens.map((token) => (
+                      <div key={token.envVar} className="flex items-center gap-2">
+                        {ch.hasToken ? (
+                          <CheckCircle2 className="h-3.5 w-3.5 text-[hsl(var(--success))] shrink-0" />
+                        ) : (
+                          <XCircle className="h-3.5 w-3.5 text-destructive shrink-0" />
+                        )}
+                        <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
+                          {token.envVar}
+                        </code>
+                        <span className="text-xs text-muted-foreground/60">
+                          {token.label}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Setup guide */}
+                {meta.setupSteps && !ch.hasToken && (
+                  <div className="space-y-2 border-t border-border/50 pt-3">
+                    <div className="text-xs font-medium text-muted-foreground">
+                      Setup guide
+                    </div>
+                    <ol className="text-xs text-muted-foreground/80 space-y-1 list-decimal list-inside">
+                      {meta.setupSteps.map((step, i) => (
+                        <li key={i}>{step}</li>
+                      ))}
+                    </ol>
+                    {meta.setupUrl && (
+                      <a
+                        href={meta.setupUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                      >
+                        Open developer portal
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
                   </div>
                 )}
               </CardContent>
