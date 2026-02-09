@@ -211,10 +211,10 @@ describe('Config Load/Save Round-trip', () => {
 });
 
 describe('Browser Config', () => {
-  it('should default to disabled', () => {
+  it('should default to enabled', () => {
     const config = ConfigSchema.parse({});
     expect(config.browser).toBeDefined();
-    expect(config.browser.enabled).toBe(false);
+    expect(config.browser.enabled).toBe(true);
   });
 
   it('should accept fully specified browser config', () => {

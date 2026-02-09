@@ -276,7 +276,7 @@ export const BrowserConfigSchema = z.object({
    * Whether to inject a Playwright MCP server into agent sessions.
    * When enabled, agents get browser automation with a persistent profile.
    */
-  enabled: z.boolean().default(false),
+  enabled: z.boolean().default(true),
 
   /**
    * Persistent profile directory for browser state (cookies, localStorage,

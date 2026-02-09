@@ -102,6 +102,15 @@ export const DEFAULT_TOOLS_MD = `# TOOLS.md — Workspace Context
 
 Local notes and context specific to this agent's workspace.
 
+## Browser Automation
+You have full browser automation capabilities via Playwright MCP. You can:
+- Navigate to any URL, click elements, fill forms, and interact with web pages
+- Take screenshots and accessibility snapshots of pages
+- Manage tabs, handle dialogs, upload files
+- Use a persistent browser profile (cookies and logins survive across sessions)
+
+Use browser tools for tasks that require real web interaction — booking, form submission, scraping dynamic content, monitoring pages, etc. For simple URL fetching or web search, prefer WebFetch/WebSearch instead.
+
 ## Workspace
 - **Primary Directory:** (where this agent works)
 - **Project Type:** (web app, CLI tool, etc.)

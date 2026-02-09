@@ -137,6 +137,9 @@ function bootstrapDefaultConfig(cladeHome: string, configPath: string): void {
       defaultAgent: '',
       rules: [],
     },
+    browser: {
+      enabled: true,
+    },
   };
 
   writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
