@@ -137,8 +137,8 @@ server.tool(
   },
   async ({ query, limit }) => {
     try {
-      // Re-index before searching to catch any external changes
-      store.reindexAll(agentDir);
+      // Incrementally re-index only files that changed since last search
+      store.reindexChanged(agentDir);
 
       const results = store.search(query, limit);
 
@@ -279,6 +279,137 @@ server.tool(
           {
             type: 'text' as const,
             text: `Error listing memory files: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Tool: memory_delete
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'memory_delete',
+  'Delete a specific entry from MEMORY.md or a daily log, or delete an entire memory file.',
+  {
+    file: z
+      .string()
+      .describe(
+        'Relative path within agent directory, e.g. "MEMORY.md" or "memory/2026-02-01.md"',
+      ),
+    pattern: z
+      .string()
+      .optional()
+      .describe(
+        'If provided, delete only lines/sections matching this text. If omitted, delete the entire file.',
+      ),
+  },
+  async ({ file, pattern }) => {
+    try {
+      const fullPath = join(agentDir, file);
+      if (!existsSync(fullPath)) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `File "${file}" not found.`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      // Security: ensure the path is within agentDir
+      const { resolve } = await import('node:path');
+      const resolved = resolve(fullPath);
+      const agentResolved = resolve(agentDir);
+      if (!resolved.startsWith(agentResolved)) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'Access denied: path is outside agent directory.',
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      if (!pattern) {
+        // Delete entire file
+        const { unlinkSync } = await import('node:fs');
+        unlinkSync(fullPath);
+        store.removeFile(file);
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Deleted "${file}".`,
+            },
+          ],
+        };
+      }
+
+      // Delete matching lines/sections
+      const content = readFileSync(fullPath, 'utf-8');
+      const patternLower = pattern.toLowerCase();
+
+      // Try section-based deletion first (## heading blocks)
+      const sectionRegex = new RegExp(
+        `(^## [^\\n]*${pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^\\n]*\\n)([\\s\\S]*?)(?=^## |\\Z)`,
+        'im',
+      );
+      const sectionMatch = content.match(sectionRegex);
+
+      let updated: string;
+      let deletedCount: number;
+
+      if (sectionMatch) {
+        // Remove the matched section
+        updated = content.replace(sectionRegex, '');
+        deletedCount = 1;
+      } else {
+        // Fall back to line-based deletion
+        const lines = content.split('\n');
+        const kept = lines.filter(
+          (line) => !line.toLowerCase().includes(patternLower),
+        );
+        deletedCount = lines.length - kept.length;
+        updated = kept.join('\n');
+      }
+
+      if (deletedCount === 0) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `No matching content found for "${pattern}" in "${file}".`,
+            },
+          ],
+        };
+      }
+
+      writeFileSync(fullPath, updated, 'utf-8');
+      // Re-index the updated file
+      store.indexFile(file, updated);
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Deleted ${deletedCount} matching ${sectionMatch ? 'section' : 'line'}(s) from "${file}".`,
+          },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error deleting memory: ${err instanceof Error ? err.message : String(err)}`,
           },
         ],
         isError: true,

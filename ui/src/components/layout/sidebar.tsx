@@ -5,7 +5,7 @@ import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   LayoutDashboard, MessageSquare, Bot, FolderOpen, Puzzle, BookOpen,
-  Radio, Clock, Settings, ChevronRight, User, Zap, CalendarDays, Search
+  Radio, Clock, Settings, ChevronRight, User, Zap, CalendarDays, Search, HardDrive
 } from "lucide-react"
 
 interface Agent {
@@ -37,6 +37,7 @@ const NAV_ITEMS = [
   { id: 'activity', label: 'Activity', icon: Zap },
   { id: 'calendar', label: 'Calendar', icon: CalendarDays },
   { id: 'search', label: 'Search', icon: Search },
+  { id: 'backup', label: 'Backup', icon: HardDrive },
   { id: 'config', label: 'Config', icon: Settings },
 ]
 

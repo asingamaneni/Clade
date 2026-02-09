@@ -99,6 +99,26 @@ const migrations: Migration[] = [
       return result;
     },
   },
+  {
+    fromVersion: 4,
+    toVersion: 5,
+    description: 'Add backup configuration for auto-backup to GitHub',
+    up: (config) => {
+      const result: Record<string, unknown> = { ...config, version: 5 };
+
+      if (!result.backup) {
+        result.backup = {
+          enabled: false,
+          repo: '',
+          branch: 'main',
+          intervalMinutes: 30,
+          excludeChats: false,
+        };
+      }
+
+      return result;
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------

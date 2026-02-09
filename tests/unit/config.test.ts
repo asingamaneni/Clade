@@ -32,7 +32,7 @@ describe('Config Schema', () => {
     expect(config.gateway.port).toBe(7890);
     expect(config.gateway.host).toBe('127.0.0.1');
     expect(config.routing.defaultAgent).toBe('');
-    expect(config.version).toBe(4);
+    expect(config.version).toBe(5);
   });
 
   it('should validate a fully specified config', () => {
@@ -337,8 +337,8 @@ describe('Skills Config', () => {
 });
 
 describe('Config Migrations', () => {
-  it('should report current schema version as 4', () => {
-    expect(currentSchemaVersion()).toBe(4);
+  it('should report current schema version as 5', () => {
+    expect(currentSchemaVersion()).toBe(5);
   });
 
   it('should migrate v3 config to v4 by adding skills', () => {
@@ -351,8 +351,8 @@ describe('Config Migrations', () => {
     };
 
     const { config, applied } = migrateConfig(v3Config);
-    expect(config.version).toBe(4);
-    expect(applied).toHaveLength(1);
+    expect(config.version).toBe(5);
+    expect(applied).toHaveLength(2);
     expect(applied[0]).toContain('skills');
 
     // Root-level skills config should be added
@@ -365,7 +365,7 @@ describe('Config Migrations', () => {
     expect(agents['main']!.mcp).toEqual(['memory']);
   });
 
-  it('should not re-migrate already v4 config', () => {
+  it('should migrate v4 config to v5 by adding backup', () => {
     const v4Config = {
       version: 4,
       agents: {
@@ -376,8 +376,15 @@ describe('Config Migrations', () => {
     };
 
     const { config, applied } = migrateConfig(v4Config);
-    expect(applied).toHaveLength(0);
-    expect(config.version).toBe(4);
+    expect(applied).toHaveLength(1);
+    expect(config.version).toBe(5);
+    expect(config.backup).toEqual({
+      enabled: false,
+      repo: '',
+      branch: 'main',
+      intervalMinutes: 30,
+      excludeChats: false,
+    });
   });
 
   it('should migrate from v1 through v4', () => {
@@ -388,8 +395,8 @@ describe('Config Migrations', () => {
     };
 
     const { config, applied } = migrateConfig(v1Config);
-    expect(config.version).toBe(4);
-    expect(applied.length).toBeGreaterThanOrEqual(3);
+    expect(config.version).toBe(5);
+    expect(applied.length).toBeGreaterThanOrEqual(4);
 
     // Should have skills at root level
     expect(config.skills).toEqual({ autoApprove: [] });

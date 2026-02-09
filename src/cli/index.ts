@@ -9,6 +9,7 @@ import { registerWorkCommand } from './commands/work.js';
 import { registerDoctorCommand } from './commands/doctor.js';
 import { registerUiCommand } from './commands/ui.js';
 import { registerDocsCommand } from './commands/docs.js';
+import { registerBackupCommand } from './commands/backup.js';
 
 /**
  * Create and configure the Clade CLI program.
@@ -33,6 +34,7 @@ export function createCli(): Command {
   registerDoctorCommand(program);
   registerUiCommand(program);
   registerDocsCommand(program);
+  registerBackupCommand(program);
 
   // Default action: show help
   program.action(() => {

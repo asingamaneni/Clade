@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 
 export interface ActivityEvent {
   id: string;
-  type: 'chat' | 'skill' | 'mcp' | 'reflection' | 'agent' | 'heartbeat' | 'cron';
+  type: 'chat' | 'skill' | 'mcp' | 'reflection' | 'agent' | 'heartbeat' | 'cron' | 'backup';
   agentId?: string;
   title: string;
   description: string;

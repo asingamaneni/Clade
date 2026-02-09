@@ -19,6 +19,7 @@ import { WelcomePage, OnboardingPage } from '@/pages/welcome'
 import { ActivityPage } from '@/pages/activity'
 import { CalendarPage } from '@/pages/calendar'
 import { SearchPage } from '@/pages/search'
+import { BackupPage } from '@/pages/backup'
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -204,6 +205,7 @@ export default function App() {
             else if (domain === 'skill') fetchSkills()
             else if (domain === 'cron') fetchCron()
             else if (domain === 'channel' || domain === 'webchat') fetchChannels()
+            else if (domain === 'backup') { /* backup page self-fetches */ }
             else if (domain === 'config') fetchAll()
           }
         } catch {}
@@ -305,6 +307,8 @@ export default function App() {
         return <CalendarPage agents={agents} />
       case 'search':
         return <SearchPage onNavigate={setPage} />
+      case 'backup':
+        return <BackupPage />
       case 'config':
         return <ConfigPage />
       default:

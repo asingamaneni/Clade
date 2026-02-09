@@ -164,6 +164,28 @@ export class MemoryStore {
   }
 
   // -------------------------------------------------------------------------
+  // File mtime tracking for incremental indexing
+  // -------------------------------------------------------------------------
+
+  /**
+   * Get the last indexed timestamp for a file.
+   */
+  private getIndexedMtime(filePath: string): number | null {
+    const row = this.db.prepare(
+      'SELECT updated_at FROM memory_chunks WHERE file_path = ? LIMIT 1',
+    ).get(filePath) as { updated_at: string } | undefined;
+    if (!row) return null;
+    return new Date(row.updated_at).getTime();
+  }
+
+  /**
+   * Remove all chunks for a given file path.
+   */
+  removeFile(filePath: string): void {
+    this.db.prepare('DELETE FROM memory_chunks WHERE file_path = ?').run(filePath);
+  }
+
+  // -------------------------------------------------------------------------
   // Bulk re-indexing
   // -------------------------------------------------------------------------
 
@@ -180,6 +202,49 @@ export class MemoryStore {
         this.indexFile(relPath, content);
       }
     });
+    transaction();
+  }
+
+  /**
+   * Incrementally re-index only files that have changed since last indexed.
+   * Compares file mtimes against stored updated_at timestamps.
+   * Also removes chunks for files that no longer exist.
+   */
+  reindexChanged(dir: string): void {
+    const files = collectMarkdownFiles(dir);
+    const fileSet = new Set<string>();
+
+    const transaction = this.db.transaction(() => {
+      for (const absPath of files) {
+        const relPath = relative(dir, absPath);
+        fileSet.add(relPath);
+
+        let fileMtime: number;
+        try {
+          fileMtime = statSync(absPath).mtimeMs;
+        } catch {
+          continue;
+        }
+
+        const indexedMtime = this.getIndexedMtime(relPath);
+        // Skip if file hasn't changed since last index
+        if (indexedMtime !== null && fileMtime <= indexedMtime) continue;
+
+        const content = readFileSync(absPath, 'utf-8');
+        this.indexFile(relPath, content);
+      }
+
+      // Remove chunks for files that no longer exist on disk
+      const indexed = this.db.prepare(
+        'SELECT DISTINCT file_path FROM memory_chunks',
+      ).all() as Array<{ file_path: string }>;
+      for (const row of indexed) {
+        if (!fileSet.has(row.file_path)) {
+          this.removeFile(row.file_path);
+        }
+      }
+    });
+
     transaction();
   }
 

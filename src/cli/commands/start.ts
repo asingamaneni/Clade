@@ -11,6 +11,8 @@ import { DEFAULT_SOUL, DEFAULT_HEARTBEAT, DEFAULT_USER_MD, DEFAULT_TOOLS_MD } fr
 import { runReflectionCycle } from '../../agents/reflection.js';
 import { saveVersion, getVersionHistory, getVersionContent } from '../../agents/versioning.js';
 import { type ActivityEvent, loadActivityLog, saveActivityLog, logActivity } from '../../utils/activity.js';
+import { performBackup, getBackupStatus, getBackupHistory, isBackupInProgress } from '../../backup/backup.js';
+import { MemoryStore } from '../../mcp/memory/store.js';
 
 interface StartOptions {
   port?: string;
@@ -896,6 +898,8 @@ async function startPlaceholderServer(
   // ── WebSocket support for admin dashboard ─────────────────────
   const wsMod = await import('@fastify/websocket').catch(() => null);
   const wsClients = new Set<import('ws').WebSocket>();
+  const memoryStores = new Map<string, MemoryStore>();
+
   if (wsMod) {
     await fastify.register(wsMod.default, { options: { maxPayload: 16 * 1024 * 1024 } });
     fastify.get('/ws/admin', { websocket: true }, (socket) => {
@@ -1494,7 +1498,7 @@ async function startPlaceholderServer(
     }
   });
 
-  // ── Search agent memory ────────────────────────────────────
+  // ── Search agent memory (FTS5-backed) ─────────────────────
   fastify.post<{ Params: { id: string } }>('/api/agents/:id/memory/search', async (req, reply) => {
     const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
     const { id } = req.params;
@@ -1510,49 +1514,36 @@ async function startPlaceholderServer(
     }
 
     const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
-    const baseDir = join(cladeHome, 'agents', id);
-    const memoryDir = join(baseDir, 'memory');
-    const results: Array<{ file: string; snippet: string }> = [];
-    const queryLower = query.toLowerCase();
+    const agentDir = join(cladeHome, 'agents', id);
 
-    // Search MEMORY.md
-    const memoryMdPath = join(baseDir, 'MEMORY.md');
-    if (existsSync(memoryMdPath)) {
-      try {
-        const content = readFileSync(memoryMdPath, 'utf-8');
-        if (content.toLowerCase().includes(queryLower)) {
-          const lines = content.split('\n');
-          for (const line of lines) {
-            if (line.toLowerCase().includes(queryLower)) {
-              results.push({ file: 'MEMORY.md', snippet: line.trim() });
-            }
-          }
-        }
-      } catch {}
+    try {
+      // Get or create a MemoryStore for this agent
+      let store = memoryStores.get(id);
+      if (!store) {
+        const dbPath = join(agentDir, 'memory.db');
+        store = new MemoryStore(dbPath);
+        store.reindexAll(agentDir);
+        memoryStores.set(id, store);
+      } else {
+        store.reindexChanged(agentDir);
+      }
+
+      const limit = typeof (body as any).limit === 'number' ? (body as any).limit : 20;
+      const ftsResults = store.search(query, limit);
+
+      const results = ftsResults.map(r => ({
+        file: r.filePath,
+        snippet: r.chunkText.length > 300
+          ? r.chunkText.slice(0, 300) + '…'
+          : r.chunkText,
+        rank: r.rank,
+      }));
+
+      return { agentId: id, query, results };
+    } catch (err) {
+      reply.status(500);
+      return { error: 'Memory search failed' };
     }
-
-    // Search memory/*.md files
-    if (existsSync(memoryDir)) {
-      try {
-        const { readdirSync: rd } = await import('node:fs');
-        const entries = rd(memoryDir).filter((f: string) => f.endsWith('.md'));
-        for (const entry of entries) {
-          try {
-            const content = readFileSync(join(memoryDir, entry), 'utf-8');
-            if (content.toLowerCase().includes(queryLower)) {
-              const lines = content.split('\n');
-              for (const line of lines) {
-                if (line.toLowerCase().includes(queryLower)) {
-                  results.push({ file: `memory/${entry}`, snippet: line.trim() });
-                }
-              }
-            }
-          } catch {}
-        }
-      } catch {}
-    }
-
-    return { agentId: id, query, results };
   });
 
   // ── Update agent config (PUT) ───────────────────────────────
@@ -3021,7 +3012,7 @@ async function startPlaceholderServer(
       return { error: 'type and title are required' };
     }
 
-    const validTypes = ['chat', 'skill', 'mcp', 'reflection', 'agent', 'heartbeat', 'cron'];
+    const validTypes = ['chat', 'skill', 'mcp', 'reflection', 'agent', 'heartbeat', 'cron', 'backup'];
     if (!validTypes.includes(eventType)) {
       reply.status(400);
       return { error: `type must be one of: ${validTypes.join(', ')}` };
@@ -3036,6 +3027,88 @@ async function startPlaceholderServer(
     });
 
     return { success: true, event };
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Backup API — /api/backup
+  // ═══════════════════════════════════════════════════════════════════════
+
+  fastify.get('/api/backup/status', async () => {
+    const backupConfig = (config.backup ?? {}) as Record<string, unknown>;
+    const bkHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+    return getBackupStatus(bkHome, {
+      enabled: Boolean(backupConfig.enabled),
+      repo: String(backupConfig.repo || ''),
+      branch: String(backupConfig.branch || 'main'),
+      intervalMinutes: Number(backupConfig.intervalMinutes || 30),
+      lastBackupAt: backupConfig.lastBackupAt as string | undefined,
+      lastCommitSha: backupConfig.lastCommitSha as string | undefined,
+      lastError: backupConfig.lastError as string | undefined,
+    });
+  });
+
+  fastify.post('/api/backup/now', async (_req, reply) => {
+    const backupConfig = (config.backup ?? {}) as Record<string, unknown>;
+    if (!backupConfig.repo) {
+      reply.status(400);
+      return { error: 'Backup not configured. Run "clade backup setup --repo owner/repo" first.' };
+    }
+    if (isBackupInProgress()) {
+      reply.status(409);
+      return { error: 'Backup already in progress' };
+    }
+    try {
+      const bkHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+      const bkConfigPath = join(bkHome, 'config.json');
+      const result = await performBackup(bkHome, {
+        repo: String(backupConfig.repo),
+        branch: String(backupConfig.branch || 'main'),
+        excludeChats: Boolean(backupConfig.excludeChats),
+      });
+      if (result.changed) {
+        backupConfig.lastBackupAt = new Date().toISOString();
+        backupConfig.lastCommitSha = result.commitSha;
+        delete backupConfig.lastError;
+        writeFileSync(bkConfigPath, JSON.stringify(config, null, 2), 'utf-8');
+        logActivityLocal({
+          type: 'backup',
+          title: 'Manual backup completed',
+          description: `${result.filesChanged} file(s) committed${result.pushed ? ' and pushed' : ' (push pending)'}`,
+          metadata: { commitSha: result.commitSha, pushed: result.pushed },
+        });
+        broadcastAdmin({ type: 'backup:completed', ...result });
+      }
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      backupConfig.lastError = message;
+      const bkHome2 = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+      writeFileSync(join(bkHome2, 'config.json'), JSON.stringify(config, null, 2), 'utf-8');
+      broadcastAdmin({ type: 'backup:error', error: message });
+      reply.status(500);
+      return { error: message };
+    }
+  });
+
+  fastify.get('/api/backup/history', async (req) => {
+    const query = req.query as Record<string, string>;
+    const limit = Math.min(Number(query.limit) || 20, 100);
+    const bkHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+    const entries = await getBackupHistory(bkHome, limit);
+    return { entries };
+  });
+
+  fastify.put('/api/backup/config', async (req) => {
+    const body = req.body as Record<string, unknown>;
+    const backupConfig = ((config as Record<string, unknown>).backup ?? {}) as Record<string, unknown>;
+    if (body.enabled !== undefined) backupConfig.enabled = Boolean(body.enabled);
+    if (body.intervalMinutes !== undefined) backupConfig.intervalMinutes = Number(body.intervalMinutes);
+    if (body.excludeChats !== undefined) backupConfig.excludeChats = Boolean(body.excludeChats);
+    (config as Record<string, unknown>).backup = backupConfig;
+    const bkHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+    writeFileSync(join(bkHome, 'config.json'), JSON.stringify(config, null, 2), 'utf-8');
+    broadcastAdmin({ type: 'backup:config_updated' });
+    return { success: true, backup: backupConfig };
   });
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -3498,6 +3571,43 @@ async function startPlaceholderServer(
       }, 300);
     });
   }
+
+  // ── Auto-backup timer ────────────────────────────────────────────
+  const backupCfg = (config.backup ?? {}) as Record<string, unknown>;
+  if (backupCfg.enabled && backupCfg.repo && Number(backupCfg.intervalMinutes) > 0) {
+    const intervalMs = Number(backupCfg.intervalMinutes) * 60_000;
+    const backupTimer = setInterval(async () => {
+      if (isBackupInProgress()) return;
+      try {
+        const result = await performBackup(cladeHome, {
+          repo: String(backupCfg.repo),
+          branch: String(backupCfg.branch || 'main'),
+          excludeChats: Boolean(backupCfg.excludeChats),
+        });
+        if (result.changed) {
+          backupCfg.lastBackupAt = new Date().toISOString();
+          backupCfg.lastCommitSha = result.commitSha;
+          delete backupCfg.lastError;
+          writeFileSync(join(cladeHome, 'config.json'), JSON.stringify(config, null, 2), 'utf-8');
+          logActivityLocal({
+            type: 'backup',
+            title: 'Auto-backup completed',
+            description: `${result.filesChanged} file(s) committed${result.pushed ? ' and pushed' : ' (push pending)'}`,
+            metadata: { commitSha: result.commitSha, pushed: result.pushed },
+          });
+          broadcastAdmin({ type: 'backup:completed', ...result });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        backupCfg.lastError = message;
+        writeFileSync(join(cladeHome, 'config.json'), JSON.stringify(config, null, 2), 'utf-8');
+        broadcastAdmin({ type: 'backup:error', error: message });
+      }
+    }, intervalMs);
+    backupTimer.unref();
+    console.log(`  Auto-backup enabled: every ${backupCfg.intervalMinutes}m to ${backupCfg.repo}`);
+  }
+
   const channels = (config.channels ?? {}) as Record<string, { enabled?: boolean }>;
 
   // ── Connect channel adapters (Slack, Telegram, Discord) ─────────

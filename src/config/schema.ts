@@ -318,12 +318,37 @@ export const BrowserConfigSchema = z.object({
 export type BrowserConfig = z.infer<typeof BrowserConfigSchema>;
 
 // ---------------------------------------------------------------------------
+// Backup configuration
+// ---------------------------------------------------------------------------
+
+export const BackupConfigSchema = z.object({
+  /** Whether automatic backup to GitHub is enabled. */
+  enabled: z.boolean().default(false),
+  /** GitHub repo in "owner/repo" format. */
+  repo: z.string().default(''),
+  /** Git branch to push to. */
+  branch: z.string().default('main'),
+  /** How often to auto-backup (in minutes). 0 = manual only. */
+  intervalMinutes: z.number().int().min(0).default(30),
+  /** Exclude chat data from backups. */
+  excludeChats: z.boolean().default(false),
+  /** ISO timestamp of last successful backup. */
+  lastBackupAt: z.string().optional(),
+  /** Short SHA of last backup commit. */
+  lastCommitSha: z.string().optional(),
+  /** Last backup error message (cleared on success). */
+  lastError: z.string().optional(),
+});
+
+export type BackupConfig = z.infer<typeof BackupConfigSchema>;
+
+// ---------------------------------------------------------------------------
 // Root configuration schema
 // ---------------------------------------------------------------------------
 
 export const ConfigSchema = z.object({
   /** Schema version for config migration support. */
-  version: z.number().int().default(4),
+  version: z.number().int().default(5),
 
   /** Agents are user-created. No pre-defined agents — starts empty. */
   agents: z
@@ -343,6 +368,9 @@ export const ConfigSchema = z.object({
 
   /** Browser automation configuration (Playwright MCP). */
   browser: BrowserConfigSchema.default({}),
+
+  /** Auto-backup to GitHub configuration. */
+  backup: BackupConfigSchema.default({}),
 }).passthrough();
 
 export type Config = z.infer<typeof ConfigSchema>;
