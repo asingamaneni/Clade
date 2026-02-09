@@ -167,6 +167,270 @@ describe('MemoryStore', () => {
   });
 
   // -----------------------------------------------------------------------
+  // Embedding storage
+  // -----------------------------------------------------------------------
+
+  describe('embedding storage', () => {
+    it('should store and retrieve an embedding as Float32Array', () => {
+      store.indexFile('emb.md', 'Some content for embedding test');
+
+      // Get the chunk id
+      const results = store.search('embedding test');
+      expect(results).toHaveLength(1);
+
+      // Store a known embedding vector
+      const embedding = new Float32Array([0.1, 0.2, 0.3, 0.4, 0.5]);
+      // We need the chunk id — use a low-level approach via search result
+      // The chunk id is the rowid; we can get it by storing for id 1
+      // Since this is the first and only chunk, its id should be 1
+      store.storeEmbedding(1, embedding);
+
+      const retrieved = store.getEmbedding(1);
+      expect(retrieved).not.toBeNull();
+      expect(retrieved).toBeInstanceOf(Float32Array);
+      expect(retrieved!.length).toBe(5);
+      expect(retrieved![0]).toBeCloseTo(0.1);
+      expect(retrieved![1]).toBeCloseTo(0.2);
+      expect(retrieved![2]).toBeCloseTo(0.3);
+      expect(retrieved![3]).toBeCloseTo(0.4);
+      expect(retrieved![4]).toBeCloseTo(0.5);
+    });
+
+    it('should return null for non-existent embedding', () => {
+      const result = store.getEmbedding(999);
+      expect(result).toBeNull();
+    });
+
+    it('should overwrite embedding on re-store (INSERT OR REPLACE)', () => {
+      store.indexFile('overwrite.md', 'Content to overwrite');
+
+      const v1 = new Float32Array([1.0, 2.0, 3.0]);
+      store.storeEmbedding(1, v1);
+
+      const v2 = new Float32Array([4.0, 5.0, 6.0]);
+      store.storeEmbedding(1, v2);
+
+      const retrieved = store.getEmbedding(1);
+      expect(retrieved![0]).toBeCloseTo(4.0);
+      expect(retrieved![1]).toBeCloseTo(5.0);
+      expect(retrieved![2]).toBeCloseTo(6.0);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // hasEmbeddings
+  // -----------------------------------------------------------------------
+
+  describe('hasEmbeddings', () => {
+    it('should return false when no embeddings exist', () => {
+      expect(store.hasEmbeddings()).toBe(false);
+    });
+
+    it('should return true after storing one embedding', () => {
+      store.indexFile('has.md', 'Content for has embeddings test');
+      store.storeEmbedding(1, new Float32Array([0.1, 0.2, 0.3]));
+      expect(store.hasEmbeddings()).toBe(true);
+    });
+
+    it('should return false on empty store even with chunks', () => {
+      store.indexFile('chunks.md', 'Content with chunks but no embeddings');
+      expect(store.hasEmbeddings()).toBe(false);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // getChunkIdsWithoutEmbeddings
+  // -----------------------------------------------------------------------
+
+  describe('getChunkIdsWithoutEmbeddings', () => {
+    it('should return all chunk IDs when no embeddings exist', () => {
+      store.indexFile('a.md', 'First file');
+      store.indexFile('b.md', 'Second file');
+
+      const ids = store.getChunkIdsWithoutEmbeddings();
+      expect(ids).toHaveLength(2);
+    });
+
+    it('should return empty array when all chunks have embeddings', () => {
+      store.indexFile('all.md', 'Content for all embedded');
+
+      const ids = store.getChunkIdsWithoutEmbeddings();
+      expect(ids).toHaveLength(1);
+
+      store.storeEmbedding(ids[0]!, new Float32Array([0.1, 0.2]));
+
+      const remaining = store.getChunkIdsWithoutEmbeddings();
+      expect(remaining).toHaveLength(0);
+    });
+
+    it('should return only chunk IDs without embeddings', () => {
+      store.indexFile('partial1.md', 'First partial');
+      store.indexFile('partial2.md', 'Second partial');
+
+      const allIds = store.getChunkIdsWithoutEmbeddings();
+      expect(allIds).toHaveLength(2);
+
+      // Embed only the first chunk
+      store.storeEmbedding(allIds[0]!, new Float32Array([0.5]));
+
+      const remaining = store.getChunkIdsWithoutEmbeddings();
+      expect(remaining).toHaveLength(1);
+      expect(remaining[0]).toBe(allIds[1]);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // vectorSearch
+  // -----------------------------------------------------------------------
+
+  describe('vectorSearch', () => {
+    it('should return results sorted by cosine similarity (most similar first)', () => {
+      store.indexFile('dog.md', 'Dogs are loyal animals');
+      store.indexFile('cat.md', 'Cats are independent pets');
+      store.indexFile('car.md', 'Cars need gasoline to run');
+
+      // Create embeddings that have known cosine similarity
+      // Query vector: [1, 0, 0]
+      // dog embedding: [0.9, 0.1, 0.0] -> high similarity
+      // cat embedding: [0.5, 0.5, 0.0] -> medium similarity
+      // car embedding: [0.0, 0.1, 0.9] -> low similarity
+      const ids = store.getChunkIdsWithoutEmbeddings();
+      // Sort ids to map them predictably: dog=1, cat=2, car=3
+      ids.sort((a, b) => a - b);
+
+      store.storeEmbedding(ids[0]!, new Float32Array([0.9, 0.1, 0.0]));
+      store.storeEmbedding(ids[1]!, new Float32Array([0.5, 0.5, 0.0]));
+      store.storeEmbedding(ids[2]!, new Float32Array([0.0, 0.1, 0.9]));
+
+      const query = new Float32Array([1.0, 0.0, 0.0]);
+      const results = store.vectorSearch(query, 3);
+
+      expect(results).toHaveLength(3);
+      // First result should be the most similar (dog)
+      expect(results[0]!.chunkText).toContain('Dogs');
+      // Last result should be the least similar (car)
+      expect(results[2]!.chunkText).toContain('Cars');
+      // rank should be negative similarity (lower = more relevant)
+      expect(results[0]!.rank).toBeLessThan(results[2]!.rank);
+      // similarity should be positive
+      expect(results[0]!.similarity).toBeGreaterThan(results[2]!.similarity!);
+    });
+
+    it('should respect the limit parameter', () => {
+      store.indexFile('a.md', 'File A');
+      store.indexFile('b.md', 'File B');
+      store.indexFile('c.md', 'File C');
+
+      const ids = store.getChunkIdsWithoutEmbeddings();
+      ids.sort((a, b) => a - b);
+      store.storeEmbedding(ids[0]!, new Float32Array([1.0, 0.0]));
+      store.storeEmbedding(ids[1]!, new Float32Array([0.5, 0.5]));
+      store.storeEmbedding(ids[2]!, new Float32Array([0.0, 1.0]));
+
+      const query = new Float32Array([1.0, 0.0]);
+      const results = store.vectorSearch(query, 2);
+      expect(results).toHaveLength(2);
+    });
+
+    it('should return empty array when no embeddings exist', () => {
+      store.indexFile('none.md', 'No embeddings here');
+
+      const query = new Float32Array([1.0, 0.0]);
+      const results = store.vectorSearch(query);
+      expect(results).toHaveLength(0);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // hybridSearch
+  // -----------------------------------------------------------------------
+
+  describe('hybridSearch', () => {
+    it('should combine FTS5 and vector results using RRF', () => {
+      store.indexFile('ts.md', 'TypeScript is a typed programming language');
+      store.indexFile('js.md', 'JavaScript is a dynamic scripting language');
+      store.indexFile('py.md', 'Python is great for data science');
+
+      const ids = store.getChunkIdsWithoutEmbeddings();
+      ids.sort((a, b) => a - b);
+
+      // Make the vector search favor Python (opposite of FTS for "TypeScript")
+      store.storeEmbedding(ids[0]!, new Float32Array([0.1, 0.9])); // ts
+      store.storeEmbedding(ids[1]!, new Float32Array([0.3, 0.7])); // js
+      store.storeEmbedding(ids[2]!, new Float32Array([0.9, 0.1])); // py
+
+      const queryEmb = new Float32Array([0.8, 0.2]); // favors Python in vector space
+      const results = store.hybridSearch('TypeScript programming', queryEmb, 3);
+
+      expect(results.length).toBeGreaterThanOrEqual(1);
+      // Results should have rank values (negative RRF scores)
+      for (const r of results) {
+        expect(typeof r.rank).toBe('number');
+        expect(r.rank).toBeLessThan(0);
+      }
+    });
+
+    it('should return results from both FTS and vector when they differ', () => {
+      store.indexFile('alpha.md', 'Alpha bravo charlie');
+      store.indexFile('delta.md', 'Delta echo foxtrot');
+
+      const ids = store.getChunkIdsWithoutEmbeddings();
+      ids.sort((a, b) => a - b);
+
+      store.storeEmbedding(ids[0]!, new Float32Array([0.1, 0.9]));
+      store.storeEmbedding(ids[1]!, new Float32Array([0.9, 0.1]));
+
+      // FTS will match "Alpha" -> alpha.md
+      // Vector will match delta.md (closer to [1,0])
+      const queryEmb = new Float32Array([1.0, 0.0]);
+      const results = store.hybridSearch('Alpha', queryEmb, 10);
+
+      // Should have results from both sources
+      expect(results.length).toBe(2);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // CASCADE delete (embeddings removed when chunks are deleted)
+  // -----------------------------------------------------------------------
+
+  describe('CASCADE delete', () => {
+    it('should remove embeddings when file is re-indexed', () => {
+      store.indexFile('cascade.md', 'Original content for cascade');
+
+      const ids = store.getChunkIdsWithoutEmbeddings();
+      expect(ids).toHaveLength(1);
+
+      store.storeEmbedding(ids[0]!, new Float32Array([1.0, 2.0, 3.0]));
+      expect(store.hasEmbeddings()).toBe(true);
+      expect(store.getEmbedding(ids[0]!)).not.toBeNull();
+
+      // Re-index the same file (deletes old chunks, creates new ones)
+      store.indexFile('cascade.md', 'Completely new content after re-index');
+
+      // Old embedding should be gone due to CASCADE delete
+      expect(store.getEmbedding(ids[0]!)).toBeNull();
+
+      // New chunk should exist without embedding
+      const newIds = store.getChunkIdsWithoutEmbeddings();
+      expect(newIds).toHaveLength(1);
+      expect(newIds[0]).not.toBe(ids[0]);
+    });
+
+    it('should remove embeddings when file is removed', () => {
+      store.indexFile('removal.md', 'Content to be removed');
+
+      const ids = store.getChunkIdsWithoutEmbeddings();
+      store.storeEmbedding(ids[0]!, new Float32Array([1.0]));
+      expect(store.hasEmbeddings()).toBe(true);
+
+      store.removeFile('removal.md');
+
+      expect(store.hasEmbeddings()).toBe(false);
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // File path tracking
   // -----------------------------------------------------------------------
 

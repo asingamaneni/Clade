@@ -13,6 +13,7 @@ import { saveVersion, getVersionHistory, getVersionContent } from '../../agents/
 import { type ActivityEvent, loadActivityLog, saveActivityLog, logActivity } from '../../utils/activity.js';
 import { performBackup, getBackupStatus, getBackupHistory, isBackupInProgress } from '../../backup/backup.js';
 import { MemoryStore } from '../../mcp/memory/store.js';
+import { embeddingProvider } from '../../mcp/memory/embeddings.js';
 
 interface StartOptions {
   port?: string;
@@ -1498,7 +1499,7 @@ async function startPlaceholderServer(
     }
   });
 
-  // ── Search agent memory (FTS5-backed) ─────────────────────
+  // ── Search agent memory (FTS5 + vector hybrid) ────────────
   fastify.post<{ Params: { id: string } }>('/api/agents/:id/memory/search', async (req, reply) => {
     const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
     const { id } = req.params;
@@ -1529,17 +1530,36 @@ async function startPlaceholderServer(
       }
 
       const limit = typeof (body as any).limit === 'number' ? (body as any).limit : 20;
-      const ftsResults = store.search(query, limit);
+      const mode = typeof (body as any).mode === 'string' ? (body as any).mode : 'keyword';
 
-      const results = ftsResults.map(r => ({
+      let searchResults;
+      const useVector = (mode === 'semantic' || mode === 'hybrid') && store.hasEmbeddings();
+
+      if (useVector) {
+        try {
+          const queryEmbedding = await embeddingProvider.embed(query);
+          if (mode === 'hybrid') {
+            searchResults = store.hybridSearch(query, queryEmbedding, limit);
+          } else {
+            searchResults = store.vectorSearch(queryEmbedding, limit);
+          }
+        } catch {
+          searchResults = store.search(query, limit);
+        }
+      } else {
+        searchResults = store.search(query, limit);
+      }
+
+      const results = searchResults.map(r => ({
         file: r.filePath,
         snippet: r.chunkText.length > 300
           ? r.chunkText.slice(0, 300) + '…'
           : r.chunkText,
         rank: r.rank,
+        similarity: r.similarity,
       }));
 
-      return { agentId: id, query, results };
+      return { agentId: id, query, mode: useVector ? mode : 'keyword', results };
     } catch (err) {
       reply.status(500);
       return { error: 'Memory search failed' };

@@ -12,6 +12,7 @@ export interface SearchResult {
   chunkStart: number;
   chunkEnd: number;
   rank: number;
+  similarity?: number; // cosine similarity score (0-1)
 }
 
 // ---------------------------------------------------------------------------
@@ -71,7 +72,16 @@ export class MemoryStore {
         INSERT INTO memory_fts(memory_fts, rowid, chunk_text) VALUES('delete', old.id, old.chunk_text);
         INSERT INTO memory_fts(rowid, chunk_text) VALUES (new.id, new.chunk_text);
       END;
+
+      CREATE TABLE IF NOT EXISTS memory_embeddings (
+        chunk_id INTEGER PRIMARY KEY REFERENCES memory_chunks(id) ON DELETE CASCADE,
+        embedding BLOB NOT NULL,
+        model TEXT NOT NULL DEFAULT 'all-MiniLM-L6-v2',
+        created_at TEXT DEFAULT (datetime('now'))
+      );
     `);
+    // Enable foreign keys so CASCADE deletes work for memory_embeddings
+    this.db.pragma('foreign_keys = ON');
   }
 
   // -------------------------------------------------------------------------
@@ -161,6 +171,175 @@ export class MemoryStore {
       chunkEnd: row.chunk_end,
       rank: row.rank,
     }));
+  }
+
+  // -------------------------------------------------------------------------
+  // Vector embeddings
+  // -------------------------------------------------------------------------
+
+  /**
+   * Store a vector embedding for a chunk. Uses INSERT OR REPLACE so
+   * re-indexing the same chunk overwrites the old embedding.
+   */
+  storeEmbedding(chunkId: number, embedding: Float32Array): void {
+    this.db.prepare(
+      'INSERT OR REPLACE INTO memory_embeddings (chunk_id, embedding) VALUES (?, ?)',
+    ).run(chunkId, Buffer.from(embedding.buffer));
+  }
+
+  /**
+   * Retrieve the stored embedding for a chunk, or null if none exists.
+   */
+  getEmbedding(chunkId: number): Float32Array | null {
+    const row = this.db.prepare(
+      'SELECT embedding FROM memory_embeddings WHERE chunk_id = ?',
+    ).get(chunkId) as { embedding: Buffer } | undefined;
+    if (!row) return null;
+    return new Float32Array(row.embedding.buffer, row.embedding.byteOffset, row.embedding.byteLength / 4);
+  }
+
+  /**
+   * Quick check whether any embeddings have been stored (used to determine
+   * if semantic search is available).
+   */
+  hasEmbeddings(): boolean {
+    const row = this.db.prepare(
+      'SELECT 1 FROM memory_embeddings LIMIT 1',
+    ).get();
+    return row !== undefined;
+  }
+
+  /**
+   * Return chunk IDs that do not yet have embeddings (for incremental
+   * embedding generation).
+   */
+  getChunkIdsWithoutEmbeddings(): number[] {
+    const rows = this.db.prepare(`
+      SELECT mc.id FROM memory_chunks mc
+      LEFT JOIN memory_embeddings me ON me.chunk_id = mc.id
+      WHERE me.chunk_id IS NULL
+    `).all() as Array<{ id: number }>;
+    return rows.map((r) => r.id);
+  }
+
+  /**
+   * Return chunks that do not yet have embeddings, including their text.
+   * Used for incremental embedding generation.
+   */
+  getChunksWithoutEmbeddings(): Array<{ id: number; chunkText: string }> {
+    const rows = this.db.prepare(`
+      SELECT mc.id, mc.chunk_text FROM memory_chunks mc
+      LEFT JOIN memory_embeddings me ON me.chunk_id = mc.id
+      WHERE me.chunk_id IS NULL
+    `).all() as Array<{ id: number; chunk_text: string }>;
+    return rows.map((r) => ({ id: r.id, chunkText: r.chunk_text }));
+  }
+
+  /**
+   * Pure vector similarity search. Loads all embeddings, computes cosine
+   * similarity against `queryEmbedding`, and returns the top `limit` results.
+   * The `rank` field is set to `-similarity` so that lower = more relevant,
+   * consistent with FTS5 rank semantics.
+   */
+  vectorSearch(queryEmbedding: Float32Array, limit: number = 10): SearchResult[] {
+    const rows = this.db.prepare(`
+      SELECT
+        me.chunk_id,
+        me.embedding,
+        mc.file_path,
+        mc.chunk_text,
+        mc.chunk_start,
+        mc.chunk_end
+      FROM memory_embeddings me
+      JOIN memory_chunks mc ON mc.id = me.chunk_id
+    `).all() as Array<{
+      chunk_id: number;
+      embedding: Buffer;
+      file_path: string;
+      chunk_text: string;
+      chunk_start: number;
+      chunk_end: number;
+    }>;
+
+    const scored = rows.map((row) => {
+      const emb = new Float32Array(row.embedding.buffer, row.embedding.byteOffset, row.embedding.byteLength / 4);
+      const sim = this.cosineSimilarity(queryEmbedding, emb);
+      return {
+        filePath: row.file_path,
+        chunkText: row.chunk_text,
+        chunkStart: row.chunk_start,
+        chunkEnd: row.chunk_end,
+        rank: -sim, // lower = more relevant, consistent with FTS5
+        similarity: sim,
+      } satisfies SearchResult;
+    });
+
+    scored.sort((a, b) => a.rank - b.rank);
+    return scored.slice(0, limit);
+  }
+
+  /**
+   * Hybrid search combining FTS5 full-text and vector similarity results
+   * using Reciprocal Rank Fusion (RRF). Returns the top `limit` merged results.
+   */
+  hybridSearch(query: string, queryEmbedding: Float32Array, limit: number = 10): SearchResult[] {
+    const k = 60; // standard RRF constant
+    const poolSize = limit * 2;
+
+    const ftsResults = this.search(query, poolSize);
+    const vecResults = this.vectorSearch(queryEmbedding, poolSize);
+
+    // Build a unique key for each result (file + start offset)
+    const key = (r: SearchResult) => `${r.filePath}:${r.chunkStart}`;
+
+    // Map from key -> { result, rrf score }
+    const merged = new Map<string, { result: SearchResult; rrfScore: number }>();
+
+    for (const [i, r] of ftsResults.entries()) {
+      const k_ = key(r);
+      const existing = merged.get(k_);
+      if (existing) {
+        existing.rrfScore += 1 / (k + i + 1);
+      } else {
+        merged.set(k_, { result: r, rrfScore: 1 / (k + i + 1) });
+      }
+    }
+
+    for (const [i, r] of vecResults.entries()) {
+      const k_ = key(r);
+      const existing = merged.get(k_);
+      if (existing) {
+        existing.rrfScore += 1 / (k + i + 1);
+        // Preserve the similarity score from vector results
+        existing.result.similarity = r.similarity;
+      } else {
+        merged.set(k_, { result: r, rrfScore: 1 / (k + i + 1) });
+      }
+    }
+
+    const sorted = [...merged.values()].sort((a, b) => b.rrfScore - a.rrfScore);
+    return sorted.slice(0, limit).map((entry) => ({
+      ...entry.result,
+      rank: -entry.rrfScore, // negate so lower = better
+    }));
+  }
+
+  // -------------------------------------------------------------------------
+  // Helpers
+  // -------------------------------------------------------------------------
+
+  private cosineSimilarity(a: Float32Array, b: Float32Array): number {
+    let dot = 0;
+    let normA = 0;
+    let normB = 0;
+    for (let i = 0; i < a.length; i++) {
+      const ai = a[i]!;
+      const bi = b[i]!;
+      dot += ai * bi;
+      normA += ai * ai;
+      normB += bi * bi;
+    }
+    return dot / (Math.sqrt(normA) * Math.sqrt(normB));
   }
 
   // -------------------------------------------------------------------------

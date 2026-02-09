@@ -18,7 +18,12 @@ import {
   appendToLongTermMemory,
   readMemoryFile,
 } from './daily-log.js';
+import {
+  checkAndArchiveMemory,
+  consolidateDailyLogs,
+} from './consolidation.js';
 import { saveVersion } from '../../agents/versioning.js';
+import { embeddingProvider } from './embeddings.js';
 
 // ---------------------------------------------------------------------------
 // Environment
@@ -40,6 +45,38 @@ const store = new MemoryStore(dbPath);
 
 // Initial indexing of all existing markdown files
 store.reindexAll(agentDir);
+
+// ---------------------------------------------------------------------------
+// Background embedding generation
+// ---------------------------------------------------------------------------
+
+let embeddingInProgress = false;
+
+/**
+ * Generate embeddings for any chunks that don't have them yet.
+ * Runs in the background — does not block the calling tool.
+ */
+async function generateMissingEmbeddings(): Promise<void> {
+  if (embeddingInProgress) return;
+  embeddingInProgress = true;
+
+  try {
+    const missing = store.getChunksWithoutEmbeddings();
+    if (missing.length === 0) return;
+
+    for (const { id, chunkText } of missing) {
+      try {
+        const embedding = await embeddingProvider.embed(chunkText);
+        store.storeEmbedding(id, embedding);
+      } catch {
+        // Model not available — stop trying
+        break;
+      }
+    }
+  } finally {
+    embeddingInProgress = false;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // MCP Server
@@ -78,11 +115,22 @@ server.tool(
           store.indexFile('MEMORY.md', fileContent);
         }
 
+        // Auto-archive if MEMORY.md exceeds size limit
+        const archiveResult = checkAndArchiveMemory(agentDir);
+        if (archiveResult.archived) {
+          // Re-index after archival rewrote MEMORY.md
+          store.reindexChanged(agentDir);
+        }
+
+        const archiveNote = archiveResult.archived
+          ? ` (auto-archived ${archiveResult.sectionsArchived} old sections)`
+          : '';
+
         return {
           content: [
             {
               type: 'text' as const,
-              text: 'Stored to long-term memory (MEMORY.md).',
+              text: `Stored to long-term memory (MEMORY.md).${archiveNote}`,
             },
           ],
         };
@@ -130,17 +178,43 @@ server.tool(
 
 server.tool(
   'memory_search',
-  'Search across all memory files using full-text search.',
+  'Search across all memory files. Supports keyword (FTS5), semantic (vector similarity), or hybrid (combined) modes.',
   {
     query: z.string().describe('Search query'),
     limit: z.number().default(10).describe('Maximum number of results'),
+    mode: z
+      .enum(['keyword', 'semantic', 'hybrid'])
+      .default('keyword')
+      .describe(
+        'Search mode: "keyword" (FTS5), "semantic" (vector similarity), or "hybrid" (combined). Falls back to keyword if embeddings are unavailable.',
+      ),
   },
-  async ({ query, limit }) => {
+  async ({ query, limit, mode }) => {
     try {
       // Incrementally re-index only files that changed since last search
       store.reindexChanged(agentDir);
 
-      const results = store.search(query, limit);
+      // Trigger background embedding generation for any new chunks
+      generateMissingEmbeddings().catch(() => {});
+
+      let results;
+      const useVector = (mode === 'semantic' || mode === 'hybrid') && store.hasEmbeddings();
+
+      if (useVector) {
+        try {
+          const queryEmbedding = await embeddingProvider.embed(query);
+          if (mode === 'hybrid') {
+            results = store.hybridSearch(query, queryEmbedding, limit);
+          } else {
+            results = store.vectorSearch(queryEmbedding, limit);
+          }
+        } catch {
+          // Embedding failed — fall back to keyword search
+          results = store.search(query, limit);
+        }
+      } else {
+        results = store.search(query, limit);
+      }
 
       if (results.length === 0) {
         return {
@@ -153,16 +227,20 @@ server.tool(
         };
       }
 
+      const modeUsed = useVector ? mode : 'keyword';
       const formatted = results.map((r, i) => {
         const snippet =
           r.chunkText.length > 300
             ? r.chunkText.slice(0, 300) + '...'
             : r.chunkText;
+        const simNote = r.similarity !== undefined
+          ? `\n- **Similarity:** ${r.similarity.toFixed(4)}`
+          : '';
         return [
           `### Result ${i + 1}`,
           `- **File:** ${r.filePath}`,
           `- **Lines:** ${r.chunkStart}-${r.chunkEnd} (char offset)`,
-          `- **Relevance:** ${r.rank.toFixed(4)}`,
+          `- **Relevance:** ${r.rank.toFixed(4)}${simNote}`,
           '',
           snippet,
         ].join('\n');
@@ -172,7 +250,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: formatted.join('\n\n---\n\n'),
+            text: `*Search mode: ${modeUsed}*\n\n${formatted.join('\n\n---\n\n')}`,
           },
         ],
       };
@@ -732,6 +810,86 @@ server.tool(
           {
             type: 'text' as const,
             text: `Error updating TOOLS.md: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Tool: memory_consolidate
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'memory_consolidate',
+  'Consolidate recent daily logs into MEMORY.md and archive old sections. Extracts important facts from daily logs and appends them to long-term memory, then optionally archives oversized MEMORY.md sections.',
+  {
+    days: z
+      .number()
+      .default(7)
+      .describe('How many days of daily logs to process'),
+    archive: z
+      .boolean()
+      .default(true)
+      .describe('Whether to also archive oversized MEMORY.md'),
+  },
+  async ({ days, archive }) => {
+    try {
+      // Step 1: Consolidate daily logs into MEMORY.md
+      const consolidation = consolidateDailyLogs(agentDir, days);
+
+      // Step 2: Optionally archive oversized MEMORY.md
+      let archiveResult = null;
+      if (archive) {
+        archiveResult = checkAndArchiveMemory(agentDir);
+      }
+
+      // Step 3: Re-index MEMORY.md and any new archive files
+      store.reindexChanged(agentDir);
+
+      // Build response
+      const parts: string[] = [
+        `## Consolidation Results`,
+        '',
+        `- **Days processed:** ${consolidation.daysProcessed}`,
+        `- **Facts extracted:** ${consolidation.factsExtracted}`,
+        `- **New facts added:** ${consolidation.factsAdded}`,
+      ];
+
+      if (archiveResult) {
+        parts.push('');
+        if (archiveResult.archived) {
+          parts.push(`## Archive Results`);
+          parts.push('');
+          parts.push(
+            `- **Sections archived:** ${archiveResult.sectionsArchived}`,
+          );
+          parts.push(
+            `- **New MEMORY.md size:** ${archiveResult.newSize} chars`,
+          );
+        } else {
+          parts.push(
+            `MEMORY.md is within size limit (${archiveResult.newSize} chars). No archiving needed.`,
+          );
+        }
+      }
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: parts.join('\n'),
+          },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error consolidating memory: ${err instanceof Error ? err.message : String(err)}`,
           },
         ],
         isError: true,
