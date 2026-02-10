@@ -12,7 +12,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { api } from '@/lib/api'
 import {
-  MessageSquare, Puzzle, BookOpen, Bot, RefreshCw, Loader2, Zap, Search as SearchIcon, Heart, Timer
+  MessageSquare, Puzzle, BookOpen, Bot, RefreshCw, Loader2, Zap, Search as SearchIcon, Heart, Timer, ArrowRightLeft, Calendar, X
 } from "lucide-react"
 
 // ---------------------------------------------------------------------------
@@ -21,7 +21,7 @@ import {
 
 interface ActivityEvent {
   id: string
-  type: 'chat' | 'skill' | 'mcp' | 'reflection' | 'agent' | 'heartbeat' | 'cron'
+  type: 'chat' | 'skill' | 'mcp' | 'reflection' | 'agent' | 'heartbeat' | 'cron' | 'delegation'
   agentId?: string
   title: string
   description: string
@@ -66,9 +66,10 @@ const EVENT_CONFIG: Record<string, { color: string; bg: string; border: string; 
   agent:      { color: 'text-cyan-400',   bg: 'bg-cyan-500/10',   border: 'border-l-cyan-500',   icon: Bot,           label: 'Agent' },
   heartbeat:  { color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-l-emerald-500', icon: Heart,       label: 'Heartbeat' },
   cron:       { color: 'text-sky-400',   bg: 'bg-sky-500/10',   border: 'border-l-sky-500',   icon: Timer,         label: 'Cron' },
+  delegation: { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-l-orange-500', icon: ArrowRightLeft, label: 'Delegation' },
 }
 
-const FILTER_TYPES = ['all', 'chat', 'skill', 'mcp', 'reflection', 'agent', 'heartbeat', 'cron'] as const
+const FILTER_TYPES = ['all', 'chat', 'skill', 'mcp', 'reflection', 'agent', 'heartbeat', 'cron', 'delegation'] as const
 
 // ---------------------------------------------------------------------------
 // Component
@@ -261,6 +262,18 @@ function EventDetailContent({ event, agents }: { event: ActivityEvent; agents: A
         </div>
       )
 
+    case 'delegation':
+      return (
+        <div className="space-y-4">
+          {commonHeader}
+          <DetailSection label="DESCRIPTION">
+            <pre className="text-sm bg-secondary/50 rounded-md p-3 whitespace-pre-wrap break-words">
+              {event.description}
+            </pre>
+          </DetailSection>
+        </div>
+      )
+
     default:
       return (
         <div className="space-y-4">
@@ -284,15 +297,50 @@ export function ActivityPage({ agents, wsRef }: ActivityPageProps) {
   const [loadingMore, setLoadingMore] = useState(false)
   const [filter, setFilter] = useState<string>('all')
   const [agentFilter, setAgentFilter] = useState<string>('all')
+  const [datePreset, setDatePreset] = useState<string>('all')
+  const [dateFrom, setDateFrom] = useState<string>('')
+  const [dateTo, setDateTo] = useState<string>('')
   const [hasMore, setHasMore] = useState(true)
   const [selectedEvent, setSelectedEvent] = useState<ActivityEvent | null>(null)
   const offsetRef = useRef(0)
+
+  // Compute effective from/to ISO strings from preset or custom inputs
+  const getDateRange = useCallback((): { from?: string; to?: string } => {
+    if (datePreset === 'custom') {
+      return {
+        from: dateFrom ? new Date(dateFrom).toISOString() : undefined,
+        to: dateTo ? new Date(dateTo + 'T23:59:59.999').toISOString() : undefined,
+      }
+    }
+    if (datePreset === 'all') return {}
+    const now = new Date()
+    const startOfDay = (d: Date) => { d.setHours(0, 0, 0, 0); return d }
+    switch (datePreset) {
+      case 'today':
+        return { from: startOfDay(new Date(now)).toISOString() }
+      case 'yesterday': {
+        const yStart = startOfDay(new Date(now))
+        yStart.setDate(yStart.getDate() - 1)
+        const yEnd = new Date(yStart)
+        yEnd.setHours(23, 59, 59, 999)
+        return { from: yStart.toISOString(), to: yEnd.toISOString() }
+      }
+      case '7d':
+        return { from: new Date(now.getTime() - 7 * 86400000).toISOString() }
+      case '30d':
+        return { from: new Date(now.getTime() - 30 * 86400000).toISOString() }
+      default: return {}
+    }
+  }, [datePreset, dateFrom, dateTo])
 
   const fetchEvents = useCallback(async (offset = 0, append = false) => {
     try {
       const params = new URLSearchParams({ limit: '50', offset: String(offset) })
       if (filter !== 'all') params.set('type', filter)
       if (agentFilter !== 'all') params.set('agentId', agentFilter)
+      const range = getDateRange()
+      if (range.from) params.set('from', range.from)
+      if (range.to) params.set('to', range.to)
 
       const data = await api<{ events: ActivityEvent[] }>(`/activity?${params}`)
       const fetched = data.events || []
@@ -307,7 +355,7 @@ export function ActivityPage({ agents, wsRef }: ActivityPageProps) {
     } catch {
       if (!append) setEvents([])
     }
-  }, [filter, agentFilter])
+  }, [filter, agentFilter, getDateRange])
 
   // Initial load + reload on filter change
   useEffect(() => {
@@ -329,6 +377,10 @@ export function ActivityPage({ agents, wsRef }: ActivityPageProps) {
           // Apply current filters
           if (filter !== 'all' && evt.type !== filter) return
           if (agentFilter !== 'all' && evt.agentId !== agentFilter) return
+          // Apply date filter — only check if date range excludes future/past
+          const range = getDateRange()
+          if (range.from && new Date(evt.timestamp).getTime() < new Date(range.from).getTime()) return
+          if (range.to && new Date(evt.timestamp).getTime() > new Date(range.to).getTime()) return
           setEvents(prev => [evt, ...prev])
         }
       } catch {}
@@ -336,7 +388,7 @@ export function ActivityPage({ agents, wsRef }: ActivityPageProps) {
 
     ws.addEventListener('message', handler)
     return () => ws.removeEventListener('message', handler)
-  }, [wsRef, filter, agentFilter])
+  }, [wsRef, filter, agentFilter, getDateRange])
 
   const loadMore = async () => {
     setLoadingMore(true)
@@ -355,7 +407,53 @@ export function ActivityPage({ agents, wsRef }: ActivityPageProps) {
         </div>
       </div>
 
-      {/* Filters */}
+      {/* Date range filter */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
+        {(['all', 'today', 'yesterday', '7d', '30d', 'custom'] as const).map(preset => (
+          <Button
+            key={preset}
+            size="sm"
+            variant={datePreset === preset ? "default" : "outline"}
+            className="h-7 text-xs"
+            onClick={() => {
+              setDatePreset(preset)
+              if (preset !== 'custom') { setDateFrom(''); setDateTo('') }
+            }}
+          >
+            {preset === 'all' ? 'All time' : preset === 'today' ? 'Today' : preset === 'yesterday' ? 'Yesterday' : preset === '7d' ? 'Last 7 days' : preset === '30d' ? 'Last 30 days' : 'Custom'}
+          </Button>
+        ))}
+        {datePreset === 'custom' && (
+          <div className="flex items-center gap-2 ml-1">
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={e => setDateFrom(e.target.value)}
+              className="h-7 text-xs rounded-md border border-input bg-background px-2 text-foreground"
+            />
+            <span className="text-xs text-muted-foreground">to</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={e => setDateTo(e.target.value)}
+              className="h-7 text-xs rounded-md border border-input bg-background px-2 text-foreground"
+            />
+            {(dateFrom || dateTo) && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 w-7 p-0"
+                onClick={() => { setDateFrom(''); setDateTo('') }}
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Type & agent filters */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="flex gap-1.5">
           {FILTER_TYPES.map(t => {

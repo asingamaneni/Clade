@@ -47,17 +47,15 @@ channel routing, proactive scheduling, and autonomous work loops.
 │     └────────────────┘ └────────────────┘ └────────────────┘    │
 │                                                                    │
 │  ┌──────────────────────────────────────────────────────────────┐ │
-│  │                    MCP Server Layer (6 servers)              │ │
+│  │                    MCP Server Layer (8 servers)              │ │
 │  │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────────┐      │ │
 │  │  │ Memory  │ │Sessions │ │Messaging│ │ MCP Manager │      │ │
-│  │  │ (10)    │ │ (5)     │ │ (3)     │ │ (5)         │      │ │
+│  │  │ (12)    │ │ (5)     │ │ (3)     │ │ (5)         │      │ │
 │  │  └─────────┘ └─────────┘ └─────────┘ └─────────────┘      │ │
-│  │  ┌─────────┐ ┌──────────────────────────────────────┐      │ │
-│  │  │Platform │ │ Admin MCP (24 tools, orchestrators)  │      │ │
-│  │  │ (6)     │ │ skill discovery/install/create/manage│      │ │
-│  │  └─────────┘ │ MCP server management, agent mgmt   │      │ │
-│  │              │ plugin management                    │      │ │
-│  │              └──────────────────────────────────────┘      │ │
+│  │  ┌─────────┐ ┌─────────────┐ ┌────────────────────────┐   │ │
+│  │  │Platform │ │Collaboration│ │ Admin MCP (24 tools,   │   │ │
+│  │  │ (6)     │ │ (9)         │ │ orchestrators only)    │   │ │
+│  │  └─────────┘ └─────────────┘ └────────────────────────┘   │ │
 │  └──────────────────────────────────────────────────────────────┘ │
 │                                                                    │
 │  ┌──────────────────────────────────────────────────────────────┐ │
@@ -75,9 +73,10 @@ channel routing, proactive scheduling, and autonomous work loops.
 │                                                                    │
 │  ┌──────────────────────────────────────────────────────────────┐ │
 │  │  Admin UI (React + Radix UI + Tailwind + Vite, /admin)      │ │
-│  │  14 pages: Dashboard, Chat, Agents, Sessions, MCP, Skills,  │ │
+│  │  19 pages: Dashboard, Chat, Agents, Sessions, MCP, Skills,  │ │
 │  │  Channels, Cron, Config, User, Welcome, Activity, Calendar, │ │
-│  │  Search  (Mission Control: Activity Feed + Calendar + Search)│ │
+│  │  Search, Backup, Collaboration, Docs, Discord, Health       │ │
+│  │  (Mission Control: Activity Feed + Calendar + Search)        │ │
 │  └──────────────────────────────────────────────────────────────┘ │
 └────────────────────────────────────────────────────────────────────┘
 ```
@@ -207,6 +206,11 @@ the user's preferences. All templates include a Content Routing Guide that
 directs agents to store information in the right place (SKILL.md for procedures,
 USER.md for preferences, TOOLS.md for environment notes, MEMORY.md for brief facts).
 
+The **orchestrator** template includes a Delegation-First Workflow section that
+instructs the agent to check for available specialists (via `agents_list`) before
+doing work itself, and to use `sessions_spawn`, `collab_delegate`, and
+`collab_get_delegations` for task delegation and tracking.
+
 #### Reflection (src/agents/reflection.ts)
 
 Agents self-improve through periodic reflection:
@@ -217,13 +221,19 @@ Agents self-improve through periodic reflection:
 5. Previous SOUL.md saved to `soul-history/YYYY-MM-DD.md`
 6. Diff-based validation ensures changes are meaningful, not destructive
 
-#### Collaboration (src/agents/collaboration.ts)
+#### Collaboration (src/agents/collaboration.ts + src/mcp/collaboration/)
 
 Agents interact through:
-- **Delegation**: Agent A formally delegates a task to Agent B with context and callback
+- **Delegation**: Agent A formally delegates a task to Agent B with context and callback.
+  Status workflow: pending → accepted → in_progress → completed/failed
 - **Shared memory**: Agents can read (not write) each other's MEMORY.md
 - **Message bus**: Pub/sub topics — publish "code-review-needed", subscribed agents pick it up
 - **@mentions**: Agents can reference each other in memory entries
+
+The collaboration protocol is exposed as a full **Collaboration MCP server** (9 tools,
+see MCP Servers section) and a **REST API** (10 endpoints at `/api/collaborations/*`,
+see Gateway section). The admin UI includes a dedicated Collaboration page with 3 tabs:
+Delegations, Message Bus, and Subscriptions.
 
 #### Portability (src/agents/portability.ts)
 
@@ -259,24 +269,30 @@ Agent config stored in `~/.clade/config.json`:
 
 Tool presets map to `--allowedTools` arrays:
 - **potato**: No tools (just chat)
-- **coding**: Read, Edit, Write, Bash, Glob, Grep + memory/sessions MCP servers
-- **messaging**: Memory/sessions/messaging MCP servers only
-- **full**: All Claude Code tools + all MCP servers
+- **coding**: Read, Edit, Write, Bash, Glob, Grep, NotebookEdit + memory, sessions, collaboration, and MCP manager
+- **messaging**: Memory, sessions, collaboration, messaging, and MCP manager
+- **full**: All Claude Code tools + all MCP servers (memory, sessions, collaboration, messaging, MCP manager, platform)
 - **custom**: Explicitly listed tools
 
 ### 3. MCP Servers (src/mcp/)
 
-Six custom MCP servers, each a stdio process:
+Eight custom MCP servers, each a stdio process:
 
-#### Memory MCP (src/mcp/memory/) -- 10 tools
-- `memory_store`, `memory_search`, `memory_get`, `memory_list` -- Core memory operations
+#### Memory MCP (src/mcp/memory/) -- 12 tools
+- `memory_store`, `memory_search`, `memory_get`, `memory_list`, `memory_delete` -- Core memory operations
+- `memory_consolidate` -- Consolidate daily logs into MEMORY.md + auto-archive
 - `user_get`, `user_store` -- Read/write the global USER.md (user preferences/facts)
 - `tools_get`, `tools_store` -- Read/write per-agent TOOLS.md (environment/tool notes)
 - `skill_create`, `skill_list` -- Create and list SKILL.md instruction files
 - Stores in `~/.clade/agents/<agentId>/MEMORY.md` and `memory/*.md`
 - SQLite FTS5 index for full-text search
+- **Vector/semantic search**: Local embeddings via `@huggingface/transformers` (all-MiniLM-L6-v2 model)
+- **Hybrid search**: Combines FTS5 keyword + vector similarity via Reciprocal Rank Fusion (RRF)
+- Search modes: `keyword` (FTS5 only), `semantic` (vector only), `hybrid` (RRF fusion)
 - Chunks files at ~400 tokens with 80-token overlap for search
+- Incremental re-indexing (`reindexChanged` instead of full `reindexAll`)
 - Auto-creates daily log files
+- Auto-archiving of oversized MEMORY.md
 
 #### Sessions MCP (src/mcp/sessions/) -- 5 tools
 - `sessions_list`, `sessions_spawn`, `sessions_send`, `session_status`, `agents_list`
@@ -303,6 +319,19 @@ Six custom MCP servers, each a stdio process:
 - Auto-detects macOS vs Linux and uses appropriate commands
 - Graceful fallback when commands are unavailable
 - System info: OS, hostname, shell, terminal, uptime
+
+#### Collaboration MCP (src/mcp/collaboration/) -- 9 tools
+- `collab_delegate` -- Create a delegation (assign task from one agent to another)
+- `collab_update_delegation` -- Update delegation status/result (pending → accepted → in_progress → completed/failed)
+- `collab_get_delegations` -- List delegations (filterable by role: from/to)
+- `collab_publish` -- Publish a message to a topic on the message bus
+- `collab_subscribe` -- Subscribe an agent to a topic
+- `collab_unsubscribe` -- Unsubscribe an agent from a topic
+- `collab_get_messages` -- Read messages on a topic (with optional `since` timestamp filter)
+- `collab_get_subscriptions` -- List an agent's active subscriptions
+- `collab_shared_memory` -- Read another agent's MEMORY.md (read-only cross-agent access)
+- File-based storage at `~/.clade/data/collaborations/` (delegations.json, topics/)
+- Included in coding, messaging, and full presets
 
 #### Admin MCP (src/mcp/admin/) -- 24 tools
 - **Skill Discovery** (5): `admin_skill_search_local`, `admin_skill_search_github`, `admin_skill_search_npm`, `admin_skill_search_web`, `admin_skill_search_all`
@@ -343,6 +372,11 @@ Routes:
 
 **MCP Servers:**
 - `GET /api/mcp` — List MCP servers (active + pending from `~/.clade/mcp/`)
+- `GET /api/mcp/:status/:name` — Get MCP server detail
+- `POST /api/mcp/:name/approve` — Approve pending MCP server
+- `POST /api/mcp/:name/reject` — Reject pending MCP server
+- `DELETE /api/mcp/:name` — Delete MCP server
+- `POST /api/mcp/install` — Install new MCP server
 
 **Skills (SKILL.md):**
 - `GET /api/skills` — List all skills (active, pending, disabled)
@@ -366,15 +400,40 @@ Routes:
 - `GET /api/agents/:id/tools-md/history` — Get TOOLS.md version history
 - `GET /api/agents/:id/tools-md/history/:date` — Get specific TOOLS.md version
 
+**Memory (per-agent):**
+- `POST /api/agents/:id/memory/search` — Search agent's memory (keyword, semantic, or hybrid)
+
+**Collaboration:**
+- `GET /api/collaborations/delegations` — List all delegations
+- `POST /api/collaborations/delegations` — Create delegation
+- `PUT /api/collaborations/delegations/:id` — Update delegation
+- `GET /api/collaborations/topics` — List all topics with message counts
+- `GET /api/collaborations/topics/:name/messages` — Get messages on a topic
+- `POST /api/collaborations/topics/:name/publish` — Publish to topic
+- `POST /api/collaborations/topics/:name/subscribe` — Subscribe agent
+- `POST /api/collaborations/topics/:name/unsubscribe` — Unsubscribe agent
+- `GET /api/collaborations/subscriptions` — List all subscriptions
+- `GET /api/collaborations/shared-memory/:agentId` — Read agent's memory
+
+**Backup:**
+- `GET /api/backup/status` — Current backup status
+- `POST /api/backup/now` — Trigger immediate backup
+- `GET /api/backup/history` — List backup commit history
+- `POST /api/backup/setup` — Initialize backup repo
+- `POST /api/backup/disable` — Disable auto-backup
+
 **Mission Control:**
-- `GET /api/activity` — Activity feed (filterable by agent, type; paginated)
+- `GET /api/activity` — Activity feed (filterable by agent, type, date range; paginated)
 - `POST /api/activity` — Log a custom activity event
 - `GET /api/calendar/events` — Calendar events (chat sessions, heartbeats, activity)
 - `POST /api/search` — Global search across memories, conversations, skills, agents, config
 
 **Other:**
 - `GET /api/channels` — List connected channel adapters
+- `POST /api/channels/:name/connect` — Connect a channel adapter
+- `POST /api/channels/:name/disconnect` — Disconnect a channel adapter
 - `GET /api/cron` — List cron jobs
+- `POST /api/cron` — Create cron job
 
 ### 5. Router (src/router/)
 
@@ -485,6 +544,14 @@ CREATE VIRTUAL TABLE memory_fts USING fts5(
   chunk_text,
   content=memory_index,
   content_rowid=id
+);
+
+-- Vector embeddings for semantic search
+CREATE TABLE IF NOT EXISTS memory_embeddings (
+  chunk_id INTEGER PRIMARY KEY REFERENCES memory_chunks(id) ON DELETE CASCADE,
+  embedding BLOB NOT NULL,
+  model TEXT NOT NULL DEFAULT 'all-MiniLM-L6-v2',
+  created_at TEXT DEFAULT (datetime('now'))
 );
 ```
 
@@ -606,21 +673,26 @@ The admin UI is a React SPA built with Vite, served at `/admin`. Tech stack:
 - **Lucide React** icons
 - **Vite 6** build, outputs to `dist/ui/`
 
-14 pages (state-based routing in `App.tsx`):
+19 pages (state-based routing in `App.tsx`):
 - **Dashboard** — Agent overview, session status, quick actions
 - **Chat** — Multi-conversation tabs per agent, real-time WebSocket messaging
 - **Agents** — Agent list, create from templates, per-agent skills/tools tabs
 - **Sessions** — Active sessions derived from conversation data
-- **MCP** — MCP server management (active/pending)
+- **MCP** — MCP server management (install, approve/reject, detail view)
 - **Skills** — Skill management (install, approve/reject, assign to agents, detail view)
 - **Channels** — Connected channel adapters
 - **Cron** — Cron job listing
 - **Config** — Global config editor
 - **User** — USER.md editor with version history
 - **Welcome/Onboarding** — First-run setup wizard, agent creation flow
-- **Activity** — Activity feed with filtering by agent/type (Mission Control)
+- **Activity** — Activity feed with filtering by agent, type, and date range (Mission Control)
 - **Calendar** — Calendar view of chat sessions, heartbeats, events (Mission Control)
 - **Search** — Global search across memories, conversations, skills, agents, config (Mission Control)
+- **Backup** — Backup status, setup guide, manual trigger, history
+- **Collaboration** — 3 tabs: Delegations (create/view/update), Message Bus (topics/publish), Subscriptions (manage)
+- **Docs** — Embedded VitePress documentation viewer
+- **Discord** — Discord community invite/link
+- **Health** — System health check dashboard
 
 ## Skills System
 
@@ -649,13 +721,13 @@ Two additional per-session context files injected into agent system prompts:
 
 ## Browser Configuration
 
-Optional Playwright MCP integration for browser automation. Configured in
-`config.json` under the `browser` key:
+Playwright MCP integration for browser automation, enabled by default. Configured
+in `config.json` under the `browser` key:
 
 ```json
 {
   "browser": {
-    "enabled": false,
+    "enabled": true,
     "browser": "chromium",
     "headless": false,
     "userDataDir": "~/.clade/browser-profile",
@@ -667,3 +739,109 @@ Optional Playwright MCP integration for browser automation. Configured in
 When enabled, agents get a Playwright MCP server with a persistent browser profile
 (cookies, localStorage survive restarts). Supports chromium, chrome, msedge, firefox.
 Can connect to an already-running browser via CDP endpoint.
+
+## IPC System
+
+Lightweight inter-process communication server for agent-to-agent and MCP-to-gateway
+communication, implemented in `start.ts` using `createNetServer` from `node:net`.
+
+- **Socket**: Unix socket at `~/.clade/ipc-{pid}.sock`
+- **Discovery**: MCP servers find the socket via `CLADE_IPC_SOCKET` env var, with
+  filesystem fallback (scan `~/.clade/` for `ipc-*.sock` files) when env var is
+  unavailable (e.g., claude CLI may not forward env vars to MCP subprocesses)
+- **Protocol**: JSON request/response over TCP — client sends JSON, server responds with
+  `{ ok: boolean, ... }` and closes the connection
+
+`handleIpcMessage()` handles the following message types:
+- `agents.list` — Return all configured agents (id, name, description, toolPreset)
+- `sessions.list` — Return active sessions from session-map
+- `sessions.spawn` — Spawn a new agent subprocess via `askClaude()`, enriched with
+  delegation context if called by another agent. Persists conversation in both the
+  spawned agent's and calling agent's chat history.
+- `sessions.send` — Send a message to an existing agent session
+- `sessions.status` — Check if a session is active
+- `messaging.send` — Send a message via a channel adapter (Slack, Telegram, etc.)
+- `messaging.typing` — Send a typing indicator via a channel adapter
+- `messaging.channel_info` — Get info about connected channel adapters
+
+## Backup System
+
+Auto-backup of all Clade data (`~/.clade/`) to a GitHub repository.
+
+### Components
+- **Engine**: `src/backup/backup.ts` — Async git operations via `spawn()` (not `execSync`)
+  with mutex to prevent concurrent backup runs
+- **CLI**: `src/cli/commands/backup.ts` — Subcommands: `setup`, `now`, `restore`, `status`,
+  `history`, `disable`
+- **Server**: Backup REST routes at `/api/backup/*` + auto-backup timer started after
+  `fastify.listen()`
+- **UI**: `ui/src/pages/backup.tsx` — Status display, setup guide, manual trigger, history
+
+### Config (`BackupConfigSchema`)
+```json
+{
+  "backup": {
+    "enabled": false,
+    "repo": "owner/repo",
+    "branch": "main",
+    "intervalMinutes": 30,
+    "excludeChats": false,
+    "lastBackupAt": null,
+    "lastCommitSha": null,
+    "lastError": null
+  }
+}
+```
+
+### Data Flow
+1. **Auto-backup timer** fires every `intervalMinutes` (or manually via `POST /api/backup/now`)
+2. `performBackup()` stages all changes (`git add -A`), generates `.gitignore` (excludes
+   `browser-profile/`, `logs/`, `*.db`, `models/`, optionally `data/chats/`)
+3. Creates timestamped commit, pushes to GitHub (push failure is non-fatal — local commit preserved)
+4. Updates config with `lastBackupAt`, `lastCommitSha`; broadcasts `backup:completed` to admin UI
+5. Logs activity event with type `backup`
+
+### Restore Flow
+1. Clones repo to temp directory (shallow clone)
+2. Validates structure (must have `config.json` and `agents/`)
+3. Creates safety backup of current `~/.clade/` (renamed to `~/.clade-backup-{timestamp}`)
+4. Copies restored files (excludes `.git`)
+
+## Activity Feed
+
+Event logging system for tracking all significant actions across the platform.
+
+- **Engine**: `src/utils/activity.ts` — `logActivity()` function with WebSocket broadcasting
+- **Storage**: File-based at `~/.clade/data/activity.json` (max 1000 events, FIFO trimming)
+- **Event types**: `chat`, `skill`, `mcp`, `reflection`, `agent`, `heartbeat`, `cron`, `backup`, `delegation`
+- **WebSocket**: New events are broadcast to all connected admin UI clients via `broadcastAdmin()`
+  with message type `activity:new`
+- **REST API**: `GET /api/activity` (filterable by agent, type, date range; paginated),
+  `POST /api/activity` (log custom events)
+- **UI**: Activity page with agent/type/date-range filters, delegation detail modals
+
+Each event includes:
+```typescript
+interface ActivityEvent {
+  id: string;           // "evt_" + random UUID prefix
+  type: string;         // One of the event types above
+  agentId?: string;     // Which agent triggered this
+  title: string;        // Short description
+  description: string;  // Detailed description
+  timestamp: string;    // ISO-8601 timestamp
+  metadata?: Record<string, unknown>;  // Extra data (commitSha, etc.)
+}
+```
+
+## Config Schema
+
+Config is stored at `~/.clade/config.json` with a versioned schema (current version: **5**).
+Migrations are additive-only — see `src/config/migrations.ts` for the v2→v5 migration chain.
+
+Key schema sections:
+- **ConfigSchema** (root) — `version`, `agents`, `channels`, `gateway`, `routing`, `mcp`, `skills`, `browser`, `backup`
+- **AgentConfigSchema** — `name`, `description`, `model`, `toolPreset`, `customTools`, `mcp` (array), `skills` (array), `heartbeat`, `reflection`, `maxTurns`, `notifications`, `admin`
+- **AdminConfigSchema** — `enabled`, `autoApproveSkills`, `autoApproveMcp`, `autoApprovePlugins`, `canCreateSkills`, `canPublishSkills`, `canManageAgents`, `canModifyConfig`
+- **McpConfigSchema** — `autoApprove` (array of MCP server names)
+- **BackupConfigSchema** — `enabled`, `repo`, `branch`, `intervalMinutes`, `excludeChats`, `lastBackupAt`, `lastCommitSha`, `lastError`
+- **BrowserConfigSchema** — `enabled` (default: true), `browser`, `headless`, `userDataDir`, `cdpEndpoint`

@@ -11,12 +11,14 @@ The name "Clade" means *a group of organisms that share a common ancestor* — a
 - **Multi-agent orchestration** — Create specialized agents (orchestrator, coding, research, ops, project management) that each have their own personality, memory, and tools
 - **Proactive, not reactive** — Agents wake up on a configurable heartbeat, check for issues, and act before you ask
 - **Multi-channel** — Talk to your agents via Slack, Telegram, Discord, or the built-in web chat
-- **Persistent memory** — Agents remember across conversations with a two-layer memory system (daily logs + curated knowledge) and full-text search
+- **Persistent memory** — Agents remember across conversations with a two-layer memory system (daily logs + curated knowledge), full-text search, vector/semantic search via local embeddings, and automatic memory consolidation
 - **Skills system** — Reusable SKILL.md instruction files that agents can create, install, and share. Agents route knowledge to the right place automatically
 - **Autonomous work loops** — RALPH loop: give an agent a task list, it works through each task, verifies its work, and reports back
 - **Self-improving** — Agents reflect on interactions and evolve their SOUL.md personality over time (core principles stay locked)
+- **Agent collaboration** — Full collaboration bus with delegation tracking, pub/sub message bus, and shared memory between agents
+- **Auto-backup to GitHub** — Periodic backups of all agent state to a GitHub repo, with one-command restore on any machine
 - **Native platform integration** — Agents can send system notifications, read your clipboard, open URLs, take screenshots
-- **Admin dashboard** — React SPA at `localhost:7890/admin` with Mission Control (activity feed, calendar, global search), agent management, skills, and configuration
+- **Admin dashboard** — React SPA at `localhost:7890/admin` with 19 pages including Mission Control, agent management, skills, MCP servers, backup, and collaboration
 - **Admin MCP for orchestrators** — Orchestrator agents can autonomously discover, install, and create skills, MCP servers, and plugins
 
 ## Quick Start
@@ -132,6 +134,23 @@ clade agent import researcher.agent.tar.gz
 
 The entire agent directory is plain markdown — you can also sync it via git.
 
+## Backup
+
+Back up all agent state (config, souls, memory, skills) to a GitHub repo with automatic periodic backups and one-command restore:
+
+```bash
+# Set up auto-backup to GitHub
+clade backup setup --repo myuser/clade-backup
+
+# Manual backup
+clade backup now
+
+# Restore on a new machine
+clade backup restore --repo myuser/clade-backup
+```
+
+Backup status, history, and manual triggers are also available in the admin dashboard.
+
 ## Channels
 
 ### Slack
@@ -173,12 +192,14 @@ Mentions are case-insensitive and work on all channels. If no agent is mentioned
 
 ## Agent Collaboration
 
-Agents can work together:
+Agents collaborate via a dedicated Collaboration MCP server (9 tools) with a full REST API and admin UI page:
 
-- **Delegation** — One agent formally hands off a task to another
-- **Shared memory** — Agents can read (not write) each other's memory
-- **Message bus** — Pub/sub topics for loose coupling between agents
+- **Delegation** — One agent formally hands off a task to another with full status tracking (pending → accepted → in_progress → completed/failed)
+- **Shared memory** — Agents can read (not write) each other's MEMORY.md for cross-agent context
+- **Message bus** — Pub/sub topics for loose coupling between agents. Subscribe to topics, publish messages, and read topic history
 - **Status updates** — Agents proactively notify you on your preferred channel
+
+The admin UI Collaboration page has three tabs: Delegations (create/view/update), Message Bus (topics and publishing), and Subscriptions management.
 
 ## CLI Reference
 
@@ -197,8 +218,16 @@ Agents can work together:
 | `clade skill list` | List installed skills |
 | `clade skill install <name>` | Install a skill |
 | `clade skill approve <name>` | Approve a pending skill |
-| `clade mcp list` | List installed MCP servers |
+| `clade mcp list` | List MCP servers (`--pending`, `--active`, `--json`) |
+| `clade mcp add <package>` | Install MCP server from npm or local path |
+| `clade mcp remove <name>` | Remove an MCP server |
 | `clade mcp approve <name>` | Approve a pending MCP server |
+| `clade backup setup` | Initialize auto-backup to GitHub |
+| `clade backup now` | Trigger a manual backup |
+| `clade backup status` | Show backup status |
+| `clade backup history` | Show backup commit history |
+| `clade backup restore` | Restore from a GitHub backup |
+| `clade backup disable` | Disable auto-backup |
 | `clade doctor` | Health check |
 
 ## Skills
@@ -220,12 +249,15 @@ Agents automatically route knowledge to the right place: reusable procedures go 
 
 ## Admin Dashboard
 
-The admin UI at `localhost:7890/admin` is a React SPA with 14 pages:
+The admin UI at `localhost:7890/admin` is a React SPA with 19 pages:
 
 - **Dashboard** — Agent overview and quick actions
 - **Chat** — Multi-conversation tabs per agent with real-time messaging
 - **Agents** — Create, configure, and manage agents (with skills and tools tabs)
 - **Skills** — Install, approve/reject, assign skills to agents, view contents
+- **MCP** — MCP server management (install, approve/reject, detail view)
+- **Backup** — Setup, status, manual trigger, and backup history
+- **Collaboration** — Delegations, message bus, and subscriptions management
 - **User Profile** — Edit USER.md (global preferences shared across agents)
 - **Mission Control** — Activity feed, calendar view, and global search across all agent data
 
@@ -235,7 +267,7 @@ Config lives at `~/.clade/config.json` (override with `CLADE_HOME` env var).
 
 Agent state lives at `~/.clade/agents/<name>/` — plain markdown files that are never touched by `npm update`.
 
-Key config sections: `agents`, `channels`, `gateway`, `routing`, `mcp`, `skills`, `browser`.
+Key config sections: `agents`, `channels`, `gateway`, `routing`, `mcp`, `skills`, `browser`, `backup`.
 
 ## Architecture
 

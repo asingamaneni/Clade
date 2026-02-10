@@ -363,21 +363,41 @@ function buildAgentContext(
   ];
   if (selfDesc) lines.push(`Your role: ${selfDesc}`);
 
-  // Build teammate list
+  // Build teammate list (include agent ID so orchestrators can use sessions_spawn)
   const teammates = Object.entries(agents)
     .filter(([id]) => id !== agentId)
     .map(([id, a]) => {
       const name = (a.name as string) || id;
       const desc = (a.description as string) || '';
-      return desc ? `- ${name}: ${desc}` : `- ${name}`;
+      return desc ? `- **${name}** (id: \`${id}\`): ${desc}` : `- **${name}** (id: \`${id}\`)`;
     });
 
   if (teammates.length > 0) {
     lines.push('');
     lines.push('Your team:');
     lines.push(...teammates);
-    lines.push('');
-    lines.push('You can reference these agents when relevant.');
+
+    // Detect if this is an orchestrator-type agent (has description mentioning orchestrator/delegate/assistant)
+    const isOrchestrator = /orchestrat|personal assistant|delegates? to/i.test(selfDesc);
+    if (isOrchestrator) {
+      lines.push('');
+      lines.push('## DELEGATION RULES (MANDATORY)');
+      lines.push('');
+      lines.push('You are the orchestrator. Before doing ANY work yourself, you MUST:');
+      lines.push('1. Look at the team list above and identify if a specialist can handle this task');
+      lines.push('2. If a specialist exists, delegate using `sessions_spawn` with their agent ID and a detailed prompt');
+      lines.push('3. `sessions_spawn` returns the specialist\'s full response — use it to formulate your reply to the user');
+      lines.push('4. Only do the work yourself if NO specialist on the team matches the task');
+      lines.push('');
+      lines.push('Tool usage for delegation:');
+      lines.push('- `sessions_spawn` tool: { agent: "<agent-id>", prompt: "<detailed task>" } — this spawns the specialist and returns their response');
+      lines.push('- The agent ID is the lowercase name shown in the team list (e.g. "researcher", "coder")');
+      lines.push('');
+      lines.push('IMPORTANT: You MUST delegate to specialists when available. Do NOT do the work yourself if a specialist exists for it.');
+    } else {
+      lines.push('');
+      lines.push('You can reference these agents when relevant.');
+    }
   }
 
   return lines.join('\n');
@@ -3002,6 +3022,8 @@ async function startPlaceholderServer(
     const offset = parseInt(query.offset || '0', 10) || 0;
     const filterAgentId = query.agentId || undefined;
     const filterType = query.type || undefined;
+    const fromDate = query.from ? new Date(query.from).getTime() : undefined;
+    const toDate = query.to ? new Date(query.to).getTime() : undefined;
 
     let events = loadActivityLog();
 
@@ -3015,6 +3037,12 @@ async function startPlaceholderServer(
     if (filterType) {
       const types = filterType.split(',');
       events = events.filter(e => types.includes(e.type));
+    }
+    if (fromDate && !isNaN(fromDate)) {
+      events = events.filter(e => new Date(e.timestamp).getTime() >= fromDate);
+    }
+    if (toDate && !isNaN(toDate)) {
+      events = events.filter(e => new Date(e.timestamp).getTime() <= toDate);
     }
 
     const totalEvents = events.length;
@@ -3034,7 +3062,7 @@ async function startPlaceholderServer(
       return { error: 'type and title are required' };
     }
 
-    const validTypes = ['chat', 'skill', 'mcp', 'reflection', 'agent', 'heartbeat', 'cron', 'backup'];
+    const validTypes = ['chat', 'skill', 'mcp', 'reflection', 'agent', 'heartbeat', 'cron', 'backup', 'delegation'];
     if (!validTypes.includes(eventType)) {
       reply.status(400);
       return { error: `type must be one of: ${validTypes.join(', ')}` };
@@ -3779,7 +3807,7 @@ async function startPlaceholderServer(
         try {
           const msg = JSON.parse(data) as { type: string; [key: string]: unknown };
           console.log(`  [ipc] Received: ${msg.type}${msg.agentId ? ` (agent: ${msg.agentId})` : ''}`);
-          const response = await handleIpcMessage(msg, agents, config, cladeHome);
+          const response = await handleIpcMessage(msg, agents, config, cladeHome, broadcastAdmin, logActivityLocal);
           console.log(`  [ipc] Response for ${msg.type}: ok=${response.ok}`);
           conn.write(JSON.stringify(response));
         } catch (err) {
@@ -3941,6 +3969,8 @@ async function handleIpcMessage(
   agents: Record<string, Record<string, unknown>>,
   config: Record<string, unknown>,
   cladeHome: string,
+  broadcastAdmin: (msg: Record<string, unknown>) => void,
+  logActivityLocal: (event: Omit<ActivityEvent, 'id' | 'timestamp'>) => ActivityEvent,
 ): Promise<{ ok: boolean; [key: string]: unknown }> {
   switch (msg.type) {
     case 'agents.list': {
@@ -3971,6 +4001,7 @@ async function handleIpcMessage(
     case 'sessions.spawn': {
       const agentId = msg.agentId as string | undefined;
       const prompt = msg.prompt as string | undefined;
+      const callingAgentId = msg.callingAgentId as string | undefined;
       if (!agentId || typeof agentId !== 'string') return { ok: false, error: 'agentId is required' };
       if (!prompt || typeof prompt !== 'string') return { ok: false, error: 'prompt is required' };
       if (!agents[agentId]) return { ok: false, error: `Agent "${agentId}" not found` };
@@ -3981,12 +4012,20 @@ async function handleIpcMessage(
       const agentContext = buildAgentContext(agentId, agents);
       const sessionKey = `ipc:${agentId}:${randomUUID().slice(0, 8)}`;
 
+      // Enrich prompt with delegation context if called by another agent
+      const callerName = callingAgentId && agents[callingAgentId]
+        ? ((agents[callingAgentId].name as string) || callingAgentId)
+        : callingAgentId;
+      const enrichedPrompt = callerName
+        ? `[Delegated by ${callerName}]\n\n${prompt}`
+        : prompt;
+
       const browserCfg = { ...(config.browser ?? {}) } as { enabled?: boolean; userDataDir?: string; browser?: string; cdpEndpoint?: string; headless?: boolean };
       if (typeof cdpEndpointUrl === 'string') browserCfg.cdpEndpoint = cdpEndpointUrl;
 
       try {
         const result = await askClaude(
-          prompt,
+          enrichedPrompt,
           existsSync(soulPath) ? soulPath : null,
           agentContext,
           sessionKey,
@@ -3995,7 +4034,68 @@ async function handleIpcMessage(
           toolPreset,
           browserCfg,
         );
-        return { ok: true, sessionId: result.sessionId, response: result.text };
+
+        const now = new Date().toISOString();
+        const responseText = result.text || '';
+
+        // (a) Persist the delegation conversation in the spawned agent's chat
+        const spawnedAgentName = (agentCfg.name as string) || agentId;
+        const delegationLabel = callerName
+          ? `Delegation from ${callerName}`
+          : 'Delegated task';
+        const spawnConv = createConversation(cladeHome, agentId, delegationLabel);
+        saveChatMessage(cladeHome, {
+          id: randomUUID(),
+          agentId,
+          role: 'user',
+          text: `@${callerName || 'system'}: ${prompt}`,
+          timestamp: now,
+          sessionId: result.sessionId,
+        }, spawnConv.id);
+        saveChatMessage(cladeHome, {
+          id: randomUUID(),
+          agentId,
+          role: 'assistant',
+          text: `@${spawnedAgentName}: ${responseText}`,
+          timestamp: now,
+          sessionId: result.sessionId,
+        }, spawnConv.id);
+        broadcastAdmin({ type: 'chat', agentId, conversationId: spawnConv.id });
+
+        // (b) Inject reply-back message into the calling agent's chat
+        if (callingAgentId && agents[callingAgentId]) {
+          const callerData = loadAgentChatData(cladeHome, callingAgentId);
+          const recentConvId = callerData.order[0];
+          if (recentConvId && callerData.conversations[recentConvId]) {
+            const replyText = `@${spawnedAgentName} **replied:**\n\n${responseText}`;
+            saveChatMessage(cladeHome, {
+              id: randomUUID(),
+              agentId: callingAgentId,
+              role: 'assistant',
+              text: replyText,
+              timestamp: now,
+            }, recentConvId);
+            broadcastAdmin({ type: 'chat', agentId: callingAgentId, conversationId: recentConvId });
+          }
+        }
+
+        // (c) Log delegation sent to activity feed
+        logActivityLocal({
+          type: 'delegation',
+          agentId: callingAgentId || 'system',
+          title: `@${callerName || 'system'} delegated task to @${spawnedAgentName}`,
+          description: prompt,
+        });
+
+        // (d) Log delegation response to activity feed
+        logActivityLocal({
+          type: 'delegation',
+          agentId: agentId,
+          title: `@${spawnedAgentName} completed delegation from @${callerName || 'system'}`,
+          description: responseText,
+        });
+
+        return { ok: true, sessionId: result.sessionId, response: responseText };
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
       }

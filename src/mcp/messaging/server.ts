@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { createConnection } from 'node:net';
-import { readdirSync } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -11,9 +11,14 @@ import { homedir } from 'node:os';
 // ---------------------------------------------------------------------------
 
 function discoverIpcSocket(): string {
-  // First try the explicit env var
+  // First try the explicit env var, but verify it still exists
   const explicit = process.env['CLADE_IPC_SOCKET'];
-  if (explicit) return explicit;
+  if (explicit) {
+    try {
+      statSync(explicit);
+      return explicit;
+    } catch { /* stale socket path — fall through to discovery */ }
+  }
 
   // Fallback: scan CLADE_HOME for ipc-*.sock files
   const home = process.env['CLADE_HOME'] || join(homedir(), '.clade');
