@@ -24,8 +24,14 @@ The name "Clade" means *a group of organisms that share a common ancestor* — a
 ## Quick Start
 
 ```bash
-# Install
-npm install -g clade
+# Clone and build
+git clone https://github.com/asingamaneni/Clade.git
+cd Clade
+npm install
+npm run build
+
+# Install globally
+npm install -g .
 
 # Start the gateway — auto-creates config if first run
 clade start
@@ -36,8 +42,6 @@ clade ui
 # Browse the documentation
 clade docs --serve
 ```
-
-That's it. Three commands to a running dashboard. No setup wizard required.
 
 ### Adding Agents
 
