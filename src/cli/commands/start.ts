@@ -556,8 +556,8 @@ function buildMcpConfigForAgent(
   const MCP_SERVERS_BY_PRESET: Record<string, string[]> = {
     potato: [],
     coding: ['memory', 'sessions', 'collaboration', 'mcp-manager'],
-    messaging: ['memory', 'sessions', 'collaboration', 'messaging', 'mcp-manager'],
-    full: ['memory', 'sessions', 'collaboration', 'messaging', 'mcp-manager'],
+    messaging: ['memory', 'sessions', 'collaboration', 'messaging', 'mcp-manager', 'phone-calls'],
+    full: ['memory', 'sessions', 'collaboration', 'messaging', 'mcp-manager', 'phone-calls'],
     custom: ['memory', 'sessions', 'collaboration'],
   };
 
@@ -4441,11 +4441,10 @@ async function startPlaceholderServer(
         promptParts.push('Here is your checklist:', '', checklist, '');
       }
 
-      const mode = hb.mode || 'check';
       promptParts.push(
-        mode === 'work'
-          ? 'Review each item and perform any necessary actions.'
-          : 'Review each item and report any issues that need attention.',
+        'Review your checklist and recent conversations below.',
+        'For anything that needs action, call `task_queue_schedule` to schedule a follow-up task.',
+        'Do NOT write a status report — schedule tasks instead.',
       );
 
       // --- Smart follow-up: Check ALL conversations for unfulfilled promises ---
@@ -4473,8 +4472,8 @@ async function startPlaceholderServer(
 
           if (msgLines.length === 0) continue;
 
-          const title = conv.title || convId;
-          allConvSummaries.push(`**Conversation: "${title}"**\n${msgLines.join('\n')}`);
+          const title = conv.label || 'Untitled';
+          allConvSummaries.push(`**Conversation: "${title}"** (conversationId: \`${convId}\`)\n${msgLines.join('\n')}`);
 
           // Cap at 4 conversations to avoid blowing context
           if (allConvSummaries.length >= 4) break;
@@ -4490,17 +4489,21 @@ async function startPlaceholderServer(
             '## Recent Conversations (check for unfulfilled promises)',
             '',
             'Below are your last messages from each active conversation, showing BOTH user and assistant messages.',
-            'This is the FULL state — if the user already provided info you asked for, you can see it here.',
+            'Each conversation header includes its `conversationId` — use it when scheduling tasks.',
             '',
             'Look for YOUR last message in each conversation. If it contains:',
             '- "Let me check...", "Let me also...", "Now let me...", "I\'ll look into..."',
             '- "I\'ll forward...", "I\'ll send...", "I\'ll schedule...", "I\'ll follow up..."',
             '- Any promise to do future work that was NOT completed',
             '',
-            'Then you MUST:',
-            '- Actually USE TOOLS to complete the promised work right now',
-            '- OR call task_queue_schedule to schedule it',
-            '- Do NOT just write a status report about it — take action',
+            'For EACH unfulfilled promise, call `task_queue_schedule` with:',
+            '- `conversationId`: the conversationId from the conversation header above',
+            '- `delayMinutes`: 0.5 (30 seconds — so it fires quickly with full conversation context)',
+            '- `prompt`: a detailed instruction of what needs to be done',
+            '- `description`: a short human-readable summary',
+            '',
+            'Do NOT write a status report — schedule tasks instead.',
+            'After scheduling all tasks (or if none needed), respond with HEARTBEAT_OK.',
             '',
             truncated,
           );
@@ -4562,13 +4565,15 @@ async function startPlaceholderServer(
 
         const isOk = result.text.includes('HEARTBEAT_OK');
         const suppressOk = hb.suppressOk !== false; // default true
+        const scheduledTasks = result.text.includes('Task scheduled successfully');
 
-        if (isOk && suppressOk) {
-          console.log(`  [heartbeat] ${agentId}: OK`);
+        if ((isOk && suppressOk) || scheduledTasks) {
+          // Suppress — either OK or tasks were scheduled (results will appear in correct conversations)
+          console.log(`  [heartbeat] ${agentId}: ${scheduledTasks ? 'tasks scheduled' : 'OK'}`);
         } else {
           console.log(`  [heartbeat] ${agentId}: ${result.text.slice(0, 100)}`);
 
-          // Save heartbeat response to the agent's most recent conversation
+          // Save genuine alerts to chat (not scheduling confirmations)
           try {
             const chatData = loadAgentChatData(cladeHome, agentId);
             const recentConvId = chatData.order[0];
@@ -4589,9 +4594,9 @@ async function startPlaceholderServer(
           type: 'heartbeat',
           agentId,
           title: `Heartbeat: ${agentId}`,
-          description: isOk ? 'All clear' : result.text.slice(0, 200),
+          description: scheduledTasks ? 'Tasks scheduled for follow-up' : isOk ? 'All clear' : result.text.slice(0, 200),
         });
-        broadcastAdmin({ type: 'heartbeat', agentId, status: isOk ? 'ok' : 'alert', text: result.text.slice(0, 200) });
+        broadcastAdmin({ type: 'heartbeat', agentId, status: isOk ? 'ok' : (scheduledTasks ? 'scheduled' : 'alert'), text: result.text.slice(0, 200) });
       } catch (err) {
         console.error(`  [heartbeat] ${agentId} error:`, err instanceof Error ? err.message : String(err));
         logActivityLocal({
@@ -4899,6 +4904,7 @@ async function handleIpcMessage(
       const prompt = msg.prompt as string | undefined;
       const description = msg.description as string | undefined;
       const delayMinutes = Number(msg.delayMinutes || 1);
+      const explicitConvId = msg.conversationId as string | undefined;
 
       if (!agentId) return { ok: false, error: 'agentId is required' };
       if (!prompt) return { ok: false, error: 'prompt is required' };
@@ -4907,9 +4913,9 @@ async function handleIpcMessage(
       const now = new Date();
       const executeAt = new Date(now.getTime() + delayMinutes * 60_000);
 
-      // Try to resolve conversationId from current session for --resume
-      let conversationId: string | undefined;
-      if (sessionId) {
+      // Use explicit conversationId if provided (e.g. from heartbeat), otherwise resolve from session
+      let conversationId: string | undefined = explicitConvId;
+      if (!conversationId && sessionId) {
         conversationId = resolveConversationForSession(cladeHome, sessionId);
       }
 

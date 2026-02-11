@@ -486,8 +486,12 @@ server.tool(
       .min(0.5)
       .max(43200)
       .describe('Minutes to wait before executing (0.5 = 30 seconds, 1440 = 24 hours, 43200 = 30 days)'),
+    conversationId: z
+      .string()
+      .optional()
+      .describe('Optional conversation ID to resume when executing. Use when scheduling from heartbeat to target a specific conversation.'),
   },
-  async ({ prompt, description, delayMinutes }) => {
+  async ({ prompt, description, delayMinutes, conversationId }) => {
     try {
       const response = await sendIpc({
         type: 'taskqueue.schedule',
@@ -496,6 +500,7 @@ server.tool(
         prompt,
         description,
         delayMinutes,
+        conversationId: conversationId || undefined,
       });
 
       if (!response.ok) {
