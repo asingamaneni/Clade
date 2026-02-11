@@ -468,6 +468,199 @@ server.tool(
 );
 
 // ---------------------------------------------------------------------------
+// Tool: task_queue_schedule
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'task_queue_schedule',
+  'Schedule a follow-up task to be executed after a delay. Use this when you promise to do something later (e.g., "I\'ll check on that in 5 minutes", "Let me forward that invite"). The task will run automatically using your conversation context.',
+  {
+    prompt: z
+      .string()
+      .describe('The prompt/instruction for the follow-up task. Be specific about what needs to be done.'),
+    description: z
+      .string()
+      .describe('Short human-readable description of the task (e.g., "Check flight status", "Forward calendar invite")'),
+    delayMinutes: z
+      .number()
+      .min(0.5)
+      .max(1440)
+      .describe('Minutes to wait before executing (0.5 = 30 seconds, 1440 = 24 hours)'),
+  },
+  async ({ prompt, description, delayMinutes }) => {
+    try {
+      const response = await sendIpc({
+        type: 'taskqueue.schedule',
+        agentId: callingAgentId || undefined,
+        sessionId: currentSessionId || undefined,
+        prompt,
+        description,
+        delayMinutes,
+      });
+
+      if (!response.ok) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Error scheduling task: ${response.error ?? 'Unknown error'}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const taskId = response['taskId'] as string | undefined;
+      const executeAt = response['executeAt'] as string | undefined;
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Task scheduled successfully.\n\n- **Task ID:** ${taskId}\n- **Description:** ${description}\n- **Executes at:** ${executeAt ? new Date(executeAt).toLocaleString() : `in ${delayMinutes} minutes`}`,
+          },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error scheduling task: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Tool: task_queue_cancel
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'task_queue_cancel',
+  'Cancel a pending scheduled task.',
+  {
+    taskId: z.string().describe('The task ID to cancel'),
+  },
+  async ({ taskId }) => {
+    try {
+      const response = await sendIpc({
+        type: 'taskqueue.cancel',
+        taskId,
+        agentId: callingAgentId || undefined,
+      });
+
+      if (!response.ok) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Error cancelling task: ${response.error ?? 'Unknown error'}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Task ${taskId} cancelled successfully.`,
+          },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error cancelling task: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Tool: task_queue_list
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'task_queue_list',
+  'List your pending and recent scheduled tasks.',
+  {},
+  async () => {
+    try {
+      const response = await sendIpc({
+        type: 'taskqueue.list',
+        agentId: callingAgentId || undefined,
+      });
+
+      if (!response.ok) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Error listing tasks: ${response.error ?? 'Unknown error'}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const tasks = response['tasks'] as Array<{
+        id: string;
+        description: string;
+        status: string;
+        executeAt: string;
+        prompt: string;
+      }> | undefined;
+
+      if (!tasks || tasks.length === 0) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'No scheduled tasks found.',
+            },
+          ],
+        };
+      }
+
+      const lines = tasks.map((t) => {
+        const when = new Date(t.executeAt).toLocaleString();
+        return `- **${t.id}** | ${t.description} | status: ${t.status} | execute at: ${when}`;
+      });
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `## Scheduled Tasks\n\n${lines.join('\n')}`,
+          },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error listing tasks: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
 // Start server
 // ---------------------------------------------------------------------------
 

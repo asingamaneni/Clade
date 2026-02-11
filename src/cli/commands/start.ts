@@ -437,6 +437,55 @@ function getSessionId(cladeHome: string, convId: string): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
+// Task Queue — scheduled follow-up tasks
+// ---------------------------------------------------------------------------
+
+interface QueuedTask {
+  id: string;
+  agentId: string;
+  sessionId?: string;
+  conversationId?: string;
+  prompt: string;
+  description: string;
+  executeAt: string;
+  scheduledAt: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'expired';
+  result?: string;
+  error?: string;
+  retryCount: number;
+  completedAt?: string;
+}
+
+function taskQueuePath(cladeHome: string): string {
+  return join(cladeHome, 'data', 'task-queue.json');
+}
+
+function loadTaskQueue(cladeHome: string): QueuedTask[] {
+  try {
+    const raw = readFileSync(taskQueuePath(cladeHome), 'utf-8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveTaskQueue(cladeHome: string, tasks: QueuedTask[]): void {
+  const dir = join(cladeHome, 'data');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(taskQueuePath(cladeHome), JSON.stringify(tasks, null, 2), 'utf-8');
+}
+
+/** Reverse-look up conversationId from sessionId in session-map.json */
+function resolveConversationForSession(cladeHome: string, sessionId: string): string | undefined {
+  const map = loadSessionMap(cladeHome);
+  for (const [convId, sid] of Object.entries(map)) {
+    if (sid === sessionId) return convId;
+  }
+  return undefined;
+}
+
+// ---------------------------------------------------------------------------
 // MCP config builder for placeholder server
 // ---------------------------------------------------------------------------
 
@@ -767,6 +816,27 @@ function askClaude(
           systemParts.push('## Today\'s Activity Log\n\n' + truncated);
         }
       }
+
+      // Inject pending task queue items so the agent is aware of scheduled follow-ups
+      try {
+        const pendingTasks = loadTaskQueue(home).filter(
+          t => t.agentId === agentId && t.status === 'pending',
+        );
+        if (pendingTasks.length > 0) {
+          const taskLines = pendingTasks.map(t => {
+            const msUntil = new Date(t.executeAt).getTime() - Date.now();
+            const minsUntil = Math.max(0, Math.round(msUntil / 60_000));
+            const timeStr = minsUntil <= 0 ? 'due now' : minsUntil < 60 ? `due in ${minsUntil} minutes` : `due in ${Math.round(minsUntil / 60)} hours`;
+            return `- "${t.description}" — ${timeStr} (id: ${t.id})`;
+          });
+          systemParts.push(
+            '## Pending Scheduled Tasks\n\n' +
+            `You have ${pendingTasks.length} pending follow-up task(s):\n` +
+            taskLines.join('\n') +
+            '\nReview these and cancel any that are no longer needed using task_queue_cancel.',
+          );
+        }
+      } catch { /* ignore errors reading task queue */ }
     }
 
     if (systemParts.length > 0) {
@@ -1703,7 +1773,7 @@ async function startPlaceholderServer(
   // Built-in MCP server descriptions
   const BUILTIN_MCP_DESCRIPTIONS: Record<string, string> = {
     memory: 'Read, write, search, and manage agent memory (MEMORY.md + daily logs)',
-    sessions: 'Spawn agents, list sessions, send messages, and check status',
+    sessions: 'Spawn agents, list sessions, send messages, check status, and schedule task queue follow-ups',
     collaboration: 'Delegation tracking, pub/sub message bus, subscriptions, shared memory',
     messaging: 'Send messages across channels (Slack, Telegram, Discord, webchat)',
     'mcp-manager': 'Search, install, and manage MCP servers and plugins dynamically',
@@ -2754,6 +2824,118 @@ async function startPlaceholderServer(
     return job;
   });
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // Task Queue API — /api/task-queue
+  // ═══════════════════════════════════════════════════════════════════════
+
+  fastify.get('/api/task-queue', async (req) => {
+    const query = req.query as Record<string, string>;
+    const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+    let tasks = loadTaskQueue(cladeHome);
+
+    if (query.status) {
+      tasks = tasks.filter(t => t.status === query.status);
+    }
+    if (query.agentId) {
+      tasks = tasks.filter(t => t.agentId === query.agentId);
+    }
+
+    // Sort: pending/running first (by executeAt), then completed/failed/cancelled (by completedAt desc)
+    tasks.sort((a, b) => {
+      const activeA = a.status === 'pending' || a.status === 'running' ? 0 : 1;
+      const activeB = b.status === 'pending' || b.status === 'running' ? 0 : 1;
+      if (activeA !== activeB) return activeA - activeB;
+      if (activeA === 0) return new Date(a.executeAt).getTime() - new Date(b.executeAt).getTime();
+      return new Date(b.completedAt || b.scheduledAt).getTime() - new Date(a.completedAt || a.scheduledAt).getTime();
+    });
+
+    return { tasks };
+  });
+
+  fastify.post('/api/task-queue', async (req, reply) => {
+    const body = req.body as Record<string, unknown>;
+    const agentId = body.agentId as string;
+    const prompt = body.prompt as string;
+    const description = body.description as string;
+    const delayMinutes = Number(body.delayMinutes || 1);
+
+    if (!agentId || !prompt || !description) {
+      reply.status(400);
+      return { error: 'agentId, prompt, and description are required' };
+    }
+
+    const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+    const now = new Date();
+    const executeAt = new Date(now.getTime() + delayMinutes * 60_000);
+
+    const task: QueuedTask = {
+      id: 'tq_' + randomUUID().slice(0, 12),
+      agentId,
+      prompt,
+      description,
+      executeAt: executeAt.toISOString(),
+      scheduledAt: now.toISOString(),
+      status: 'pending',
+      retryCount: 0,
+    };
+
+    const tasks = loadTaskQueue(cladeHome);
+    tasks.push(task);
+    saveTaskQueue(cladeHome, tasks);
+
+    logActivityLocal({
+      type: 'task_queue',
+      agentId,
+      title: `Task scheduled: ${description}`,
+      description: `Executes at ${executeAt.toLocaleString()} (in ${delayMinutes}m)`,
+      metadata: { action: 'scheduled', taskId: task.id, prompt, delayMinutes },
+    });
+    broadcastAdmin({ type: 'taskqueue:scheduled', task });
+
+    return { task };
+  });
+
+  fastify.get<{ Params: { id: string } }>('/api/task-queue/:id', async (req, reply) => {
+    const { id } = req.params;
+    const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+    const tasks = loadTaskQueue(cladeHome);
+    const task = tasks.find(t => t.id === id);
+    if (!task) {
+      reply.status(404);
+      return { error: 'Task not found' };
+    }
+    return { task };
+  });
+
+  fastify.delete<{ Params: { id: string } }>('/api/task-queue/:id', async (req, reply) => {
+    const { id } = req.params;
+    const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
+    const tasks = loadTaskQueue(cladeHome);
+    const task = tasks.find(t => t.id === id);
+    if (!task) {
+      reply.status(404);
+      return { error: 'Task not found' };
+    }
+    if (task.status !== 'pending') {
+      reply.status(400);
+      return { error: `Cannot cancel task with status "${task.status}"` };
+    }
+    task.status = 'cancelled';
+    task.completedAt = new Date().toISOString();
+    saveTaskQueue(cladeHome, tasks);
+
+    logActivityLocal({
+      type: 'task_queue',
+      agentId: task.agentId,
+      title: `Task cancelled: ${task.description}`,
+      description: `Task ${task.id} was cancelled before execution`,
+      metadata: { action: 'cancelled', taskId: task.id },
+    });
+    broadcastAdmin({ type: 'taskqueue:cancelled', taskId: task.id });
+
+    return { task };
+  });
+
   // ── Templates API ──────────────────────────────────────────
   fastify.get('/api/templates', async () => {
     const templates = listTemplates().map(t => ({
@@ -3132,7 +3314,7 @@ async function startPlaceholderServer(
       return { error: 'type and title are required' };
     }
 
-    const validTypes = ['chat', 'skill', 'mcp', 'reflection', 'agent', 'heartbeat', 'cron', 'backup', 'delegation'];
+    const validTypes = ['chat', 'skill', 'mcp', 'reflection', 'agent', 'heartbeat', 'cron', 'backup', 'delegation', 'task_queue'];
     if (!validTypes.includes(eventType)) {
       reply.status(400);
       return { error: `type must be one of: ${validTypes.join(', ')}` };
@@ -3342,6 +3524,7 @@ async function startPlaceholderServer(
           chat: '#58a6ff',
           heartbeat: '#3fb950',
           cron: '#79c0ff',
+          task_queue: '#2dd4bf',
         };
         calendarEvents.push({
           id: evt.id,
@@ -4003,6 +4186,160 @@ async function startPlaceholderServer(
     console.log(`  Auto-backup enabled: every ${backupCfg.intervalMinutes}m to ${backupCfg.repo}`);
   }
 
+  // ── Task Queue timer — execute due tasks ────────────────────────
+  let taskQueueProcessing = false;
+  const taskQueueTimer = setInterval(async () => {
+    if (taskQueueProcessing) return;
+    taskQueueProcessing = true;
+    try {
+      const tasks = loadTaskQueue(cladeHome);
+      const now = Date.now();
+      let changed = false;
+
+      for (const task of tasks) {
+        // Expire tasks older than 24h that are still pending
+        if (task.status === 'pending' && now - new Date(task.executeAt).getTime() > 24 * 60 * 60_000) {
+          task.status = 'expired';
+          task.completedAt = new Date().toISOString();
+          changed = true;
+          logActivityLocal({
+            type: 'task_queue',
+            agentId: task.agentId,
+            title: `Task expired: ${task.description}`,
+            description: `Task ${task.id} expired (24h past due)`,
+            metadata: { action: 'expired', taskId: task.id },
+          });
+          broadcastAdmin({ type: 'taskqueue:expired', taskId: task.id });
+          continue;
+        }
+
+        // Execute due tasks
+        if (task.status === 'pending' && new Date(task.executeAt).getTime() <= now) {
+          task.status = 'running';
+          changed = true;
+          saveTaskQueue(cladeHome, tasks);
+          broadcastAdmin({ type: 'taskqueue:running', taskId: task.id });
+
+          console.log(`  [task-queue] Executing: ${task.description} (${task.id})`);
+
+          const freshAgents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+          const agentCfg = freshAgents[task.agentId];
+          if (!agentCfg) {
+            task.status = 'failed';
+            task.error = `Agent "${task.agentId}" not found`;
+            task.completedAt = new Date().toISOString();
+            logActivityLocal({
+              type: 'task_queue',
+              agentId: task.agentId,
+              title: `Task failed: ${task.description}`,
+              description: task.error,
+              metadata: { action: 'failed', taskId: task.id, error: task.error },
+            });
+            broadcastAdmin({ type: 'taskqueue:failed', taskId: task.id });
+            continue;
+          }
+
+          const soulPath = join(cladeHome, 'agents', task.agentId, 'SOUL.md');
+          const toolPreset = (agentCfg.toolPreset as string) || 'coding';
+          const agentContext = buildAgentContext(task.agentId, freshAgents);
+          const browserCfg = { ...(config.browser ?? {}) } as { enabled?: boolean; userDataDir?: string; browser?: string; cdpEndpoint?: string; headless?: boolean };
+          if (typeof cdpEndpointUrl === 'string') browserCfg.cdpEndpoint = cdpEndpointUrl;
+          const agentModel = (agentCfg.model as string) || undefined;
+
+          // Use the original conversation so --resume provides full chat history
+          const conversationId = task.conversationId || undefined;
+
+          try {
+            const result = await askClaude(
+              task.prompt,
+              existsSync(soulPath) ? soulPath : null,
+              agentContext,
+              conversationId,
+              task.agentId,
+              cladeHome,
+              toolPreset,
+              browserCfg,
+              undefined,
+              agentModel,
+            );
+
+            task.status = 'completed';
+            task.result = result.text;
+            task.completedAt = new Date().toISOString();
+            if (result.sessionId) task.sessionId = result.sessionId;
+
+            // Inject result into chat conversation
+            if (conversationId) {
+              const agentName = (agentCfg.name as string) || task.agentId;
+              saveChatMessage(cladeHome, {
+                id: 'msg_' + randomUUID().slice(0, 12),
+                agentId: task.agentId,
+                role: 'assistant',
+                text: `**[Scheduled task: ${task.description}]**\n\n${result.text}`,
+                timestamp: new Date().toISOString(),
+              }, conversationId);
+              broadcastAdmin({ type: 'chat', agentId: task.agentId, conversationId });
+            }
+
+            logActivityLocal({
+              type: 'task_queue',
+              agentId: task.agentId,
+              title: `Task completed: ${task.description}`,
+              description: result.text.slice(0, 200),
+              metadata: { action: 'completed', taskId: task.id, result: result.text },
+            });
+            broadcastAdmin({ type: 'taskqueue:completed', taskId: task.id });
+            console.log(`  [task-queue] Completed: ${task.description} (${task.id})`);
+          } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            task.retryCount++;
+
+            if (task.retryCount < 3) {
+              // Retry: set back to pending with 1min delay
+              task.status = 'pending';
+              task.executeAt = new Date(Date.now() + 60_000).toISOString();
+              console.log(`  [task-queue] Retry ${task.retryCount}/2 for: ${task.description}`);
+            } else {
+              task.status = 'failed';
+              task.error = errMsg;
+              task.completedAt = new Date().toISOString();
+              logActivityLocal({
+                type: 'task_queue',
+                agentId: task.agentId,
+                title: `Task failed: ${task.description}`,
+                description: errMsg.slice(0, 200),
+                metadata: { action: 'failed', taskId: task.id, error: errMsg, retries: task.retryCount },
+              });
+              broadcastAdmin({ type: 'taskqueue:failed', taskId: task.id });
+              console.log(`  [task-queue] Failed after retries: ${task.description} (${task.id})`);
+            }
+          }
+
+          // Only execute one task per cycle (serial execution)
+          break;
+        }
+      }
+
+      // Clean up tasks older than 7 days
+      const sevenDaysAgo = now - 7 * 24 * 60 * 60_000;
+      const cleaned = tasks.filter(t => {
+        if (t.status === 'pending' || t.status === 'running') return true;
+        const completedTime = t.completedAt ? new Date(t.completedAt).getTime() : 0;
+        return completedTime > sevenDaysAgo;
+      });
+
+      if (changed || cleaned.length !== tasks.length) {
+        saveTaskQueue(cladeHome, cleaned);
+      }
+    } catch (err) {
+      console.error('  [task-queue] Timer error:', err instanceof Error ? err.message : String(err));
+    } finally {
+      taskQueueProcessing = false;
+    }
+  }, 15_000);
+  taskQueueTimer.unref();
+  console.log('  [ok] Task queue timer started (15s interval)');
+
   const channels = (config.channels ?? {}) as Record<string, { enabled?: boolean }>;
 
   // ── Connect channel adapters (Slack, Telegram, Discord) ─────────
@@ -4279,6 +4616,98 @@ async function handleIpcMessage(
       if (!adapter) return { ok: false, error: `Channel "${channel}" not found` };
 
       return { ok: true, connected: adapter.isConnected(), type: adapter.name };
+    }
+
+    // ── Task Queue IPC handlers ──────────────────────────────────
+
+    case 'taskqueue.schedule': {
+      const agentId = msg.agentId as string | undefined;
+      const sessionId = msg.sessionId as string | undefined;
+      const prompt = msg.prompt as string | undefined;
+      const description = msg.description as string | undefined;
+      const delayMinutes = Number(msg.delayMinutes || 1);
+
+      if (!agentId) return { ok: false, error: 'agentId is required' };
+      if (!prompt) return { ok: false, error: 'prompt is required' };
+      if (!description) return { ok: false, error: 'description is required' };
+
+      const now = new Date();
+      const executeAt = new Date(now.getTime() + delayMinutes * 60_000);
+
+      // Try to resolve conversationId from current session for --resume
+      let conversationId: string | undefined;
+      if (sessionId) {
+        conversationId = resolveConversationForSession(cladeHome, sessionId);
+      }
+
+      const task: QueuedTask = {
+        id: 'tq_' + randomUUID().slice(0, 12),
+        agentId,
+        sessionId: sessionId || undefined,
+        conversationId,
+        prompt,
+        description,
+        executeAt: executeAt.toISOString(),
+        scheduledAt: now.toISOString(),
+        status: 'pending',
+        retryCount: 0,
+      };
+
+      const tasks = loadTaskQueue(cladeHome);
+      tasks.push(task);
+      saveTaskQueue(cladeHome, tasks);
+
+      logActivityLocal({
+        type: 'task_queue',
+        agentId,
+        title: `Task scheduled: ${description}`,
+        description: `Executes at ${executeAt.toLocaleString()} (in ${delayMinutes}m)`,
+        metadata: { action: 'scheduled', taskId: task.id, prompt, delayMinutes },
+      });
+      broadcastAdmin({ type: 'taskqueue:scheduled', task });
+
+      return { ok: true, taskId: task.id, executeAt: executeAt.toISOString() };
+    }
+
+    case 'taskqueue.cancel': {
+      const taskId = msg.taskId as string | undefined;
+      const agentId = msg.agentId as string | undefined;
+      if (!taskId) return { ok: false, error: 'taskId is required' };
+
+      const tasks = loadTaskQueue(cladeHome);
+      const task = tasks.find(t => t.id === taskId);
+      if (!task) return { ok: false, error: 'Task not found' };
+      if (task.status !== 'pending') return { ok: false, error: `Cannot cancel task with status "${task.status}"` };
+
+      task.status = 'cancelled';
+      task.completedAt = new Date().toISOString();
+      saveTaskQueue(cladeHome, tasks);
+
+      logActivityLocal({
+        type: 'task_queue',
+        agentId: task.agentId,
+        title: `Task cancelled: ${task.description}`,
+        description: `Task ${task.id} was cancelled`,
+        metadata: { action: 'cancelled', taskId: task.id, cancelledBy: agentId },
+      });
+      broadcastAdmin({ type: 'taskqueue:cancelled', taskId: task.id });
+
+      return { ok: true };
+    }
+
+    case 'taskqueue.list': {
+      const agentId = msg.agentId as string | undefined;
+      const tasks = loadTaskQueue(cladeHome);
+      const filtered = agentId
+        ? tasks.filter(t => t.agentId === agentId)
+        : tasks;
+      // Return pending/running + last 10 completed
+      const active = filtered.filter(t => t.status === 'pending' || t.status === 'running');
+      const recent = filtered
+        .filter(t => t.status !== 'pending' && t.status !== 'running')
+        .sort((a, b) => new Date(b.completedAt || b.scheduledAt).getTime() - new Date(a.completedAt || a.scheduledAt).getTime())
+        .slice(0, 10);
+      return { ok: true, tasks: [...active, ...recent] };
     }
 
     default:

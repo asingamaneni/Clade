@@ -12,7 +12,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { api } from '@/lib/api'
 import {
-  MessageSquare, Puzzle, BookOpen, Bot, RefreshCw, Loader2, Zap, Search as SearchIcon, Heart, Timer, ArrowRightLeft, Calendar, X
+  MessageSquare, Puzzle, BookOpen, Bot, RefreshCw, Loader2, Zap, Search as SearchIcon, Heart, Timer, ArrowRightLeft, Calendar, X, ListTodo
 } from "lucide-react"
 
 // ---------------------------------------------------------------------------
@@ -21,7 +21,7 @@ import {
 
 interface ActivityEvent {
   id: string
-  type: 'chat' | 'skill' | 'mcp' | 'reflection' | 'agent' | 'heartbeat' | 'cron' | 'delegation'
+  type: 'chat' | 'skill' | 'mcp' | 'reflection' | 'agent' | 'heartbeat' | 'cron' | 'delegation' | 'task_queue'
   agentId?: string
   title: string
   description: string
@@ -67,9 +67,10 @@ const EVENT_CONFIG: Record<string, { color: string; bg: string; border: string; 
   heartbeat:  { color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-l-emerald-500', icon: Heart,       label: 'Heartbeat' },
   cron:       { color: 'text-sky-400',   bg: 'bg-sky-500/10',   border: 'border-l-sky-500',   icon: Timer,         label: 'Cron' },
   delegation: { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-l-orange-500', icon: ArrowRightLeft, label: 'Delegation' },
+  task_queue: { color: 'text-teal-400', bg: 'bg-teal-500/10', border: 'border-l-teal-500', icon: ListTodo, label: 'Task Queue' },
 }
 
-const FILTER_TYPES = ['all', 'chat', 'skill', 'mcp', 'reflection', 'agent', 'heartbeat', 'cron', 'delegation'] as const
+const FILTER_TYPES = ['all', 'chat', 'skill', 'mcp', 'reflection', 'agent', 'heartbeat', 'cron', 'delegation', 'task_queue'] as const
 
 // ---------------------------------------------------------------------------
 // Component
