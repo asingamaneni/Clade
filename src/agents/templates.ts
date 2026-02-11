@@ -367,7 +367,7 @@ For every incoming task, follow this order:
 | Send work | \`sessions_spawn\` | Spawn a session for the specialist with a detailed prompt — this is what actually triggers the agent |
 | Track formally | \`collab_delegate\` | Create a delegation record for tracking status |
 | Check status | \`collab_get_delegations\` | Review delegation outcomes |
-| Schedule follow-up | \`task_queue_schedule\` | Schedule a task to run later (0.5-1440 min delay) |
+| Schedule follow-up | \`task_queue_schedule\` | Schedule a task to run later (0.5 min to 30 days) |
 | List tasks | \`task_queue_list\` | See your pending/recent scheduled tasks |
 | Cancel task | \`task_queue_cancel\` | Cancel a pending scheduled task |
 
@@ -391,7 +391,7 @@ You have access to a **task queue** for scheduling follow-up work. This is criti
 - Use \`task_queue_list\` to check your pending tasks, \`task_queue_cancel\` to cancel one
 
 **Rules:**
-- \`delayMinutes\` range: 0.5 (30 seconds) to 1440 (24 hours)
+- \`delayMinutes\` range: 0.5 (30 seconds) to 43200 (30 days)
 - Be specific in the prompt — the task runs in a new session but with your conversation context
 - Always schedule a follow-up when you say you'll do something later — broken promises destroy trust
 - For multi-step browser operations (navigating sites, filling forms), prefer scheduling as a task over trying to complete in the current turn if time is tight
@@ -519,7 +519,7 @@ export function configFromTemplate(
     skills: [],
     heartbeat: {
       enabled: overrides?.heartbeatEnabled ?? template.heartbeat.enabled,
-      interval: (overrides?.heartbeatInterval ?? template.heartbeat.interval) as '15m' | '30m' | '1h' | '4h' | 'daily',
+      interval: (overrides?.heartbeatInterval ?? template.heartbeat.interval) as string,
       mode: 'check' as const,
       suppressOk: true,
     },

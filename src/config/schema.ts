@@ -22,8 +22,8 @@ export const HeartbeatConfigSchema = z.object({
   /** Whether heartbeat monitoring is enabled for this agent. */
   enabled: z.boolean().default(false),
 
-  /** How often the heartbeat fires. */
-  interval: z.enum(['15m', '30m', '1h', '4h', 'daily']).default('30m'),
+  /** How often the heartbeat fires. Accepts presets (5m, 15m, 30m, 1h, 4h, daily) or custom like "7m", "2h". */
+  interval: z.string().default('30m'),
 
   /** Optional active-hours window. Heartbeats outside this window are skipped. */
   activeHours: z

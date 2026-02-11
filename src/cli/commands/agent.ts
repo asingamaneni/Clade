@@ -423,7 +423,7 @@ async function editAgent(name: string): Promise<void> {
       type: 'list',
       name: 'heartbeatInterval',
       message: 'Heartbeat interval:',
-      choices: ['15m', '30m', '1h', '4h', 'daily'],
+      choices: ['5m', '15m', '30m', '1h', '4h', 'daily'],
       default: agent.heartbeat?.interval ?? '30m',
       when: (a: { heartbeatEnabled?: boolean }) =>
         a.heartbeatEnabled === true,

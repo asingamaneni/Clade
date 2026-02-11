@@ -1221,6 +1221,8 @@ If nothing needs attention, respond with: HEARTBEAT_OK
       // Step 3: Heartbeat
       const [heartbeatEnabled, setHeartbeatEnabled] = useState(true);
       const [heartbeatInterval, setHeartbeatInterval] = useState('30m');
+      const [hbUseCustom, setHbUseCustom] = useState(false);
+      const [hbCustomMins, setHbCustomMins] = useState('');
       const [heartbeatContent, setHeartbeatContent] = useState(DEFAULT_CUSTOM_HEARTBEAT);
 
       const nameSlug = name.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
@@ -1252,7 +1254,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
               soulContent: soulContent || undefined,
               heartbeatContent: heartbeatContent || undefined,
               heartbeatEnabled,
-              heartbeatInterval,
+              heartbeatInterval: hbUseCustom ? (parseInt(hbCustomMins,10) || 30) + 'm' : heartbeatInterval,
             },
           });
           showToast('Agent "' + nameSlug + '" created!', 'success');
@@ -1445,17 +1447,32 @@ If nothing needs attention, respond with: HEARTBEAT_OK
                     </button>
                   </div>
                   ${heartbeatEnabled && html`
-                    <div class="flex gap-2 mt-3">
-                      ${['15m', '30m', '1h', '4h', 'daily'].map(iv => html`
+                    <div class="flex flex-wrap gap-2 mt-3 items-center">
+                      ${['5m', '15m', '30m', '1h', '4h', 'daily'].map(iv => html`
                         <button
                           key=${iv}
-                          class="flex-1 py-2 rounded-lg text-xs font-medium transition-all"
-                          style="background:${heartbeatInterval === iv ? 'rgba(88,166,255,0.15)' : '#161b22'};color:${heartbeatInterval === iv ? '#58a6ff' : '#8b949e'};border:1px solid ${heartbeatInterval === iv ? 'rgba(88,166,255,0.4)' : '#30363d'};cursor:pointer"
-                          onClick=${() => setHeartbeatInterval(iv)}
+                          class="px-3 py-2 rounded-lg text-xs font-medium transition-all"
+                          style="background:${!hbUseCustom && heartbeatInterval === iv ? 'rgba(88,166,255,0.15)' : '#161b22'};color:${!hbUseCustom && heartbeatInterval === iv ? '#58a6ff' : '#8b949e'};border:1px solid ${!hbUseCustom && heartbeatInterval === iv ? 'rgba(88,166,255,0.4)' : '#30363d'};cursor:pointer"
+                          onClick=${() => { setHbUseCustom(false); setHeartbeatInterval(iv); }}
                         >
                           ${iv}
                         </button>
                       `)}
+                      <button
+                        class="px-3 py-2 rounded-lg text-xs font-medium transition-all"
+                        style="background:${hbUseCustom ? 'rgba(88,166,255,0.15)' : '#161b22'};color:${hbUseCustom ? '#58a6ff' : '#8b949e'};border:1px solid ${hbUseCustom ? 'rgba(88,166,255,0.4)' : '#30363d'};cursor:pointer"
+                        onClick=${() => { setHbUseCustom(true); if (!hbCustomMins) setHbCustomMins('10'); }}
+                      >Custom</button>
+                      ${hbUseCustom && html`
+                        <div class="flex items-center gap-1.5">
+                          <input type="number" min="1" max="1440" value=${hbCustomMins}
+                            onInput=${e => setHbCustomMins(e.target.value)}
+                            class="w-16 px-2 py-2 rounded-lg text-xs"
+                            style="background:#161b22;color:#e6edf3;border:1px solid rgba(88,166,255,0.4);outline:none"
+                            placeholder="10" />
+                          <span class="text-xs" style="color:#8b949e">min</span>
+                        </div>
+                      `}
                     </div>
                   `}
                 </div>
@@ -1504,7 +1521,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
                     </div>
                     <div class="flex justify-between">
                       <span>Heartbeat</span>
-                      <span style="color:#e6edf3">${heartbeatEnabled ? heartbeatInterval : 'Off'}</span>
+                      <span style="color:#e6edf3">${heartbeatEnabled ? (hbUseCustom ? (hbCustomMins || '30') + 'm' : heartbeatInterval) : 'Off'}</span>
                     </div>
                     <div class="flex justify-between">
                       <span>SOUL.md</span>
@@ -3098,11 +3115,15 @@ If nothing needs attention, respond with: HEARTBEAT_OK
     function HeartbeatTab({ agentId, refreshTick }) {
       const [content, setContent] = useState('');
       const [interval, setInterval_] = useState('30m');
-      const [activeStart, setActiveStart] = useState('09:00');
-      const [activeEnd, setActiveEnd] = useState('22:00');
+      const [customMinutes, setCustomMinutes] = useState('');
+      const [useCustom, setUseCustom] = useState(false);
+      const [activeStart, setActiveStart] = useState('00:00');
+      const [activeEnd, setActiveEnd] = useState('23:59');
       const [hbEnabled, setHbEnabled] = useState(false);
       const [loading, setLoading] = useState(true);
       const [saving, setSaving] = useState(false);
+
+      const PRESETS = ['5m', '15m', '30m', '1h', '4h', 'daily'];
 
       useEffect(() => {
         setLoading(true);
@@ -3112,16 +3133,37 @@ If nothing needs attention, respond with: HEARTBEAT_OK
         ]).then(([hb, ag]) => {
           setContent(hb.content || '');
           const c = ag.agent?.heartbeat || {};
-          setInterval_(c.interval || '30m');
-          setActiveStart(c.activeHours?.start || '09:00');
-          setActiveEnd(c.activeHours?.end || '22:00');
+          const savedInterval = c.interval || '30m';
+          if (PRESETS.includes(savedInterval)) {
+            setInterval_(savedInterval);
+            setUseCustom(false);
+          } else {
+            // Custom interval like "7m" or "2h"
+            setUseCustom(true);
+            const mMatch = savedInterval.match(/^(\d+)m$/);
+            const hMatch = savedInterval.match(/^(\d+)h$/);
+            if (mMatch) setCustomMinutes(mMatch[1]);
+            else if (hMatch) setCustomMinutes(String(Number(hMatch[1]) * 60));
+            else setCustomMinutes('30');
+          }
+          setActiveStart(c.activeHours?.start || '00:00');
+          setActiveEnd(c.activeHours?.end || '23:59');
           setHbEnabled(!!c.enabled);
         }).finally(() => setLoading(false));
       }, [agentId, refreshTick]);
 
+      const getEffectiveInterval = () => {
+        if (!useCustom) return interval;
+        const mins = parseInt(customMinutes, 10);
+        if (!mins || mins < 1) return '30m';
+        if (mins >= 60 && mins % 60 === 0) return (mins / 60) + 'h';
+        return mins + 'm';
+      };
+
       const save = async () => {
         setSaving(true);
         try {
+          const effectiveInterval = getEffectiveInterval();
           await Promise.all([
             api('/agents/' + agentId + '/heartbeat', { method: 'PUT', body: { content } }),
             api('/agents/' + agentId, {
@@ -3129,7 +3171,7 @@ If nothing needs attention, respond with: HEARTBEAT_OK
               body: {
                 heartbeat: {
                   enabled: hbEnabled,
-                  interval,
+                  interval: effectiveInterval,
                   activeHours: { start: activeStart, end: activeEnd },
                 },
               },
@@ -3142,6 +3184,8 @@ If nothing needs attention, respond with: HEARTBEAT_OK
 
       if (loading) return html`<${LoadingState} text="Loading heartbeat..." />`;
 
+      const presetLabels = { '5m': '5m', '15m': '15m', '30m': '30m', '1h': '1h', '4h': '4h', 'daily': '24h' };
+
       return html`
         <div class="max-w-2xl">
           <!-- Enable toggle -->
@@ -3152,25 +3196,50 @@ If nothing needs attention, respond with: HEARTBEAT_OK
             </span>
           </div>
 
-          <!-- Settings row -->
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
-            <div>
-              <label class="block text-xs font-medium mb-1.5" style="color:#8b949e">Interval</label>
-              <select value=${interval} onChange=${e => setInterval_(e.target.value)}>
-                <option value="15m">15 minutes</option>
-                <option value="30m">30 minutes</option>
-                <option value="1h">1 hour</option>
-                <option value="4h">4 hours</option>
-                <option value="daily">Daily</option>
-              </select>
+          <!-- Interval -->
+          <div class="mb-5">
+            <label class="block text-xs font-medium mb-2" style="color:#8b949e">Interval</label>
+            <div class="flex flex-wrap gap-2 items-center">
+              ${PRESETS.map(p => html`
+                <button
+                  key=${p}
+                  class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+                  style="background:${!useCustom && interval === p ? 'rgba(88,166,255,0.15)' : '#161b22'};color:${!useCustom && interval === p ? '#58a6ff' : '#8b949e'};border:1px solid ${!useCustom && interval === p ? 'rgba(88,166,255,0.4)' : '#30363d'};cursor:pointer"
+                  onClick=${() => { setUseCustom(false); setInterval_(p); }}
+                >${presetLabels[p]}</button>
+              `)}
+              <button
+                class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+                style="background:${useCustom ? 'rgba(88,166,255,0.15)' : '#161b22'};color:${useCustom ? '#58a6ff' : '#8b949e'};border:1px solid ${useCustom ? 'rgba(88,166,255,0.4)' : '#30363d'};cursor:pointer"
+                onClick=${() => { setUseCustom(true); if (!customMinutes) setCustomMinutes('10'); }}
+              >Custom</button>
+              ${useCustom && html`
+                <div class="flex items-center gap-1.5 ml-1">
+                  <input
+                    type="number"
+                    min="1"
+                    max="1440"
+                    value=${customMinutes}
+                    onInput=${e => setCustomMinutes(e.target.value)}
+                    class="w-20 px-2 py-1.5 rounded-lg text-xs"
+                    style="background:#161b22;color:#e6edf3;border:1px solid rgba(88,166,255,0.4);outline:none"
+                    placeholder="10"
+                  />
+                  <span class="text-xs" style="color:#8b949e">minutes</span>
+                </div>
+              `}
             </div>
+          </div>
+
+          <!-- Active hours row -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
             <div>
               <label class="block text-xs font-medium mb-1.5" style="color:#8b949e">Active From</label>
-              <input type="time" value=${activeStart} onInput=${e => setActiveStart(e.target.value)} />
+              <input type="time" value=${activeStart} onInput=${e => setActiveStart(e.target.value)} step="60" />
             </div>
             <div>
               <label class="block text-xs font-medium mb-1.5" style="color:#8b949e">Active Until</label>
-              <input type="time" value=${activeEnd} onInput=${e => setActiveEnd(e.target.value)} />
+              <input type="time" value=${activeEnd} onInput=${e => setActiveEnd(e.target.value)} step="60" />
             </div>
           </div>
 

@@ -1278,11 +1278,19 @@ function MemoryTab({ agentId }: { agentId: string }) {
 function HeartbeatTab({ agentId }: { agentId: string }) {
   const [content, setContent] = useState('')
   const [interval, setIntervalVal] = useState('30m')
-  const [activeStart, setActiveStart] = useState('09:00')
-  const [activeEnd, setActiveEnd] = useState('22:00')
+  const [useCustom, setUseCustom] = useState(false)
+  const [customMinutes, setCustomMinutes] = useState('')
+  const [activeStart, setActiveStart] = useState('00:00')
+  const [activeEnd, setActiveEnd] = useState('23:59')
   const [hbEnabled, setHbEnabled] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+
+  const PRESETS = ['5m', '15m', '30m', '1h', '4h', 'daily'] as const
+  const PRESET_LABELS: Record<string, string> = {
+    '5m': '5 min', '15m': '15 min', '30m': '30 min',
+    '1h': '1 hr', '4h': '4 hr', 'daily': '24 hr',
+  }
 
   useEffect(() => {
     setLoading(true)
@@ -1297,17 +1305,37 @@ function HeartbeatTab({ agentId }: { agentId: string }) {
       .then(([hb, ag]) => {
         setContent(hb.content || '')
         const c = (ag as any).agent?.heartbeat || {}
-        setIntervalVal(c.interval || '30m')
-        setActiveStart(c.activeHours?.start || '09:00')
-        setActiveEnd(c.activeHours?.end || '22:00')
+        const savedInterval = c.interval || '30m'
+        if ((PRESETS as readonly string[]).includes(savedInterval)) {
+          setIntervalVal(savedInterval)
+          setUseCustom(false)
+        } else {
+          setUseCustom(true)
+          const mMatch = savedInterval.match(/^(\d+)m$/)
+          const hMatch = savedInterval.match(/^(\d+)h$/)
+          if (mMatch) setCustomMinutes(mMatch[1])
+          else if (hMatch) setCustomMinutes(String(Number(hMatch[1]) * 60))
+          else setCustomMinutes('30')
+        }
+        setActiveStart(c.activeHours?.start || '00:00')
+        setActiveEnd(c.activeHours?.end || '23:59')
         setHbEnabled(!!c.enabled)
       })
       .finally(() => setLoading(false))
   }, [agentId])
 
+  const getEffectiveInterval = () => {
+    if (!useCustom) return interval
+    const mins = parseInt(customMinutes, 10)
+    if (!mins || mins < 1) return '30m'
+    if (mins >= 60 && mins % 60 === 0) return (mins / 60) + 'h'
+    return mins + 'm'
+  }
+
   const save = async () => {
     setSaving(true)
     try {
+      const effectiveInterval = getEffectiveInterval()
       await Promise.all([
         api('/agents/' + agentId + '/heartbeat', {
           method: 'PUT',
@@ -1318,7 +1346,7 @@ function HeartbeatTab({ agentId }: { agentId: string }) {
           body: {
             heartbeat: {
               enabled: hbEnabled,
-              interval,
+              interval: effectiveInterval,
               activeHours: { start: activeStart, end: activeEnd },
             },
           },
@@ -1360,28 +1388,63 @@ function HeartbeatTab({ agentId }: { agentId: string }) {
         </span>
       </div>
 
-      {/* Settings row */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">Interval</Label>
-          <select
-            value={interval}
-            onChange={(e) => setIntervalVal(e.target.value)}
-            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      {/* Interval */}
+      <div className="space-y-2">
+        <Label className="text-xs text-muted-foreground">Interval</Label>
+        <div className="flex flex-wrap gap-2 items-center">
+          {PRESETS.map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => { setUseCustom(false); setIntervalVal(p) }}
+              className={cn(
+                "px-3 py-1.5 rounded-md text-xs font-medium border transition-colors",
+                !useCustom && interval === p
+                  ? "bg-primary/10 text-primary border-primary/40"
+                  : "bg-background text-muted-foreground border-border hover:border-muted-foreground/50",
+              )}
+            >
+              {PRESET_LABELS[p]}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => { setUseCustom(true); if (!customMinutes) setCustomMinutes('10') }}
+            className={cn(
+              "px-3 py-1.5 rounded-md text-xs font-medium border transition-colors",
+              useCustom
+                ? "bg-primary/10 text-primary border-primary/40"
+                : "bg-background text-muted-foreground border-border hover:border-muted-foreground/50",
+            )}
           >
-            <option value="15m">15 minutes</option>
-            <option value="30m">30 minutes</option>
-            <option value="1h">1 hour</option>
-            <option value="4h">4 hours</option>
-            <option value="daily">Daily</option>
-          </select>
+            Custom
+          </button>
+          {useCustom && (
+            <div className="flex items-center gap-1.5 ml-1">
+              <Input
+                type="number"
+                min={1}
+                max={1440}
+                value={customMinutes}
+                onChange={(e) => setCustomMinutes(e.target.value)}
+                className="w-20 h-8 text-xs"
+                placeholder="10"
+              />
+              <span className="text-xs text-muted-foreground">minutes</span>
+            </div>
+          )}
         </div>
+      </div>
+
+      {/* Active hours */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-1.5">
           <Label className="text-xs text-muted-foreground">Active From</Label>
           <Input
             type="time"
             value={activeStart}
             onChange={(e) => setActiveStart(e.target.value)}
+            step={60}
           />
         </div>
         <div className="space-y-1.5">
@@ -1390,6 +1453,7 @@ function HeartbeatTab({ agentId }: { agentId: string }) {
             type="time"
             value={activeEnd}
             onChange={(e) => setActiveEnd(e.target.value)}
+            step={60}
           />
         </div>
       </div>

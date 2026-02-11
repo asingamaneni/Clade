@@ -34,6 +34,7 @@ interface HeartbeatState {
 // ---------------------------------------------------------------------------
 
 const INTERVAL_MS: Record<string, number> = {
+  '5m': 5 * 60 * 1000,
   '15m': 15 * 60 * 1000,
   '30m': 30 * 60 * 1000,
   '1h': 60 * 60 * 1000,
@@ -43,10 +44,17 @@ const INTERVAL_MS: Record<string, number> = {
 
 /**
  * Parse a human-friendly interval string to milliseconds.
+ * Accepts presets (5m, 15m, 30m, 1h, 4h, daily) or custom like "7m", "2h", "90m".
  * Falls back to 30 minutes for unknown values.
  */
 export function parseInterval(interval: string): number {
-  return INTERVAL_MS[interval] ?? 30 * 60 * 1000;
+  if (INTERVAL_MS[interval]) return INTERVAL_MS[interval];
+  // Parse custom: "Nm" for minutes, "Nh" for hours
+  const minuteMatch = interval.match(/^(\d+)m$/);
+  if (minuteMatch) return Math.max(1, Number(minuteMatch[1])) * 60 * 1000;
+  const hourMatch = interval.match(/^(\d+)h$/);
+  if (hourMatch) return Math.max(1, Number(hourMatch[1])) * 60 * 60 * 1000;
+  return 30 * 60 * 1000;
 }
 
 // ---------------------------------------------------------------------------
@@ -65,13 +73,14 @@ export function isWithinActiveHours(config: AgentConfig): boolean {
   if (!activeHours) return true;
 
   const now = new Date();
-  const formatter = new Intl.DateTimeFormat('en-US', {
+  const formatter = new Intl.DateTimeFormat('en-GB', {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
     timeZone: activeHours.timezone,
   });
 
+  // en-GB reliably gives "00:00" for midnight (en-US can give "24:00")
   const currentTime = formatter.format(now);
   return currentTime >= activeHours.start && currentTime <= activeHours.end;
 }

@@ -4198,7 +4198,7 @@ async function startPlaceholderServer(
 
       for (const task of tasks) {
         // Expire tasks older than 24h that are still pending
-        if (task.status === 'pending' && now - new Date(task.executeAt).getTime() > 24 * 60 * 60_000) {
+        if (task.status === 'pending' && now - new Date(task.executeAt).getTime() > 30 * 24 * 60 * 60_000) {
           task.status = 'expired';
           task.completedAt = new Date().toISOString();
           changed = true;
@@ -4206,7 +4206,7 @@ async function startPlaceholderServer(
             type: 'task_queue',
             agentId: task.agentId,
             title: `Task expired: ${task.description}`,
-            description: `Task ${task.id} expired (24h past due)`,
+            description: `Task ${task.id} expired (30 days past due)`,
             metadata: { action: 'expired', taskId: task.id },
           });
           broadcastAdmin({ type: 'taskqueue:expired', taskId: task.id });
@@ -4321,11 +4321,11 @@ async function startPlaceholderServer(
       }
 
       // Clean up tasks older than 7 days
-      const sevenDaysAgo = now - 7 * 24 * 60 * 60_000;
+      const thirtyDaysAgo = now - 30 * 24 * 60 * 60_000;
       const cleaned = tasks.filter(t => {
         if (t.status === 'pending' || t.status === 'running') return true;
         const completedTime = t.completedAt ? new Date(t.completedAt).getTime() : 0;
-        return completedTime > sevenDaysAgo;
+        return completedTime > thirtyDaysAgo;
       });
 
       if (changed || cleaned.length !== tasks.length) {
@@ -4339,6 +4339,211 @@ async function startPlaceholderServer(
   }, 15_000);
   taskQueueTimer.unref();
   console.log('  [ok] Task queue timer started (15s interval)');
+
+  // ── Heartbeat timer — periodic agent check-ins ─────────────────
+  const HEARTBEAT_INTERVAL_MS: Record<string, number> = {
+    '5m': 5 * 60_000,
+    '15m': 15 * 60_000,
+    '30m': 30 * 60_000,
+    '1h': 60 * 60_000,
+    '4h': 4 * 60 * 60_000,
+    'daily': 24 * 60 * 60_000,
+  };
+
+  const heartbeatStates = new Map<string, { timer: ReturnType<typeof setInterval>; lastBeat: string | null }>();
+  let heartbeatCount = 0;
+
+  for (const [agentId, agentCfg] of Object.entries(agents)) {
+    const hb = agentCfg.heartbeat as { enabled?: boolean; interval?: string; mode?: string; suppressOk?: boolean; activeHours?: { start?: string; end?: string; timezone?: string } } | undefined;
+    if (!hb?.enabled) continue;
+
+    let intervalMs = HEARTBEAT_INTERVAL_MS[hb.interval || '30m'] || 0;
+    if (!intervalMs) {
+      // Parse custom: "Nm" for minutes, "Nh" for hours
+      const minuteMatch = (hb.interval || '').match(/^(\d+)m$/);
+      const hourMatch = (hb.interval || '').match(/^(\d+)h$/);
+      if (minuteMatch) intervalMs = Math.max(1, Number(minuteMatch[1])) * 60_000;
+      else if (hourMatch) intervalMs = Math.max(1, Number(hourMatch[1])) * 60 * 60_000;
+      else intervalMs = 30 * 60_000;
+    }
+
+    const timer = setInterval(async () => {
+      // Active hours check
+      if (hb.activeHours) {
+        try {
+          const now = new Date();
+          const formatter = new Intl.DateTimeFormat('en-GB', {
+            hour: '2-digit', minute: '2-digit', hour12: false,
+            timeZone: hb.activeHours.timezone || 'UTC',
+          });
+          const currentTime = formatter.format(now);
+          if (currentTime < (hb.activeHours.start || '09:00') || currentTime > (hb.activeHours.end || '22:00')) {
+            return; // Outside active hours
+          }
+        } catch { /* ignore timezone errors, proceed with heartbeat */ }
+      }
+
+      console.log(`  [heartbeat] Running heartbeat for ${agentId}...`);
+
+      // Read HEARTBEAT.md checklist
+      const heartbeatMdPath = join(cladeHome, 'agents', agentId, 'HEARTBEAT.md');
+      let checklist = '';
+      if (existsSync(heartbeatMdPath)) {
+        try { checklist = readFileSync(heartbeatMdPath, 'utf-8').trim(); } catch { /* ignore */ }
+      }
+
+      // Build heartbeat prompt parts
+      const promptParts: string[] = ['Heartbeat check.', ''];
+
+      if (checklist) {
+        promptParts.push('Here is your checklist:', '', checklist, '');
+      }
+
+      const mode = hb.mode || 'check';
+      promptParts.push(
+        mode === 'work'
+          ? 'Review each item and perform any necessary actions.'
+          : 'Review each item and report any issues that need attention.',
+      );
+
+      // --- Smart follow-up: Check last conversation for unfulfilled promises ---
+      try {
+        const chatData = loadAgentChatData(cladeHome, agentId);
+        const recentConvId = chatData.order[0]; // most recent conversation
+        if (recentConvId && chatData.conversations[recentConvId]) {
+          const msgs = chatData.conversations[recentConvId].messages;
+          // Get last few assistant messages (up to last 3)
+          const assistantMsgs = msgs.filter(m => m.role === 'assistant').slice(-3);
+          if (assistantMsgs.length > 0) {
+            const lastMsgTexts = assistantMsgs.map(m => m.text).join('\n---\n');
+            // Truncate to avoid blowing context
+            const truncated = lastMsgTexts.length > 3000
+              ? lastMsgTexts.slice(-3000)
+              : lastMsgTexts;
+
+            promptParts.push(
+              '',
+              '## Recent Conversation (check for unfulfilled promises)',
+              '',
+              'Below are your recent messages from the last conversation. Review them carefully.',
+              'If you promised to do something (forward an email, check on something, follow up, schedule something, etc.) and it has NOT been completed yet:',
+              '- You MUST actually USE TOOLS to complete the action (browse, send email, call APIs, etc.)',
+              '- Do NOT just write a report claiming you did it — actually do it or schedule it via task_queue_schedule',
+              '- If you cannot complete it right now, schedule it as a task queue item with task_queue_schedule',
+              '- NEVER claim an action is "resolved" unless you actually executed it with tools in THIS session',
+              'If all promises have genuinely been fulfilled (verified by tool use, not assumed), ignore this section.',
+              '',
+              truncated,
+            );
+          }
+        }
+      } catch { /* ignore errors reading chat data */ }
+
+      // --- Pending task queue items ---
+      try {
+        const pendingTasks = loadTaskQueue(cladeHome).filter(
+          t => t.agentId === agentId && t.status === 'pending',
+        );
+        if (pendingTasks.length > 0) {
+          const taskLines = pendingTasks.map(t => {
+            const msUntil = new Date(t.executeAt).getTime() - Date.now();
+            const minsUntil = Math.max(0, Math.round(msUntil / 60_000));
+            const timeStr = minsUntil <= 0 ? 'due now' : minsUntil < 60 ? `due in ${minsUntil} minutes` : `due in ${Math.round(minsUntil / 60)} hours`;
+            return `- "${t.description}" — ${timeStr} (id: ${t.id})`;
+          });
+          promptParts.push(
+            '',
+            '## Pending Scheduled Tasks',
+            '',
+            `You have ${pendingTasks.length} pending follow-up task(s):`,
+            ...taskLines,
+            'Review these and cancel any that are no longer needed.',
+          );
+        }
+      } catch { /* ignore */ }
+
+      promptParts.push('', 'If nothing needs attention and no unfulfilled promises remain, respond with exactly: HEARTBEAT_OK');
+
+      const heartbeatPrompt = promptParts.join('\n');
+      const soulPath = join(cladeHome, 'agents', agentId, 'SOUL.md');
+      const toolPreset = (agentCfg.toolPreset as string) || 'coding';
+      const agentContext = buildAgentContext(agentId, agents);
+      const browserCfg = { ...(config.browser ?? {}) } as { enabled?: boolean; userDataDir?: string; browser?: string; cdpEndpoint?: string; headless?: boolean };
+      if (typeof cdpEndpointUrl === 'string') browserCfg.cdpEndpoint = cdpEndpointUrl;
+      const agentModel = (agentCfg.model as string) || undefined;
+
+      // Each heartbeat is a fresh session — no --resume so the agent evaluates
+      // current state from scratch and can't hallucinate prior completions
+
+      try {
+        const result = await askClaude(
+          heartbeatPrompt,
+          existsSync(soulPath) ? soulPath : null,
+          agentContext,
+          undefined, // no conversationId — fresh session each time
+          agentId,
+          cladeHome,
+          toolPreset,
+          browserCfg,
+          undefined,
+          agentModel,
+        );
+
+        const state = heartbeatStates.get(agentId);
+        if (state) state.lastBeat = new Date().toISOString();
+
+        const isOk = result.text.includes('HEARTBEAT_OK');
+        const suppressOk = hb.suppressOk !== false; // default true
+
+        if (isOk && suppressOk) {
+          console.log(`  [heartbeat] ${agentId}: OK`);
+        } else {
+          console.log(`  [heartbeat] ${agentId}: ${result.text.slice(0, 100)}`);
+
+          // Save heartbeat response to the agent's most recent conversation
+          try {
+            const chatData = loadAgentChatData(cladeHome, agentId);
+            const recentConvId = chatData.order[0];
+            if (recentConvId) {
+              saveChatMessage(cladeHome, {
+                id: 'hb_' + randomUUID().slice(0, 12),
+                agentId,
+                role: 'assistant',
+                text: `**[Heartbeat]**\n\n${result.text}`,
+                timestamp: new Date().toISOString(),
+              }, recentConvId);
+              broadcastAdmin({ type: 'chat', agentId, conversationId: recentConvId });
+            }
+          } catch { /* ignore */ }
+        }
+
+        logActivityLocal({
+          type: 'heartbeat',
+          agentId,
+          title: `Heartbeat: ${agentId}`,
+          description: isOk ? 'All clear' : result.text.slice(0, 200),
+        });
+        broadcastAdmin({ type: 'heartbeat', agentId, status: isOk ? 'ok' : 'alert', text: result.text.slice(0, 200) });
+      } catch (err) {
+        console.error(`  [heartbeat] ${agentId} error:`, err instanceof Error ? err.message : String(err));
+        logActivityLocal({
+          type: 'heartbeat',
+          agentId,
+          title: `Heartbeat failed: ${agentId}`,
+          description: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }, intervalMs);
+
+    timer.unref();
+    heartbeatStates.set(agentId, { timer, lastBeat: null });
+    heartbeatCount++;
+    console.log(`  [ok] Heartbeat: ${agentId} every ${hb.interval || '30m'}`);
+  }
+
+  if (heartbeatCount > 0) {
+    console.log(`  [ok] ${heartbeatCount} heartbeat timer(s) started`);
+  }
 
   const channels = (config.channels ?? {}) as Record<string, { enabled?: boolean }>;
 

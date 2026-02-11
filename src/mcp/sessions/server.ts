@@ -484,8 +484,8 @@ server.tool(
     delayMinutes: z
       .number()
       .min(0.5)
-      .max(1440)
-      .describe('Minutes to wait before executing (0.5 = 30 seconds, 1440 = 24 hours)'),
+      .max(43200)
+      .describe('Minutes to wait before executing (0.5 = 30 seconds, 1440 = 24 hours, 43200 = 30 days)'),
   },
   async ({ prompt, description, delayMinutes }) => {
     try {
