@@ -155,6 +155,54 @@ clade backup restore --repo myuser/clade-backup
 
 Backup status, history, and manual triggers are also available in the admin dashboard.
 
+## Server Logs
+
+The Clade server logs to stdout. How you view logs depends on how you started the server:
+
+### Foreground (logs visible in terminal)
+
+```bash
+clade start
+```
+
+All server events (heartbeats, IPC messages, task queue execution, agent spawns) appear directly in your terminal. Press `Ctrl+C` to stop.
+
+### Background (recommended for production)
+
+```bash
+# Start in background, writing logs to a file
+clade start > ~/.clade/logs/server.log 2>&1 &
+
+# View logs in real-time
+tail -f ~/.clade/logs/server.log
+
+# View last 50 lines
+tail -50 ~/.clade/logs/server.log
+
+# Search logs for heartbeat events
+grep heartbeat ~/.clade/logs/server.log
+
+# Search logs for a specific agent
+grep shiva ~/.clade/logs/server.log
+```
+
+### Verbose mode
+
+Add `--verbose` (or `-v`) for extra startup diagnostics:
+
+```bash
+clade start --verbose > ~/.clade/logs/server.log 2>&1 &
+```
+
+### What the logs show
+
+- **Startup**: IPC socket path, browser connection, heartbeat timers, channels
+- **Heartbeats**: `[heartbeat] Running heartbeat for <agent>...` and result (OK or action taken)
+- **IPC**: `[ipc] Received: <message-type> (agent: <id>)` — inter-agent communication
+- **Task Queue**: Scheduled task creation, execution, and results
+- **Chat**: Incoming messages, agent spawns, response streaming
+- **Activity**: Delegations, collaboration events, skill installs
+
 ## Channels
 
 ### Slack

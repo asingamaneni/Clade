@@ -374,26 +374,54 @@ function buildAgentContext(
 
   if (teammates.length > 0) {
     lines.push('');
-    lines.push('Your team:');
+    lines.push('## Your Team');
     lines.push(...teammates);
 
     // Detect if this is an orchestrator-type agent (has description mentioning orchestrator/delegate/assistant)
     const isOrchestrator = /orchestrat|personal assistant|delegates? to/i.test(selfDesc);
     if (isOrchestrator) {
+      // Build a domain → agent routing table from descriptions
+      const routingTable: string[] = [];
+      for (const [id, a] of Object.entries(agents)) {
+        if (id === agentId) continue;
+        const name = (a.name as string) || id;
+        const desc = (a.description as string) || '';
+        if (desc) {
+          routingTable.push(`| Any task involving: ${desc} | **${name}** | \`sessions_spawn({ agent: "${id}", prompt: "..." })\` |`);
+        }
+      }
+
       lines.push('');
-      lines.push('## DELEGATION RULES (MANDATORY)');
+      lines.push('## DELEGATION RULES — YOU MUST FOLLOW THESE');
       lines.push('');
-      lines.push('You are the orchestrator. Before doing ANY work yourself, you MUST:');
-      lines.push('1. Look at the team list above and identify if a specialist can handle this task');
-      lines.push('2. If a specialist exists, delegate using `sessions_spawn` with their agent ID and a detailed prompt');
-      lines.push('3. `sessions_spawn` returns the specialist\'s full response — use it to formulate your reply to the user');
-      lines.push('4. Only do the work yourself if NO specialist on the team matches the task');
+      lines.push('**YOU ARE THE ORCHESTRATOR, NOT THE WORKER.**');
+      lines.push('Your job is to ROUTE tasks to your team, NOT to do the work yourself.');
       lines.push('');
-      lines.push('Tool usage for delegation:');
-      lines.push('- `sessions_spawn` tool: { agent: "<agent-id>", prompt: "<detailed task>" } — this spawns the specialist and returns their response');
-      lines.push('- The agent ID is the lowercase name shown in the team list (e.g. "researcher", "coder")');
+      lines.push('### Routing Table (match the user\'s request to a specialist)');
       lines.push('');
-      lines.push('IMPORTANT: You MUST delegate to specialists when available. Do NOT do the work yourself if a specialist exists for it.');
+      lines.push('| Task domain | Delegate to | How |');
+      lines.push('|-------------|-------------|-----|');
+      lines.push(...routingTable);
+      lines.push('| No specialist matches | Do it yourself | Only if NO agent above fits |');
+      lines.push('');
+      lines.push('### How to Delegate');
+      lines.push('');
+      lines.push('1. Read the user\'s request');
+      lines.push('2. Match it to a specialist in the routing table above');
+      lines.push('3. Call `sessions_spawn` with a detailed prompt including ALL relevant context:');
+      lines.push('   ```');
+      lines.push('   sessions_spawn({ agent: "<agent-id>", prompt: "Detailed task with all context the specialist needs..." })');
+      lines.push('   ```');
+      lines.push('4. The tool returns the specialist\'s full response');
+      lines.push('5. Summarize/relay the result to your human');
+      lines.push('');
+      lines.push('### Rules');
+      lines.push('');
+      lines.push('- **ALWAYS delegate** when a specialist matches — even if you COULD do it yourself');
+      lines.push('- **NEVER skip delegation** because it seems faster to just do it — your team exists for a reason');
+      lines.push('- For multi-step tasks, delegate to multiple specialists in sequence');
+      lines.push('- Include user preferences, dietary restrictions, location, etc. in every delegation prompt');
+      lines.push('- Only do the work yourself for quick lookups (weather, time) or platform management tasks');
     } else {
       lines.push('');
       lines.push('You can reference these agents when relevant.');
@@ -838,6 +866,20 @@ function askClaude(
         }
       } catch { /* ignore errors reading task queue */ }
     }
+
+    // --- Critical rule: Never promise without scheduling ---
+    // This prevents agents from saying "let me check X" and then the subprocess exits
+    // with no follow-up mechanism. The agent must schedule the work BEFORE making the promise.
+    systemParts.push(
+      '## CRITICAL: Never Promise Without Scheduling\n\n' +
+      'Before you say "let me check...", "I\'ll look into...", "now let me also...", or any statement about doing future work:\n' +
+      '1. FIRST call `task_queue_schedule` to schedule the follow-up work\n' +
+      '2. THEN tell the user what you\'ve scheduled\n\n' +
+      'Your session ends after you respond. If you promise something without scheduling it, that promise will be broken.\n' +
+      'The ONLY exception is if you are actively doing the work RIGHT NOW in this response (using tools in this turn).\n\n' +
+      'BAD: "Let me check on that and get back to you" (promise with no task scheduled — BROKEN)\n' +
+      'GOOD: *calls task_queue_schedule* "I\'ve scheduled a follow-up to check on that in 5 minutes."',
+    );
 
     if (systemParts.length > 0) {
       args.push('--append-system-prompt', systemParts.join('\n\n'));
@@ -4406,36 +4448,62 @@ async function startPlaceholderServer(
           : 'Review each item and report any issues that need attention.',
       );
 
-      // --- Smart follow-up: Check last conversation for unfulfilled promises ---
+      // --- Smart follow-up: Check ALL conversations for unfulfilled promises ---
+      // Include BOTH user and assistant messages so the heartbeat agent
+      // can see the full state (e.g. user already provided info the agent asked for)
       try {
         const chatData = loadAgentChatData(cladeHome, agentId);
-        const recentConvId = chatData.order[0]; // most recent conversation
-        if (recentConvId && chatData.conversations[recentConvId]) {
-          const msgs = chatData.conversations[recentConvId].messages;
-          // Get last few assistant messages (up to last 3)
-          const assistantMsgs = msgs.filter(m => m.role === 'assistant').slice(-3);
-          if (assistantMsgs.length > 0) {
-            const lastMsgTexts = assistantMsgs.map(m => m.text).join('\n---\n');
-            // Truncate to avoid blowing context
-            const truncated = lastMsgTexts.length > 3000
-              ? lastMsgTexts.slice(-3000)
-              : lastMsgTexts;
+        const allConvSummaries: string[] = [];
 
-            promptParts.push(
-              '',
-              '## Recent Conversation (check for unfulfilled promises)',
-              '',
-              'Below are your recent messages from the last conversation. Review them carefully.',
-              'If you promised to do something (forward an email, check on something, follow up, schedule something, etc.) and it has NOT been completed yet:',
-              '- You MUST actually USE TOOLS to complete the action (browse, send email, call APIs, etc.)',
-              '- Do NOT just write a report claiming you did it — actually do it or schedule it via task_queue_schedule',
-              '- If you cannot complete it right now, schedule it as a task queue item with task_queue_schedule',
-              '- NEVER claim an action is "resolved" unless you actually executed it with tools in THIS session',
-              'If all promises have genuinely been fulfilled (verified by tool use, not assumed), ignore this section.',
-              '',
-              truncated,
-            );
-          }
+        for (const convId of chatData.order) {
+          const conv = chatData.conversations[convId];
+          if (!conv || conv.messages.length === 0) continue;
+
+          // Skip conversations where the last message is already a heartbeat
+          const lastMsg = conv.messages[conv.messages.length - 1];
+          if (lastMsg.role === 'assistant' && lastMsg.text?.startsWith('**[Heartbeat]**')) continue;
+
+          // Get last 6 messages (both user AND assistant) to show full conversation state
+          const recentMsgs = conv.messages.slice(-6);
+          const msgLines = recentMsgs.map(m => {
+            const role = m.role === 'user' ? 'USER' : 'YOU';
+            const text = m.text?.length && m.text.length > 400 ? m.text.slice(-400) : (m.text || '');
+            return `[${role}]: ${text}`;
+          });
+
+          if (msgLines.length === 0) continue;
+
+          const title = conv.title || convId;
+          allConvSummaries.push(`**Conversation: "${title}"**\n${msgLines.join('\n')}`);
+
+          // Cap at 4 conversations to avoid blowing context
+          if (allConvSummaries.length >= 4) break;
+        }
+
+        if (allConvSummaries.length > 0) {
+          const combined = allConvSummaries.join('\n\n---\n\n');
+          // Truncate total to 5000 chars
+          const truncated = combined.length > 5000 ? combined.slice(-5000) : combined;
+
+          promptParts.push(
+            '',
+            '## Recent Conversations (check for unfulfilled promises)',
+            '',
+            'Below are your last messages from each active conversation, showing BOTH user and assistant messages.',
+            'This is the FULL state — if the user already provided info you asked for, you can see it here.',
+            '',
+            'Look for YOUR last message in each conversation. If it contains:',
+            '- "Let me check...", "Let me also...", "Now let me...", "I\'ll look into..."',
+            '- "I\'ll forward...", "I\'ll send...", "I\'ll schedule...", "I\'ll follow up..."',
+            '- Any promise to do future work that was NOT completed',
+            '',
+            'Then you MUST:',
+            '- Actually USE TOOLS to complete the promised work right now',
+            '- OR call task_queue_schedule to schedule it',
+            '- Do NOT just write a status report about it — take action',
+            '',
+            truncated,
+          );
         }
       } catch { /* ignore errors reading chat data */ }
 
