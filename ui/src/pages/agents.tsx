@@ -618,7 +618,8 @@ interface Skill {
   name: string
   status: 'active' | 'pending'
   description?: string
-  path: string
+  path?: string
+  builtin?: boolean
 }
 
 function McpTab({
@@ -629,17 +630,19 @@ function McpTab({
   onRefresh: () => void
 }) {
   const [availableSkills, setAvailableSkills] = useState<Skill[]>([])
+  const [presets, setPresets] = useState<Record<string, string[]>>({})
   const [assignedSkills, setAssignedSkills] = useState<string[]>(agent.mcp || [])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
-  // Fetch active MCP servers
+  // Fetch active MCP servers + preset mapping
   useEffect(() => {
     setLoading(true)
-    api<{ mcpServers: Skill[] }>('/mcp')
+    api<{ mcpServers: Skill[]; presets?: Record<string, string[]> }>('/mcp')
       .then((d) => {
         const active = (d.mcpServers || []).filter((s) => s.status === 'active')
         setAvailableSkills(active)
+        if (d.presets) setPresets(d.presets)
       })
       .catch((e) => console.error('Failed to load MCP servers:', e.message))
       .finally(() => setLoading(false))
@@ -649,6 +652,9 @@ function McpTab({
   useEffect(() => {
     setAssignedSkills(agent.mcp || [])
   }, [agent.id, agent.mcp])
+
+  // Determine which built-in servers are active for this agent's preset
+  const presetServers = presets[agent.toolPreset] || []
 
   const toggle = (skillName: string) => {
     setAssignedSkills((prev) =>
@@ -677,6 +683,16 @@ function McpTab({
     JSON.stringify([...assignedSkills].sort()) !==
     JSON.stringify([...(agent.mcp || [])].sort())
 
+  // Count: built-in preset servers + user-toggled extras
+  const builtinCount = availableSkills.filter(
+    (s) => s.builtin && presetServers.includes(s.name)
+  ).length
+  const userAssignedCount = assignedSkills.filter(
+    (s) => !availableSkills.find((a) => a.name === s && a.builtin)
+  ).length
+  const totalEnabled = builtinCount + userAssignedCount
+  const totalAvailable = availableSkills.length
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-muted-foreground py-8">
@@ -686,89 +702,168 @@ function McpTab({
     )
   }
 
+  // Separate built-in vs user-installed
+  const builtinServers = availableSkills.filter((s) => s.builtin)
+  const userServers = availableSkills.filter((s) => !s.builtin)
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold">Agent MCP Servers</h3>
           <p className="text-xs text-muted-foreground mt-1">
-            Enable MCP servers to give this agent additional capabilities
+            MCP servers give this agent additional capabilities
           </p>
         </div>
         <Badge variant="outline" className="text-xs">
-          {assignedSkills.length}/{availableSkills.length} enabled
+          {totalEnabled}/{totalAvailable} enabled
         </Badge>
       </div>
 
-      {availableSkills.length === 0 ? (
-        <div className="rounded-lg border border-dashed p-6 text-center">
-          <p className="text-sm text-muted-foreground">
-            No active MCP servers available. Install MCP servers from the MCP Servers page.
-          </p>
-        </div>
-      ) : (
+      {/* Built-in MCP servers from preset */}
+      {builtinServers.length > 0 && (
         <div className="space-y-2">
-          {availableSkills.map((skill) => {
-            const isAssigned = assignedSkills.includes(skill.name)
-            return (
-              <div
-                key={skill.name}
-                onClick={() => toggle(skill.name)}
-                className={cn(
-                  "flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-colors",
-                  isAssigned
-                    ? "border-[hsl(var(--success))]/30 bg-[hsl(var(--success))]/5"
-                    : "border-border hover:border-muted-foreground/30"
-                )}
-              >
-                <div className="flex items-center gap-3">
-                  <div
-                    className={cn(
-                      "w-4 h-4 rounded border-2 flex items-center justify-center transition-colors",
-                      isAssigned
-                        ? "bg-[hsl(var(--success))] border-[hsl(var(--success))]"
-                        : "border-muted-foreground/30"
-                    )}
-                  >
-                    {isAssigned && (
-                      <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 12 12">
-                        <path d="M10.28 2.28L3.989 8.575 1.695 6.28A1 1 0 00.28 7.695l3 3a1 1 0 001.414 0l7-7A1 1 0 0010.28 2.28z" />
-                      </svg>
-                    )}
+          <div className="flex items-center gap-2">
+            <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Built-in ({agent.toolPreset} preset)
+            </h4>
+          </div>
+          <div className="space-y-1.5">
+            {builtinServers.map((skill) => {
+              const isActive = presetServers.includes(skill.name)
+              return (
+                <div
+                  key={skill.name}
+                  className={cn(
+                    "flex items-center justify-between p-3 rounded-lg border transition-colors",
+                    isActive
+                      ? "border-[hsl(var(--success))]/30 bg-[hsl(var(--success))]/5"
+                      : "border-border opacity-50"
+                  )}
+                >
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={cn(
+                        "w-4 h-4 rounded border-2 flex items-center justify-center",
+                        isActive
+                          ? "bg-[hsl(var(--success))] border-[hsl(var(--success))]"
+                          : "border-muted-foreground/30"
+                      )}
+                    >
+                      {isActive && (
+                        <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 12 12">
+                          <path d="M10.28 2.28L3.989 8.575 1.695 6.28A1 1 0 00.28 7.695l3 3a1 1 0 001.414 0l7-7A1 1 0 0010.28 2.28z" />
+                        </svg>
+                      )}
+                    </div>
+                    <div>
+                      <div className="font-mono text-sm">{skill.name}</div>
+                      {skill.description && (
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          {skill.description}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <div>
-                    <div className="font-mono text-sm">{skill.name}</div>
-                    {skill.description && (
-                      <div className="text-xs text-muted-foreground mt-0.5">
-                        {skill.description}
-                      </div>
-                    )}
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="text-[10px]">
+                      Built-in
+                    </Badge>
                   </div>
                 </div>
-                <Badge variant="secondary" className="text-xs">
-                  🧩 MCP
-                </Badge>
-              </div>
-            )
-          })}
+              )
+            })}
+          </div>
         </div>
       )}
 
-      <div className="flex justify-end">
-        <Button onClick={save} disabled={saving || !hasChanges} size="sm">
-          {saving ? (
-            <>
-              <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-              Saving...
-            </>
-          ) : (
-            <>
-              <Save className="h-3.5 w-3.5 mr-1.5" />
-              Save MCP Config
-            </>
-          )}
-        </Button>
-      </div>
+      {/* User-installed MCP servers (toggleable) */}
+      {userServers.length > 0 && (
+        <div className="space-y-2">
+          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            Installed
+          </h4>
+          <div className="space-y-1.5">
+            {userServers.map((skill) => {
+              const isAssigned = assignedSkills.includes(skill.name)
+              return (
+                <div
+                  key={skill.name}
+                  onClick={() => toggle(skill.name)}
+                  className={cn(
+                    "flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-colors",
+                    isAssigned
+                      ? "border-[hsl(var(--success))]/30 bg-[hsl(var(--success))]/5"
+                      : "border-border hover:border-muted-foreground/30"
+                  )}
+                >
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={cn(
+                        "w-4 h-4 rounded border-2 flex items-center justify-center transition-colors",
+                        isAssigned
+                          ? "bg-[hsl(var(--success))] border-[hsl(var(--success))]"
+                          : "border-muted-foreground/30"
+                      )}
+                    >
+                      {isAssigned && (
+                        <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 12 12">
+                          <path d="M10.28 2.28L3.989 8.575 1.695 6.28A1 1 0 00.28 7.695l3 3a1 1 0 001.414 0l7-7A1 1 0 0010.28 2.28z" />
+                        </svg>
+                      )}
+                    </div>
+                    <div>
+                      <div className="font-mono text-sm">{skill.name}</div>
+                      {skill.description && (
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          {skill.description}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <Badge variant="secondary" className="text-xs">
+                    Installed
+                  </Badge>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {userServers.length === 0 && builtinServers.length > 0 && (
+        <div className="rounded-lg border border-dashed p-4 text-center">
+          <p className="text-xs text-muted-foreground">
+            No additional MCP servers installed. Use the MCP Servers page to add more.
+          </p>
+        </div>
+      )}
+
+      {availableSkills.length === 0 && (
+        <div className="rounded-lg border border-dashed p-6 text-center">
+          <p className="text-sm text-muted-foreground">
+            No MCP servers available. Install MCP servers from the MCP Servers page.
+          </p>
+        </div>
+      )}
+
+      {userServers.length > 0 && (
+        <div className="flex justify-end">
+          <Button onClick={save} disabled={saving || !hasChanges} size="sm">
+            {saving ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              <>
+                <Save className="h-3.5 w-3.5 mr-1.5" />
+                Save MCP Config
+              </>
+            )}
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

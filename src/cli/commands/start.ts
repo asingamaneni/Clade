@@ -690,10 +690,17 @@ function askClaude(
   toolPreset?: string,
   browserConfig?: { enabled?: boolean; userDataDir?: string; browser?: string; cdpEndpoint?: string; headless?: boolean },
   signal?: AbortSignal,
+  model?: string,
+  onDelta?: (text: string) => void,
 ): Promise<{ text: string; sessionId?: string; cancelled?: boolean }> {
   const home = cladeHome || process.env['CLADE_HOME'] || join(homedir(), '.clade');
   return new Promise((resolve) => {
     const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose', '--add-dir', '/', '--permission-mode', 'bypassPermissions'];
+
+    // Pass agent's configured model (e.g. opus, sonnet, haiku)
+    if (model) {
+      args.push('--model', model);
+    }
 
     // Resume existing session if we have one for this conversation
     if (conversationId) {
@@ -806,7 +813,23 @@ function askClaude(
       signal.addEventListener('abort', onAbort, { once: true });
     }
 
-    child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
+    child.stdout.on('data', (d: Buffer) => {
+      const chunk = d.toString();
+      stdout += chunk;
+      // Stream deltas in real-time if callback provided
+      if (onDelta) {
+        const lines = chunk.split('\n');
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line);
+            if (event.type === 'content_block_delta' && event.delta?.text) {
+              onDelta(event.delta.text);
+            }
+          } catch { /* not complete JSON line */ }
+        }
+      }
+    });
     child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
 
     child.on('close', (code) => {
@@ -1054,7 +1077,10 @@ async function startPlaceholderServer(
             inflightProcesses.set(conversationId, abortController);
 
             try {
-              const result = await askClaude(promptText, soulPath, agentContext, conversationId, msg.agentId, cladeHome, toolPreset, browserCfg, abortController.signal);
+              const agentModel = (agentCfg.model as string) || undefined;
+              const result = await askClaude(promptText, soulPath, agentContext, conversationId, msg.agentId, cladeHome, toolPreset, browserCfg, abortController.signal, agentModel, (delta) => {
+                try { socket.send(JSON.stringify({ type: 'delta', text: delta, agentId: msg.agentId, conversationId })); } catch { /* socket closed */ }
+              });
 
               // If cancelled, don't save or send a response
               if (result.cancelled) {
@@ -1253,6 +1279,8 @@ async function startPlaceholderServer(
     status: 'ok',
     version: '0.1.0',
     uptime: process.uptime(),
+    port,
+    agents: Object.keys((config.agents ?? {}) as Record<string, unknown>).length,
   }));
 
   // ── Config API ───────────────────────────────────────────────
@@ -1672,14 +1700,48 @@ async function startPlaceholderServer(
     sessions.sort((a, b) => new Date(b.lastActiveAt as string).getTime() - new Date(a.lastActiveAt as string).getTime());
     return { sessions };
   });
+  // Built-in MCP server descriptions
+  const BUILTIN_MCP_DESCRIPTIONS: Record<string, string> = {
+    memory: 'Read, write, search, and manage agent memory (MEMORY.md + daily logs)',
+    sessions: 'Spawn agents, list sessions, send messages, and check status',
+    collaboration: 'Delegation tracking, pub/sub message bus, subscriptions, shared memory',
+    messaging: 'Send messages across channels (Slack, Telegram, Discord, webchat)',
+    'mcp-manager': 'Search, install, and manage MCP servers and plugins dynamically',
+    platform: 'Native OS interaction — notifications, clipboard, screenshots, URLs',
+  };
+
+  // Which built-in MCP servers each preset gets
+  const BUILTIN_MCP_BY_PRESET: Record<string, string[]> = {
+    potato: [],
+    coding: ['memory', 'sessions', 'collaboration', 'mcp-manager'],
+    messaging: ['memory', 'sessions', 'collaboration', 'messaging', 'mcp-manager'],
+    full: ['memory', 'sessions', 'collaboration', 'messaging', 'mcp-manager'],
+    custom: ['memory', 'sessions', 'collaboration'],
+  };
+
   fastify.get('/api/mcp', async () => {
     const mcpDir = join(homedir(), '.clade', 'mcp');
-    const mcpServers: Array<{ name: string; status: 'active' | 'pending'; description?: string; path: string }> = [];
+    const mcpServers: Array<{ name: string; status: 'active' | 'pending'; description?: string; path?: string; builtin?: boolean }> = [];
 
-    // Read active MCP servers
+    // Add built-in MCP servers first
+    const allBuiltins = new Set<string>();
+    for (const servers of Object.values(BUILTIN_MCP_BY_PRESET)) {
+      for (const s of servers) allBuiltins.add(s);
+    }
+    for (const name of allBuiltins) {
+      mcpServers.push({
+        name,
+        status: 'active',
+        description: BUILTIN_MCP_DESCRIPTIONS[name] || '',
+        builtin: true,
+      });
+    }
+
+    // Read user-installed active MCP servers
     const activeDir = join(mcpDir, 'active');
     if (existsSync(activeDir)) {
       for (const name of readdirSync(activeDir)) {
+        if (allBuiltins.has(name)) continue; // skip duplicates
         const mcpPath = join(activeDir, name);
         const descMd = join(mcpPath, 'SKILL.md');
         let description = '';
@@ -1708,7 +1770,7 @@ async function startPlaceholderServer(
       }
     }
 
-    return { mcpServers };
+    return { mcpServers, presets: BUILTIN_MCP_BY_PRESET };
   });
 
   // ── Get MCP server details ───────────────────────────────────
@@ -2515,6 +2577,7 @@ async function startPlaceholderServer(
           const toolPreset = (agentConfig.toolPreset as string) || 'full';
           const browserCfg = (config.browser ?? {}) as { enabled?: boolean; userDataDir?: string; browser?: string; cdpEndpoint?: string; headless?: boolean };
           try {
+            const cronAgentModel = (agentConfig.model as string) || undefined;
             const result = await askClaude(
               job.prompt,
               existsSync(soulPath) ? soulPath : null,
@@ -2524,6 +2587,8 @@ async function startPlaceholderServer(
               cronHome,
               toolPreset,
               browserCfg,
+              undefined,     // signal
+              cronAgentModel,
             );
             // Update lastRunAt
             const jobs = loadCronJobs();
@@ -2710,12 +2775,17 @@ async function startPlaceholderServer(
       return { error: 'Agent name is required' };
     }
 
-    const agentName = String(body.name).toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+    // Support both body.id (explicit ID) and body.name (display name that also becomes ID if no explicit ID)
+    const rawName = String(body.name);
+    const agentId = body.id
+      ? String(body.id).toLowerCase().replace(/[^a-z0-9_-]/g, '-')
+      : rawName.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+    const displayName = rawName; // Preserve original casing for display
     const agents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
 
-    if (agents[agentName]) {
+    if (agents[agentId]) {
       reply.status(409);
-      return { error: `Agent "${agentName}" already exists` };
+      return { error: `Agent "${agentId}" already exists` };
     }
 
     // Build agent config from template or custom fields
@@ -2737,12 +2807,12 @@ async function startPlaceholderServer(
 
     if (template) {
       const built = configFromTemplate(template, {
-        name: String(body.description || template.name),
+        name: String(body.description || displayName),
         model: body.model ? String(body.model) : undefined,
       });
       agentConfig = {
         ...built,
-        name: body.description || template.name,
+        name: displayName,
         creature: identityDefaults.creature,
         vibe: identityDefaults.vibe,
         emoji: identityDefaults.emoji,
@@ -2753,7 +2823,7 @@ async function startPlaceholderServer(
       const hbEnabled = body.heartbeatEnabled !== undefined ? Boolean(body.heartbeatEnabled) : true;
       const hbInterval = body.heartbeatInterval ? String(body.heartbeatInterval) : '30m';
       agentConfig = {
-        name: String(body.description || agentName),
+        name: String(body.description || displayName),
         description: String(body.agentDescription || ''),
         model: String(body.model || 'sonnet'),
         toolPreset: String(body.toolPreset || 'full'),
@@ -2772,7 +2842,7 @@ async function startPlaceholderServer(
 
     // Create agent directory structure
     const cladeHome = process.env['CLADE_HOME'] || join(homedir(), '.clade');
-    const agentDir = join(cladeHome, 'agents', agentName);
+    const agentDir = join(cladeHome, 'agents', agentId);
     mkdirSync(join(agentDir, 'memory'), { recursive: true });
     mkdirSync(join(agentDir, 'soul-history'), { recursive: true });
     mkdirSync(join(agentDir, 'tools-history'), { recursive: true });
@@ -2787,32 +2857,32 @@ async function startPlaceholderServer(
     writeFileSync(join(agentDir, 'TOOLS.md'), DEFAULT_TOOLS_MD, 'utf-8');
 
     // Update config.json
-    agents[agentName] = agentConfig;
+    agents[agentId] = agentConfig;
     (config as Record<string, unknown>).agents = agents;
 
     // Set as default agent if requested (used by onboarding flow)
     if (body.setAsDefault) {
       const routing = ((config as Record<string, unknown>).routing ?? {}) as Record<string, unknown>;
-      routing.defaultAgent = agentName;
+      routing.defaultAgent = agentId;
       (config as Record<string, unknown>).routing = routing;
     }
 
     const configPath = join(cladeHome, 'config.json');
     writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
 
-    console.log(`  [ok] Created agent "${agentName}" (${isCustom ? 'custom' : 'template: ' + templateId})`);
+    console.log(`  [ok] Created agent "${agentId}" (${isCustom ? 'custom' : 'template: ' + templateId})`);
 
     logActivityLocal({
       type: 'agent',
-      agentId: agentName,
-      title: `Agent "${agentName}" created`,
+      agentId: agentId,
+      title: `Agent "${displayName}" created`,
       description: `Created from ${isCustom ? 'custom config' : 'template: ' + templateId}`,
       metadata: { action: 'create', template: templateId },
     });
 
     return {
       agent: {
-        id: agentName,
+        id: agentId,
         name: agentConfig.name,
         description: agentConfig.description ?? '',
         model: agentConfig.model ?? 'sonnet',
@@ -3807,7 +3877,8 @@ async function startPlaceholderServer(
         try {
           const msg = JSON.parse(data) as { type: string; [key: string]: unknown };
           console.log(`  [ipc] Received: ${msg.type}${msg.agentId ? ` (agent: ${msg.agentId})` : ''}`);
-          const response = await handleIpcMessage(msg, agents, config, cladeHome, broadcastAdmin, logActivityLocal);
+          const freshAgents = (config.agents ?? {}) as Record<string, Record<string, unknown>>;
+          const response = await handleIpcMessage(msg, freshAgents, config, cladeHome, broadcastAdmin, logActivityLocal);
           console.log(`  [ipc] Response for ${msg.type}: ok=${response.ok}`);
           conn.write(JSON.stringify(response));
         } catch (err) {
@@ -3979,6 +4050,7 @@ async function handleIpcMessage(
         name: (a.name as string) || id,
         description: (a.description as string) || '',
         toolPreset: (a.toolPreset as string) || 'coding',
+        mcp: (a.mcp as string[]) ?? [],
       }));
       return { ok: true, agents: agentList };
     }
@@ -4024,6 +4096,7 @@ async function handleIpcMessage(
       if (typeof cdpEndpointUrl === 'string') browserCfg.cdpEndpoint = cdpEndpointUrl;
 
       try {
+        const agentModel = (agentCfg.model as string) || undefined;
         const result = await askClaude(
           enrichedPrompt,
           existsSync(soulPath) ? soulPath : null,
@@ -4033,6 +4106,8 @@ async function handleIpcMessage(
           cladeHome,
           toolPreset,
           browserCfg,
+          undefined, // signal
+          agentModel,
         );
 
         const now = new Date().toISOString();
@@ -4290,6 +4365,7 @@ function buildChannelMessageHandler(
     try {
       const browserCfg = { ...(config.browser ?? {}) } as { enabled?: boolean; userDataDir?: string; browser?: string; cdpEndpoint?: string; headless?: boolean };
       if (cdpEndpointUrl) browserCfg.cdpEndpoint = cdpEndpointUrl;
+      const agentModel = (agentCfg.model as string) || undefined;
       const result = await askClaude(
         strippedText,
         soulPath,
@@ -4300,6 +4376,7 @@ function buildChannelMessageHandler(
         toolPreset,
         browserCfg,
         abortController.signal,
+        agentModel,
       );
 
       if (result.cancelled) return;

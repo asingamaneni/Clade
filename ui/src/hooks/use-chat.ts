@@ -237,6 +237,9 @@ export function useChat(): UseChatReturn {
 
   // ── Handle inbound WS messages ───────────────────────────────────
 
+  // Track streaming message ID so delta events accumulate into one message
+  const streamingMsgIdRef = useRef<string | null>(null)
+
   const handleWsMessage = useCallback(
     (data: Record<string, unknown>) => {
       const type = data.type as string
@@ -275,6 +278,34 @@ export function useChat(): UseChatReturn {
 
       if (type === 'typing') {
         setTyping(true)
+        // Create a streaming placeholder message
+        const agentId = data.agentId as string || ''
+        const streamId = 'stream_' + Date.now()
+        streamingMsgIdRef.current = streamId
+        setCurrentMessages((prev) => [
+          ...prev,
+          {
+            id: streamId,
+            agentId,
+            role: 'assistant' as const,
+            text: '',
+            timestamp: new Date().toISOString(),
+          },
+        ])
+        return
+      }
+
+      if (type === 'delta') {
+        // Append streaming text to the current streaming message
+        const deltaText = data.text as string
+        if (deltaText && streamingMsgIdRef.current) {
+          const streamId = streamingMsgIdRef.current
+          setCurrentMessages((prev) =>
+            prev.map((m) =>
+              m.id === streamId ? { ...m, text: m.text + deltaText } : m
+            )
+          )
+        }
         return
       }
 
@@ -282,7 +313,14 @@ export function useChat(): UseChatReturn {
         setTyping(false)
         const msg = data.message as ChatMessage | undefined
         if (msg) {
+          // Replace the streaming placeholder with the final message
+          const streamId = streamingMsgIdRef.current
+          streamingMsgIdRef.current = null
           setCurrentMessages((prev) => {
+            if (streamId) {
+              // Replace the streaming message with the final one
+              return prev.map((m) => (m.id === streamId ? msg : m))
+            }
             if (prev.find((m) => m.id === msg.id)) return prev
             return [...prev, msg]
           })
@@ -296,6 +334,9 @@ export function useChat(): UseChatReturn {
 
       if (type === 'error') {
         setTyping(false)
+        // Remove streaming placeholder if present
+        const streamId = streamingMsgIdRef.current
+        streamingMsgIdRef.current = null
         // Surface error as a system message
         const errorText = (data.text as string) || 'Unknown error'
         const errorMsg: ChatMessage = {
@@ -305,7 +346,10 @@ export function useChat(): UseChatReturn {
           text: `**Error:** ${errorText}`,
           timestamp: new Date().toISOString(),
         }
-        setCurrentMessages((prev) => [...prev, errorMsg])
+        setCurrentMessages((prev) => {
+          const filtered = streamId ? prev.filter((m) => m.id !== streamId) : prev
+          return [...filtered, errorMsg]
+        })
         return
       }
     },
