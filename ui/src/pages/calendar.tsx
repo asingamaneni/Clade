@@ -91,11 +91,25 @@ function formatHour(h: number): string {
 // Component
 // ---------------------------------------------------------------------------
 
+const EVENT_TYPE_LABELS: Record<string, string> = {
+  chat: 'Chat',
+  heartbeat: 'Heartbeat',
+  reflection: 'Reflection',
+  task_queue: 'Task Queue',
+  delegation: 'Delegation',
+  skill: 'Skill',
+  mcp: 'MCP',
+  agent: 'Agent',
+  cron: 'Cron',
+  backup: 'Backup',
+}
+
 export function CalendarPage({ agents }: CalendarPageProps) {
   const [weekStart, setWeekStart] = useState(() => getWeekStart(new Date()))
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null)
+  const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set())
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const weekEnd = useMemo(() => getWeekEnd(weekStart), [weekStart])
@@ -177,12 +191,33 @@ export function CalendarPage({ agents }: CalendarPageProps) {
     return { top: `${top}px`, height: `${height}px` }
   }
 
-  // Group events by day
+  // Collect unique event types for filter UI
+  const eventTypes = useMemo(() => {
+    const types = new Set<string>()
+    events.forEach(evt => types.add(evt.type))
+    return Array.from(types).sort()
+  }, [events])
+
+  const toggleType = (type: string) => {
+    setHiddenTypes(prev => {
+      const next = new Set(prev)
+      if (next.has(type)) next.delete(type)
+      else next.add(type)
+      return next
+    })
+  }
+
+  // Filter and group events by day
+  const filteredEvents = useMemo(() =>
+    events.filter(evt => !hiddenTypes.has(evt.type)),
+    [events, hiddenTypes]
+  )
+
   const eventsByDay = useMemo(() => {
     const map: Record<number, CalendarEvent[]> = {}
     for (let i = 0; i < 7; i++) map[i] = []
 
-    events.forEach(evt => {
+    filteredEvents.forEach(evt => {
       const start = new Date(evt.start)
       const dayIdx = days.findIndex(d =>
         d.getFullYear() === start.getFullYear() &&
@@ -192,7 +227,7 @@ export function CalendarPage({ agents }: CalendarPageProps) {
       if (dayIdx >= 0) map[dayIdx].push(evt)
     })
     return map
-  }, [events, days])
+  }, [filteredEvents, days])
 
   return (
     <div className="space-y-6">
@@ -231,6 +266,29 @@ export function CalendarPage({ agents }: CalendarPageProps) {
                 <div className={cn("w-3 h-3 rounded-sm border", colors.split(' ').slice(0, 2).join(' '))} />
                 <span className="text-xs text-muted-foreground">{a.emoji || ''} {a.name}</span>
               </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Type filters */}
+      {eventTypes.length > 0 && (
+        <div className="flex gap-2 flex-wrap">
+          {eventTypes.map(type => {
+            const hidden = hiddenTypes.has(type)
+            return (
+              <button
+                key={type}
+                onClick={() => toggleType(type)}
+                className={cn(
+                  "px-2.5 py-1 rounded-md text-xs font-medium border transition-all",
+                  hidden
+                    ? "bg-transparent border-border text-muted-foreground/50 line-through"
+                    : "bg-secondary border-border text-foreground"
+                )}
+              >
+                {EVENT_TYPE_LABELS[type] || type}
+              </button>
             )
           })}
         </div>

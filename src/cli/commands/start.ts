@@ -3554,8 +3554,10 @@ async function startPlaceholderServer(
     }
 
     // 3. Activity events within range (reflection, skill, agent events)
+    // Skip heartbeat (already shown as recurring in section 2) and chat (grouped in section 1)
     const activityEvents = loadActivityLog();
     for (const evt of activityEvents) {
+      if (evt.type === 'heartbeat' || evt.type === 'chat') continue;
       const evtMs = new Date(evt.timestamp).getTime();
       if (evtMs >= rangeStartMs && evtMs <= rangeEndMs) {
         const colorMap: Record<string, string> = {
