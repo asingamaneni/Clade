@@ -78,7 +78,7 @@ export class ClaudeCliRunner extends EventEmitter {
         proc = spawn('claude', args, {
           cwd: options.workingDirectory,
           stdio: ['pipe', 'pipe', 'pipe'],
-          env: { ...process.env },
+          env: { ...process.env, CLAUDECODE: undefined },
           signal,
         });
       } catch (err: unknown) {

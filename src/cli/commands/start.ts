@@ -912,7 +912,7 @@ function askClaude(
     const child = spawn('claude', args, {
       timeout: 300_000,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env: { ...process.env, CLAUDECODE: undefined },
     });
 
     // Wire up abort signal to kill the child process
