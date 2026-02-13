@@ -55,6 +55,12 @@
 ::-webkit-scrollbar-thumb { background: hsl(215 14% 22%); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: hsl(215 14% 30%); }
 
+/* Brighter scrollbar for modal/dialog content */
+.scrollbar-visible::-webkit-scrollbar { width: 10px; }
+.scrollbar-visible::-webkit-scrollbar-track { background: hsl(215 14% 18%); border-radius: 5px; }
+.scrollbar-visible::-webkit-scrollbar-thumb { background: hsl(215 20% 50%); border-radius: 5px; }
+.scrollbar-visible::-webkit-scrollbar-thumb:hover { background: hsl(215 20% 60%); }
+
 /* Typing animation */
 @keyframes typing-bounce {
   0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }

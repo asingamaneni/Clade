@@ -8,7 +8,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { api } from '@/lib/api'
 import { ListTodo, Loader2, X, Clock, CheckCircle2, XCircle, Ban, Timer, RefreshCw } from "lucide-react"
@@ -310,7 +309,7 @@ export function TaskQueuePage({ agents, wsRef }: TaskQueuePageProps) {
 
       {/* Detail modal */}
       <Dialog open={!!selectedTask} onOpenChange={(open) => { if (!open) setSelectedTask(null) }}>
-        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
           {selectedTask && (() => {
             const cfg = STATUS_CONFIG[selectedTask.status] || STATUS_CONFIG.pending
             const agent = agents.find(a => a.id === selectedTask.agentId)
@@ -318,7 +317,7 @@ export function TaskQueuePage({ agents, wsRef }: TaskQueuePageProps) {
 
             return (
               <>
-                <DialogHeader>
+                <DialogHeader className="flex-shrink-0">
                   <div className="flex items-center gap-2">
                     <Badge variant="secondary" className={cn("text-xs", cfg.color)}>
                       {cfg.label}
@@ -326,7 +325,7 @@ export function TaskQueuePage({ agents, wsRef }: TaskQueuePageProps) {
                     <DialogTitle className="text-base">{selectedTask.description}</DialogTitle>
                   </div>
                 </DialogHeader>
-                <div className="space-y-4">
+                <div className="space-y-4 overflow-y-auto flex-1 min-h-0 pr-1 scrollbar-visible">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <span>{agentLabel}</span>
                     <span>&middot;</span>
@@ -340,21 +339,17 @@ export function TaskQueuePage({ agents, wsRef }: TaskQueuePageProps) {
 
                   <div className="space-y-1">
                     <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Prompt</span>
-                    <ScrollArea className="max-h-[200px]">
-                      <pre className="text-xs bg-secondary/50 rounded-md p-3 whitespace-pre-wrap break-words font-mono">
-                        {selectedTask.prompt}
-                      </pre>
-                    </ScrollArea>
+                    <pre className="text-xs whitespace-pre-wrap break-words font-mono rounded-md bg-secondary/50 p-3">
+                      {selectedTask.prompt}
+                    </pre>
                   </div>
 
                   {selectedTask.result && (
                     <div className="space-y-1">
                       <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Result</span>
-                      <ScrollArea className="max-h-[300px]">
-                        <pre className="text-xs bg-secondary/50 rounded-md p-3 whitespace-pre-wrap break-words font-mono">
-                          {selectedTask.result}
-                        </pre>
-                      </ScrollArea>
+                      <pre className="text-xs whitespace-pre-wrap break-words font-mono rounded-md bg-secondary/50 p-3">
+                        {selectedTask.result}
+                      </pre>
                     </div>
                   )}
 

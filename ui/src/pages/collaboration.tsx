@@ -441,7 +441,7 @@ export function CollaborationPage({ agents }: CollaborationPageProps) {
                 </DialogTitle>
               </DialogHeader>
               {selectedDelegation && (
-                <div className="space-y-4 overflow-y-auto flex-1 min-h-0 pr-1">
+                <div className="space-y-4 overflow-y-auto flex-1 min-h-0 pr-1 scrollbar-visible">
                   <div className="flex items-center gap-2 text-sm">
                     <span className="font-medium">{agentName(selectedDelegation.fromAgent, agents)}</span>
                     <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
