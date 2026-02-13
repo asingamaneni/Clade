@@ -4712,6 +4712,16 @@ async function handleIpcMessage(
       const browserCfg = { ...(config.browser ?? {}) } as { enabled?: boolean; userDataDir?: string; browser?: string; cdpEndpoint?: string; headless?: boolean };
       if (typeof cdpEndpointUrl === 'string') browserCfg.cdpEndpoint = cdpEndpointUrl;
 
+      // Create collaboration delegation record so the Collaboration UI tracks it
+      const collabDelegation = createDelegation(
+        callingAgentId || 'system',
+        agentId,
+        prompt,
+        enrichedPrompt,
+      );
+      updateDelegation(collabDelegation.id, 'in_progress');
+      broadcastAdmin({ type: 'collaboration:delegation_created', delegation: collabDelegation, timestamp: new Date().toISOString() });
+
       try {
         const agentModel = (agentCfg.model as string) || undefined;
         const result = await askClaude(
@@ -4787,9 +4797,16 @@ async function handleIpcMessage(
           description: responseText,
         });
 
+        // (e) Update collaboration delegation to completed
+        updateDelegation(collabDelegation.id, 'completed', responseText);
+        broadcastAdmin({ type: 'collaboration:delegation_updated', delegationId: collabDelegation.id, status: 'completed', timestamp: new Date().toISOString() });
+
         return { ok: true, sessionId: result.sessionId, response: responseText };
       } catch (err) {
-        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        const errMsg = err instanceof Error ? err.message : String(err);
+        updateDelegation(collabDelegation.id, 'failed', errMsg);
+        broadcastAdmin({ type: 'collaboration:delegation_updated', delegationId: collabDelegation.id, status: 'failed', timestamp: new Date().toISOString() });
+        return { ok: false, error: errMsg };
       }
     }
 

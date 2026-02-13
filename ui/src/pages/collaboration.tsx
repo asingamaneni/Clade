@@ -433,15 +433,15 @@ export function CollaborationPage({ agents }: CollaborationPageProps) {
 
           {/* Delegation detail dialog */}
           <Dialog open={!!selectedDelegation} onOpenChange={() => setSelectedDelegation(null)}>
-            <DialogContent className="max-w-lg">
-              <DialogHeader>
+            <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+              <DialogHeader className="flex-shrink-0">
                 <DialogTitle className="flex items-center gap-2">
                   Delegation
                   {selectedDelegation && <StatusBadge status={selectedDelegation.status} />}
                 </DialogTitle>
               </DialogHeader>
               {selectedDelegation && (
-                <div className="space-y-4">
+                <div className="space-y-4 overflow-y-auto flex-1 min-h-0 pr-1">
                   <div className="flex items-center gap-2 text-sm">
                     <span className="font-medium">{agentName(selectedDelegation.fromAgent, agents)}</span>
                     <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
@@ -450,25 +450,25 @@ export function CollaborationPage({ agents }: CollaborationPageProps) {
 
                   <div>
                     <label className="text-xs text-muted-foreground block mb-1">Task</label>
-                    <p className="text-sm bg-muted/30 rounded-md p-3">{selectedDelegation.task}</p>
+                    <p className="text-sm bg-muted/30 rounded-md p-3 whitespace-pre-wrap">{selectedDelegation.task}</p>
                   </div>
 
                   <div>
                     <label className="text-xs text-muted-foreground block mb-1">Context</label>
-                    <p className="text-sm bg-muted/30 rounded-md p-3 whitespace-pre-wrap max-h-40 overflow-y-auto">{selectedDelegation.context}</p>
+                    <p className="text-sm bg-muted/30 rounded-md p-3 whitespace-pre-wrap max-h-48 overflow-y-auto">{selectedDelegation.context}</p>
                   </div>
 
                   {selectedDelegation.constraints && (
                     <div>
                       <label className="text-xs text-muted-foreground block mb-1">Constraints</label>
-                      <p className="text-sm bg-muted/30 rounded-md p-3">{selectedDelegation.constraints}</p>
+                      <p className="text-sm bg-muted/30 rounded-md p-3 whitespace-pre-wrap">{selectedDelegation.constraints}</p>
                     </div>
                   )}
 
                   {selectedDelegation.result && (
                     <div>
                       <label className="text-xs text-muted-foreground block mb-1">Result</label>
-                      <p className="text-sm bg-green-500/5 border border-green-500/20 rounded-md p-3 whitespace-pre-wrap">{selectedDelegation.result}</p>
+                      <p className="text-sm bg-green-500/5 border border-green-500/20 rounded-md p-3 whitespace-pre-wrap max-h-64 overflow-y-auto">{selectedDelegation.result}</p>
                     </div>
                   )}
 
