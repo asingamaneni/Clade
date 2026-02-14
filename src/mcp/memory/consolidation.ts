@@ -38,6 +38,14 @@ const IMPORTANT_KEYWORDS = [
   'TODO:',
   'Note:',
   'Learned:',
+  'Preference:',
+  'Action:',
+  'Scheduled:',
+  'Confirmed:',
+  'Booked:',
+  'Reserved:',
+  'Delegation to',
+  'Result:',
 ];
 
 /** Heading patterns that mark a section as important. */
@@ -45,6 +53,22 @@ const IMPORTANT_HEADING_PATTERNS = [
   /^## Key/i,
   /^## Important/i,
   /^## Decisions/i,
+  /^## Delegation/i,
+  /^## Preferences/i,
+  /^## Summary/i,
+  /^## Result/i,
+];
+
+/** Patterns that look important (bold bullets) but are actually status-check noise. */
+const LOW_SIGNAL_PATTERNS = [
+  /^- \*\*No open/i,
+  /^- \*\*No unfulfilled/i,
+  /^- \*\*No active/i,
+  /^- \*\*No pending/i,
+  /^- \*\*No remaining/i,
+  /^- \*\*All (clear|good|done)/i,
+  /^- \*\*Nothing to/i,
+  /^- \*\*Status:?\s*(ok|good|normal|clear|checked)/i,
 ];
 
 // ---------------------------------------------------------------------------
@@ -139,8 +163,17 @@ function getRecentDailyLogs(
 function isImportantLine(line: string): boolean {
   const trimmed = line.trim();
 
-  // Bold bullet points
+  // Reject status-check noise before checking positive signals
+  for (const pattern of LOW_SIGNAL_PATTERNS) {
+    if (pattern.test(trimmed)) return false;
+  }
+
+  // Bold bullet points (after filtering noise)
   if (trimmed.startsWith('- **')) return true;
+
+  // Delegation summaries
+  if (trimmed.startsWith('**Delegation')) return true;
+  if (trimmed.startsWith('**Result')) return true;
 
   // Lines containing important keywords
   for (const keyword of IMPORTANT_KEYWORDS) {
@@ -172,6 +205,11 @@ function extractImportantFacts(content: string): string[] {
   for (const line of lines) {
     // Track if we're under an "important" heading
     if (line.startsWith('## ')) {
+      // Heartbeat sections are status checks, not knowledge — skip
+      if (/heartbeat/i.test(line)) {
+        inImportantSection = false;
+        continue;
+      }
       inImportantSection = isImportantHeading(line);
       continue;
     }
@@ -301,6 +339,26 @@ export function checkAndArchiveMemory(
   };
 }
 
+/**
+ * Extract a key entity identifier from a line for semantic dedup.
+ * Returns null if no recognizable entity is found.
+ */
+function extractEntityKey(line: string): string | null {
+  // Phone numbers (US format variations)
+  const phone = line.match(/\+?1?\s*\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/);
+  if (phone) return `phone:${phone[0].replace(/\D/g, '')}`;
+
+  // Confirmation numbers
+  const conf = line.match(/[Cc]onfirmation\s*#?\s*(\d+)/);
+  if (conf) return `conf:${conf[1]}`;
+
+  // Emails
+  const email = line.match(/[\w.-]+@[\w.-]+\.\w+/);
+  if (email) return `email:${email[0].toLowerCase()}`;
+
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // consolidateDailyLogs
 // ---------------------------------------------------------------------------
@@ -367,7 +425,24 @@ export function consolidateDailyLogs(
     }
   }
 
-  if (newFacts.length === 0) {
+  // Entity-level dedup: when multiple lines reference the same entity, keep the longest
+  const entityBest = new Map<string, { line: string; index: number }>();
+  for (let i = 0; i < newFacts.length; i++) {
+    const key = extractEntityKey(newFacts[i]!);
+    if (!key) continue;
+    const existing = entityBest.get(key);
+    if (!existing || newFacts[i]!.length > existing.line.length) {
+      entityBest.set(key, { line: newFacts[i]!, index: i });
+    }
+  }
+
+  const finalFacts = newFacts.filter((fact, i) => {
+    const key = extractEntityKey(fact);
+    if (!key) return true; // no entity key — keep
+    return entityBest.get(key)!.index === i; // only keep the best version
+  });
+
+  if (finalFacts.length === 0) {
     return {
       factsExtracted: allFacts.length,
       factsAdded: 0,
@@ -378,7 +453,7 @@ export function consolidateDailyLogs(
   // Append consolidated section to MEMORY.md
   const dateStr = todayDateString();
   const consolidatedSection =
-    `\n## Consolidated (${dateStr})\n\n` + newFacts.join('\n') + '\n';
+    `\n## Consolidated (${dateStr})\n\n` + finalFacts.join('\n') + '\n';
 
   if (!existsSync(memoryPath)) {
     writeFileSync(
@@ -393,7 +468,7 @@ export function consolidateDailyLogs(
 
   return {
     factsExtracted: allFacts.length,
-    factsAdded: newFacts.length,
+    factsAdded: finalFacts.length,
     daysProcessed,
   };
 }
