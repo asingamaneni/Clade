@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { MessageSquare } from 'lucide-react'
+import { ActivityTimeline } from './activity-timeline'
+import type { ActivityStep } from '@/hooks/use-chat'
 
 interface ChatAttachment {
   name: string
@@ -27,6 +29,7 @@ interface ChatMessagesProps {
   typing: boolean
   agentEmoji?: string
   emptyText?: string
+  activitySteps?: ActivityStep[]
 }
 
 // ── Basic markdown rendering ───────────────────────────────────────
@@ -102,6 +105,7 @@ export function ChatMessages({
   typing,
   agentEmoji,
   emptyText,
+  activitySteps,
 }: ChatMessagesProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
@@ -112,7 +116,7 @@ export function ChatMessages({
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
     }, 50)
     return () => clearTimeout(timer)
-  }, [messages.length, typing])
+  }, [messages.length, typing, activitySteps?.length])
 
   if (messages.length === 0 && !typing) {
     return (
@@ -132,121 +136,145 @@ export function ChatMessages({
       <div className="flex flex-col gap-3 px-4 py-4">
         {messages.map((msg) => {
           const isUser = msg.role === 'user'
+          const hasSteps = !isUser && msg.activitySteps && msg.activitySteps.length > 0
           return (
-            <div
-              key={msg.id}
-              className={cn(
-                'flex gap-2',
-                isUser ? 'justify-end' : 'justify-start'
-              )}
-            >
-              {/* Agent avatar */}
-              {!isUser && (
-                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-secondary text-sm mt-0.5">
-                  {agentEmoji || '🤖'}
-                </div>
+            <div key={msg.id} className="flex flex-col gap-1">
+              {/* Persisted activity timeline for completed assistant messages */}
+              {hasSteps && (
+                <ActivityTimeline
+                  steps={msg.activitySteps!}
+                  agentEmoji={agentEmoji}
+                  collapsed
+                />
               )}
 
-              {/* Bubble */}
               <div
                 className={cn(
-                  'max-w-[75%] rounded-xl px-3.5 py-2.5',
-                  isUser
-                    ? 'bg-primary/15 text-foreground rounded-br-sm'
-                    : 'bg-card border border-border text-foreground rounded-bl-sm'
+                  'flex gap-2',
+                  isUser ? 'justify-end' : 'justify-start'
                 )}
               >
-                {/* Attachments */}
-                {msg.attachments && msg.attachments.length > 0 && (
-                  <div className="mb-2 flex flex-wrap gap-1.5">
-                    {msg.attachments.map((att, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center gap-1.5 rounded bg-secondary/50 px-2 py-1 text-[11px]"
-                      >
-                        {att.type?.startsWith('image/') && att.preview ? (
-                          <img
-                            src={att.preview}
-                            alt={att.name}
-                            className="h-8 w-8 rounded object-cover"
-                          />
-                        ) : att.type?.startsWith('image/') && att.url ? (
-                          <img
-                            src={att.url}
-                            alt={att.name}
-                            className="h-8 w-8 rounded object-cover"
-                          />
-                        ) : null}
-                        <span className="truncate max-w-[120px] text-muted-foreground">
-                          {att.name}
-                        </span>
-                        <span className="text-muted-foreground/50">
-                          {formatBytes(att.size)}
-                        </span>
-                      </div>
-                    ))}
+                {/* Agent avatar */}
+                {!isUser && (
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-secondary text-sm mt-0.5">
+                    {agentEmoji || '🤖'}
                   </div>
                 )}
 
-                {/* Message text */}
-                <div
-                  className="text-sm leading-relaxed break-words [&_pre]:my-1 [&_code]:break-all"
-                  dangerouslySetInnerHTML={{
-                    __html: renderMarkdown(msg.text),
-                  }}
-                />
-
-                {/* Timestamp */}
+                {/* Bubble */}
                 <div
                   className={cn(
-                    'mt-1 text-[10px]',
+                    'max-w-[75%] rounded-xl px-3.5 py-2.5',
                     isUser
-                      ? 'text-right text-muted-foreground/40'
-                      : 'text-muted-foreground/40'
+                      ? 'bg-primary/15 text-foreground rounded-br-sm'
+                      : 'bg-card border border-border text-foreground rounded-bl-sm'
                   )}
                 >
-                  {formatTime(msg.timestamp)}
-                </div>
-              </div>
+                  {/* Attachments */}
+                  {msg.attachments && msg.attachments.length > 0 && (
+                    <div className="mb-2 flex flex-wrap gap-1.5">
+                      {msg.attachments.map((att, i) => (
+                        <div
+                          key={i}
+                          className="flex items-center gap-1.5 rounded bg-secondary/50 px-2 py-1 text-[11px]"
+                        >
+                          {att.type?.startsWith('image/') && att.preview ? (
+                            <img
+                              src={att.preview}
+                              alt={att.name}
+                              className="h-8 w-8 rounded object-cover"
+                            />
+                          ) : att.type?.startsWith('image/') && att.url ? (
+                            <img
+                              src={att.url}
+                              alt={att.name}
+                              className="h-8 w-8 rounded object-cover"
+                            />
+                          ) : null}
+                          <span className="truncate max-w-[120px] text-muted-foreground">
+                            {att.name}
+                          </span>
+                          <span className="text-muted-foreground/50">
+                            {formatBytes(att.size)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
-              {/* User avatar spacer (keeps alignment symmetrical) */}
-              {isUser && <div className="w-7 shrink-0" />}
+                  {/* Message text */}
+                  <div
+                    className="text-sm leading-relaxed break-words [&_pre]:my-1 [&_code]:break-all"
+                    dangerouslySetInnerHTML={{
+                      __html: renderMarkdown(msg.text),
+                    }}
+                  />
+
+                  {/* Timestamp */}
+                  <div
+                    className={cn(
+                      'mt-1 text-[10px]',
+                      isUser
+                        ? 'text-right text-muted-foreground/40'
+                        : 'text-muted-foreground/40'
+                    )}
+                  >
+                    {formatTime(msg.timestamp)}
+                  </div>
+                </div>
+
+                {/* User avatar spacer (keeps alignment symmetrical) */}
+                {isUser && <div className="w-7 shrink-0" />}
+              </div>
             </div>
           )
         })}
 
-        {/* Typing indicator */}
+        {/* Activity timeline + Typing indicator */}
         {typing && (
-          <div className="flex items-start gap-2">
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-secondary text-sm">
-              {agentEmoji || '🤖'}
-            </div>
-            <div className="rounded-xl rounded-bl-sm border border-border bg-card px-4 py-3">
-              <div className="flex items-center gap-1">
-                <span
-                  className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/60"
-                  style={{
-                    animation: 'typing-bounce 1.4s infinite',
-                    animationDelay: '0s',
-                  }}
-                />
-                <span
-                  className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/60"
-                  style={{
-                    animation: 'typing-bounce 1.4s infinite',
-                    animationDelay: '0.2s',
-                  }}
-                />
-                <span
-                  className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/60"
-                  style={{
-                    animation: 'typing-bounce 1.4s infinite',
-                    animationDelay: '0.4s',
-                  }}
-                />
+          <>
+            {/* Activity steps timeline (replaces dots when events arrive) */}
+            {activitySteps && activitySteps.length > 0 && (
+              <ActivityTimeline
+                steps={activitySteps}
+                agentEmoji={agentEmoji}
+              />
+            )}
+
+            {/* Bouncing dots — fallback when no activity events yet */}
+            {(!activitySteps || activitySteps.length === 0) && (
+              <div className="flex items-start gap-2">
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-secondary text-sm">
+                  {agentEmoji || '🤖'}
+                </div>
+                <div className="rounded-xl rounded-bl-sm border border-border bg-card px-4 py-3">
+                  <div className="flex items-center gap-1">
+                    <span
+                      className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/60"
+                      style={{
+                        animation: 'typing-bounce 1.4s infinite',
+                        animationDelay: '0s',
+                      }}
+                    />
+                    <span
+                      className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/60"
+                      style={{
+                        animation: 'typing-bounce 1.4s infinite',
+                        animationDelay: '0.2s',
+                      }}
+                    />
+                    <span
+                      className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/60"
+                      style={{
+                        animation: 'typing-bounce 1.4s infinite',
+                        animationDelay: '0.4s',
+                      }}
+                    />
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
+            )}
+          </>
         )}
 
         {/* Scroll anchor */}

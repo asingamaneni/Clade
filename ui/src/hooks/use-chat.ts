@@ -13,6 +13,18 @@ export interface ChatAttachment {
   preview?: string | null
 }
 
+/** A single step in the agent's real-time activity timeline */
+export interface ActivityStep {
+  id: string
+  type: 'tool' | 'thinking'
+  toolName?: string
+  toolInput?: Record<string, unknown>
+  toolResult?: string
+  status: 'running' | 'done'
+  startedAt: number
+  completedAt?: number
+}
+
 export interface ChatMessage {
   id: string
   agentId: string
@@ -21,6 +33,7 @@ export interface ChatMessage {
   timestamp: string
   sessionId?: string
   attachments?: ChatAttachment[]
+  activitySteps?: ActivityStep[]
 }
 
 export interface Conversation {
@@ -64,6 +77,8 @@ export interface UseChatReturn {
   currentMessages: ChatMessage[]
   /** Whether the agent is currently responding */
   typing: boolean
+  /** Current activity steps during agent processing */
+  activitySteps: ActivityStep[]
   /** Sidebar preview data per agent */
   conversationPreviews: Record<string, ConversationPreview>
   /** Load (or reload) conversations for an agent */
@@ -149,6 +164,10 @@ export function useChat(): UseChatReturn {
   >({})
   const [currentMessages, setCurrentMessages] = useState<ChatMessage[]>([])
   const [typing, setTyping] = useState(false)
+  const [activitySteps, setActivitySteps] = useState<ActivityStep[]>([])
+  const activityStepsRef = useRef<ActivityStep[]>([])
+  // Keep ref in sync with state
+  useEffect(() => { activityStepsRef.current = activitySteps }, [activitySteps])
 
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -309,20 +328,85 @@ export function useChat(): UseChatReturn {
         return
       }
 
+      if (type === 'activity') {
+        const event = data.event as { type: string; toolName?: string; toolInput?: Record<string, unknown>; toolResult?: string; timestamp?: number } | undefined
+        if (!event) return
+
+        if (event.type === 'tool_start') {
+          const stepId = 'step_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
+          setActivitySteps((prev) => [
+            ...prev,
+            {
+              id: stepId,
+              type: 'tool',
+              toolName: event.toolName || 'Unknown tool',
+              toolInput: event.toolInput,
+              status: 'running',
+              startedAt: event.timestamp || Date.now(),
+            },
+          ])
+          return
+        }
+
+        if (event.type === 'tool_end') {
+          // Mark the most recent running tool step as done, capture result
+          setActivitySteps((prev) => {
+            const idx = prev.findLastIndex((s) => s.type === 'tool' && s.status === 'running')
+            if (idx < 0) return prev
+            const updated = [...prev]
+            updated[idx] = {
+              ...updated[idx],
+              status: 'done',
+              completedAt: event.timestamp || Date.now(),
+              toolResult: event.toolResult,
+            }
+            return updated
+          })
+          return
+        }
+
+        if (event.type === 'thinking') {
+          // Add thinking step (deduplicate rapid thinking deltas)
+          setActivitySteps((prev) => {
+            const lastStep = prev[prev.length - 1]
+            if (lastStep?.type === 'thinking' && lastStep.status === 'running') {
+              return prev // already showing thinking
+            }
+            return [
+              ...prev,
+              {
+                id: 'think_' + Date.now(),
+                type: 'thinking',
+                status: 'running',
+                startedAt: event.timestamp || Date.now(),
+              },
+            ]
+          })
+          return
+        }
+        return
+      }
+
       if (type === 'message') {
         setTyping(false)
+        // Attach activity steps to the message so they persist after completion
+        const stepsSnapshot = activityStepsRef.current.length > 0
+          ? activityStepsRef.current.map((s) => ({ ...s, status: 'done' as const }))
+          : undefined
+        setActivitySteps([])
         const msg = data.message as ChatMessage | undefined
         if (msg) {
+          const msgWithSteps = stepsSnapshot ? { ...msg, activitySteps: stepsSnapshot } : msg
           // Replace the streaming placeholder with the final message
           const streamId = streamingMsgIdRef.current
           streamingMsgIdRef.current = null
           setCurrentMessages((prev) => {
             if (streamId) {
               // Replace the streaming message with the final one
-              return prev.map((m) => (m.id === streamId ? msg : m))
+              return prev.map((m) => (m.id === streamId ? msgWithSteps : m))
             }
             if (prev.find((m) => m.id === msg.id)) return prev
-            return [...prev, msg]
+            return [...prev, msgWithSteps]
           })
           // Refresh conversation list for updated lastMessage
           if (msg.agentId) {
@@ -334,6 +418,7 @@ export function useChat(): UseChatReturn {
 
       if (type === 'error') {
         setTyping(false)
+        setActivitySteps([])
         // Remove streaming placeholder if present
         const streamId = streamingMsgIdRef.current
         streamingMsgIdRef.current = null
@@ -677,6 +762,7 @@ export function useChat(): UseChatReturn {
   const clearCurrentMessages = useCallback(() => {
     setCurrentMessages([])
     setTyping(false)
+    setActivitySteps([])
   }, [])
 
   // ── Derived: sidebar previews ────────────────────────────────────
@@ -703,6 +789,7 @@ export function useChat(): UseChatReturn {
     activeConversationIds,
     currentMessages,
     typing,
+    activitySteps,
     conversationPreviews,
     loadConversations,
     loadConversationMessages,

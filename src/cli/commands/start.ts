@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, readdirSync, statSync, watch, renameSync, rmSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
@@ -16,6 +16,8 @@ import { performBackup, getBackupStatus, getBackupHistory, isBackupInProgress } 
 import { createDelegation, updateDelegation, getDelegations, publishMessage, subscribe, unsubscribe, getMessages, getSubscriptions, getSharedMemory } from '../../agents/collaboration.js';
 import { MemoryStore } from '../../mcp/memory/store.js';
 import { embeddingProvider } from '../../mcp/memory/embeddings.js';
+import { consolidateDailyLogs, checkAndArchiveMemory } from '../../mcp/memory/consolidation.js';
+import { appendToDailyLog } from '../../mcp/memory/daily-log.js';
 
 interface StartOptions {
   port?: string;
@@ -756,6 +758,16 @@ function shutdownBrowser(): void {
 // askClaude — spawn claude CLI with full MCP + memory context
 // ---------------------------------------------------------------------------
 
+/** Structured event emitted from askClaude's stream-json parsing */
+interface AgentStreamEvent {
+  type: 'delta' | 'tool_start' | 'tool_end' | 'thinking';
+  text?: string;
+  toolName?: string;
+  toolInput?: Record<string, unknown>;
+  toolResult?: string;
+  timestamp?: number;
+}
+
 /** Spawn claude CLI to get an agent response, with MCP tools and memory */
 function askClaude(
   prompt: string,
@@ -768,7 +780,7 @@ function askClaude(
   browserConfig?: { enabled?: boolean; userDataDir?: string; browser?: string; cdpEndpoint?: string; headless?: boolean },
   signal?: AbortSignal,
   model?: string,
-  onDelta?: (text: string) => void,
+  onEvent?: (event: AgentStreamEvent) => void,
 ): Promise<{ text: string; sessionId?: string; cancelled?: boolean }> {
   const home = cladeHome || process.env['CLADE_HOME'] || join(homedir(), '.clade');
   return new Promise((resolve) => {
@@ -925,18 +937,77 @@ function askClaude(
       signal.addEventListener('abort', onAbort, { once: true });
     }
 
+    // Track tool names that are currently running (emitted tool_start but no tool_end yet)
+    const pendingTools: string[] = [];
+
     child.stdout.on('data', (d: Buffer) => {
       const chunk = d.toString();
       stdout += chunk;
-      // Stream deltas in real-time if callback provided
-      if (onDelta) {
+      // Stream events in real-time if callback provided
+      if (onEvent) {
         const lines = chunk.split('\n');
         for (const line of lines) {
           if (!line.trim()) continue;
           try {
-            const event = JSON.parse(line);
-            if (event.type === 'content_block_delta' && event.delta?.text) {
-              onDelta(event.delta.text);
+            const ev = JSON.parse(line);
+
+            // Text deltas (same as before)
+            if (ev.type === 'content_block_delta' && ev.delta?.text) {
+              onEvent({ type: 'delta', text: ev.delta.text, timestamp: Date.now() });
+            }
+
+            // Thinking deltas — signal that agent is reasoning
+            if (ev.type === 'content_block_delta' && ev.delta?.type === 'thinking_delta') {
+              onEvent({ type: 'thinking', timestamp: Date.now() });
+            }
+
+            // CLI stream-json emits "assistant" events with message.content arrays.
+            // Tool calls appear as { type: "tool_use", name: "Read", input: {...} }
+            // inside the content array.
+            if (ev.type === 'assistant' && ev.message?.content && Array.isArray(ev.message.content)) {
+              for (const block of ev.message.content) {
+                if (block.type === 'tool_use' && block.name) {
+                  // Emit tool_start
+                  pendingTools.push(block.name);
+                  onEvent({
+                    type: 'tool_start',
+                    toolName: block.name,
+                    toolInput: typeof block.input === 'object' ? block.input : undefined,
+                    timestamp: Date.now(),
+                  });
+                }
+              }
+            }
+
+            // "user" events with tool_result content = tool finished
+            if (ev.type === 'user' && ev.message?.content && Array.isArray(ev.message.content)) {
+              for (const block of ev.message.content) {
+                if (block.type === 'tool_result') {
+                  if (pendingTools.length > 0) {
+                    pendingTools.shift();
+                  }
+                  // Extract result text (may be string or nested content array)
+                  let resultText: string | undefined;
+                  if (typeof block.content === 'string') {
+                    resultText = block.content.slice(0, 2000);
+                  } else if (Array.isArray(block.content)) {
+                    const textParts = block.content
+                      .filter((c: Record<string, unknown>) => c.type === 'text' && typeof c.text === 'string')
+                      .map((c: Record<string, unknown>) => c.text as string);
+                    if (textParts.length > 0) resultText = textParts.join('\n').slice(0, 2000);
+                  }
+                  onEvent({ type: 'tool_end', toolResult: resultText, timestamp: Date.now() });
+                }
+              }
+            }
+
+            // Also handle content_block_start/stop for future CLI versions
+            if (ev.type === 'content_block_start' && ev.content_block?.type === 'tool_use') {
+              onEvent({
+                type: 'tool_start',
+                toolName: ev.content_block.name || 'unknown',
+                timestamp: Date.now(),
+              });
             }
           } catch { /* not complete JSON line */ }
         }
@@ -1190,8 +1261,16 @@ async function startPlaceholderServer(
 
             try {
               const agentModel = (agentCfg.model as string) || undefined;
-              const result = await askClaude(promptText, soulPath, agentContext, conversationId, msg.agentId, cladeHome, toolPreset, browserCfg, abortController.signal, agentModel, (delta) => {
-                try { socket.send(JSON.stringify({ type: 'delta', text: delta, agentId: msg.agentId, conversationId })); } catch { /* socket closed */ }
+              const result = await askClaude(promptText, soulPath, agentContext, conversationId, msg.agentId, cladeHome, toolPreset, browserCfg, abortController.signal, agentModel, (event) => {
+                try {
+                  if (event.type === 'delta') {
+                    // Backwards-compatible text delta
+                    socket.send(JSON.stringify({ type: 'delta', text: event.text, agentId: msg.agentId, conversationId }));
+                  } else {
+                    // Forward activity events (tool_start, tool_end, thinking)
+                    socket.send(JSON.stringify({ type: 'activity', event, agentId: msg.agentId, conversationId }));
+                  }
+                } catch { /* socket closed */ }
               });
 
               // If cancelled, don't save or send a response
@@ -4620,6 +4699,36 @@ async function startPlaceholderServer(
     console.log(`  [ok] ${heartbeatCount} heartbeat timer(s) started`);
   }
 
+  // ── Memory consolidation timer ────────────────────────────────────
+  const CONSOLIDATION_INTERVAL = 6 * 60 * 60_000; // every 6 hours
+
+  const runConsolidation = () => {
+    const agentsDir = join(cladeHome, 'agents');
+    if (!existsSync(agentsDir)) return;
+    try {
+      const agentDirs = readdirSync(agentsDir, { withFileTypes: true })
+        .filter(d => d.isDirectory())
+        .map(d => join(agentsDir, d.name));
+
+      for (const agentDir of agentDirs) {
+        try {
+          const result = consolidateDailyLogs(agentDir, 7);
+          if (result.factsAdded > 0) {
+            checkAndArchiveMemory(agentDir);
+            const agentId = basename(agentDir);
+            broadcastAdmin({ type: 'memory:consolidated', agentId, ...result, timestamp: new Date().toISOString() });
+          }
+        } catch {}
+      }
+    } catch {}
+  };
+
+  // Run once on startup (after a short delay to let things settle)
+  setTimeout(runConsolidation, 30_000);
+  // Then every 6 hours
+  const consolidationTimer = setInterval(runConsolidation, CONSOLIDATION_INTERVAL);
+  consolidationTimer.unref();
+
   const channels = (config.channels ?? {}) as Record<string, { enabled?: boolean }>;
 
   // ── Connect channel adapters (Slack, Telegram, Discord) ─────────
@@ -4800,6 +4909,15 @@ async function handleIpcMessage(
         // (e) Update collaboration delegation to completed
         updateDelegation(collabDelegation.id, 'completed', responseText);
         broadcastAdmin({ type: 'collaboration:delegation_updated', delegationId: collabDelegation.id, status: 'completed', timestamp: new Date().toISOString() });
+
+        // (f) Store delegation result in calling agent's daily log for memory continuity
+        if (callingAgentId) {
+          try {
+            const callerDir = join(cladeHome, 'agents', callingAgentId);
+            const summary = `**Delegation to @${spawnedAgentName}**: ${prompt.slice(0, 200)}\n**Result**: ${responseText.slice(0, 1000)}`;
+            appendToDailyLog(callerDir, summary);
+          } catch {}
+        }
 
         return { ok: true, sessionId: result.sessionId, response: responseText };
       } catch (err) {

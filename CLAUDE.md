@@ -129,6 +129,12 @@ src/
     install (from any source), create (from scratch or templates), and manage MCP servers
     and plugins. Orchestrators can discover and install capabilities on demand.
 
+15. **UI components — search before building**: Before creating custom UI components, search
+    online for pre-built options (npm packages, shadcn blocks, community components). Evaluate
+    whether they can be used standalone without adopting a full framework. If tightly coupled
+    to an SDK (e.g., Vercel AI SDK, assistant-ui runtime), build custom using existing
+    primitives (Radix UI, Lucide icons, Tailwind) instead.
+
 ## Common Tasks
 
 ### Adding a new CLI command
@@ -192,6 +198,9 @@ the task complete.
 
 ## Important Constraints
 
+- **NEVER delete `~/.clade` or any agent data without explicit user permission.** This directory
+  contains irreplaceable agent state (souls, memories, conversations, config). Even for testing,
+  always ask the user before removing or overwriting any data in `~/.clade`.
 - Never use `--system-prompt` (replaces Claude Code defaults). Always use `--append-system-prompt`.
 - Agent SOUL.md files are injected via CLI flag, NOT placed in workspace (prevents agent self-modification).
 - MCP servers requested by agents go to pending/ and require human approval.

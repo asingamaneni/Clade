@@ -83,6 +83,7 @@ export function ChatPage({ agents }: ChatPageProps) {
     activeConversationIds,
     currentMessages,
     typing,
+    activitySteps,
     conversationPreviews,
     loadConversations,
     loadConversationMessages,
@@ -288,6 +289,7 @@ export function ChatPage({ agents }: ChatPageProps) {
               messages={currentMessages}
               typing={typing}
               agentEmoji={selectedAgentData.emoji}
+              activitySteps={activitySteps}
               emptyText={
                 activeConvId
                   ? `Start chatting with ${selectedAgentData.name}!`
